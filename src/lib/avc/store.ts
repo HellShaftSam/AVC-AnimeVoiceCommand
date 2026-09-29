@@ -12,11 +12,15 @@ import {
   BrowserTab,
   CommandResult,
   DEFAULT_SETTINGS,
+  LibraryEntryDto,
   NavigationContext,
   PlaybackContext,
   PipelineStep,
   SiteSectionId,
   TabKind,
+  UserInfoDto,
+  VoiceAliasRow,
+  VoiceProviderMatch,
 } from './types'
 
 export type VoiceStatus = 'idle' | 'listening' | 'recognizing' | 'executing' | 'error'
@@ -34,6 +38,12 @@ export interface AddTabData {
 
 /** Снимок состояния вкладки для back-stack (kind+title+payload) */
 export type BackStackEntry = Record<string, unknown>
+
+/** Ожидание подтверждения переключения озвучки («Вы имеете в виду...?») */
+export interface VoiceConfirmState {
+  spoken: string
+  match: VoiceProviderMatch
+}
 
 export interface AvcState {
   // --- состояние ---
@@ -58,6 +68,16 @@ export interface AvcState {
   tabBackStack: Record<string, BackStackEntry[]>
   /** Инкрементится после записи в историю — HistoryPanel перезагружается */
   historyVersion: number
+
+  // --- аккаунт / библиотека / алиасы (Task 9-a) ---
+  user: UserInfoDto | null
+  library: LibraryEntryDto[]
+  voiceAliases: VoiceAliasRow[]
+  libraryOpen: boolean
+  authOpen: boolean
+  voiceConfirm: VoiceConfirmState | null
+  /** Громкость до Mute — для восстановления при Unmute */
+  prevVolume: number
 
   // --- действия: вкладки ---
   addTab: (data: AddTabData) => string
@@ -85,6 +105,15 @@ export interface AvcState {
   setHelpOpen: (v: boolean) => void
   setSettingsOpen: (v: boolean) => void
   setDebugOpen: (v: boolean) => void
+
+  // --- действия: аккаунт/библиотека/алиасы ---
+  setUser: (u: UserInfoDto | null) => void
+  setLibrary: (entries: LibraryEntryDto[]) => void
+  setVoiceAliases: (rows: VoiceAliasRow[]) => void
+  setLibraryOpen: (v: boolean) => void
+  setAuthOpen: (v: boolean) => void
+  setVoiceConfirm: (vc: VoiceConfirmState | null) => void
+  setPrevVolume: (v: number) => void
 
   // --- действия: настройки/прочее ---
   updateSettings: (partial: Partial<AppSettings>) => void
@@ -162,6 +191,15 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   tabReloadCounter: {},
   tabBackStack: {},
   historyVersion: 0,
+
+  // --- аккаунт / библиотека / алиасы ---
+  user: null,
+  library: [],
+  voiceAliases: [],
+  libraryOpen: false,
+  authOpen: false,
+  voiceConfirm: null,
+  prevVolume: 70,
 
   // --- вкладки ---------------------------------------------------------------
 
@@ -266,6 +304,16 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   setHelpOpen: (v) => set({ helpOpen: v }),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   setDebugOpen: (v) => set({ debugOpen: v }),
+
+  // --- аккаунт / библиотека / алиасы ----------------------------------------------
+
+  setUser: (u) => set({ user: u }),
+  setLibrary: (entries) => set({ library: entries }),
+  setVoiceAliases: (rows) => set({ voiceAliases: rows }),
+  setLibraryOpen: (v) => set({ libraryOpen: v }),
+  setAuthOpen: (v) => set({ authOpen: v }),
+  setVoiceConfirm: (vc) => set({ voiceConfirm: vc }),
+  setPrevVolume: (v) => set({ prevVolume: v }),
 
   // --- настройки / прочее ---------------------------------------------------------
 

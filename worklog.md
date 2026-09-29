@@ -128,3 +128,146 @@ Work Log:
 
 Stage Summary:
 - Все слои архитектуры проверены end-to-end в браузере; живые данные YummyAnime; lint/tsc чистые
+
+---
+Task ID: 7
+Agent: ZAI (main)
+Task: Контракты v2 под баг-репорты пользователя (автозапуск, аккаунт, микрофон, перемотка, резолвер озвучек)
+
+Work Log:
+- src/lib/avc/types.ts: новые команды Mute/Unmute/SetWatchStatus/ToggleFavorite/ContinueWatching/ShowLibrary/AddVoiceAlias
+- WatchStatus (watching/planned/completed/dropped/on_hold) + WATCH_STATUS_LABELS + LibraryEntryDto + UserInfoDto
+- AppSettings += micGain(1..4), vadSensitivity(0..100), sttEngine(auto|browser|server), noiseSuppression, autoGainControl, echoCancellation, micDeviceId
+- VOICE_CONFIDENCE_AUTO=0.85 / VOICE_CONFIDENCE_ASK=0.55, VoiceProviderMatch, VoiceAliasMap
+
+Stage Summary:
+- Контракты готовы; далее параллельно 8-a (бэкенд), 8-b (резолвер+парсер), 8-c (микрофон), затем 9 (фронтенд-интеграция)
+
+---
+Task ID: 8-a
+Agent: full-stack-developer
+Task: Бэкенд — аккаунты, библиотека статусов, алиасы озвучек
+
+Work Log:
+- prisma/schema.prisma: +User (username unique, passwordHash, связи), +UserLibraryEntry (@@unique([userId,animeId]), @@index([userId,updatedAt]), статус/favorite/episode/positionSec/totalEpisodes/currentDub), +VoiceAlias (@@unique([userId,targetType,targetName,alias])); AppSetting/CommandHistoryEntry/TabSession не тронуты; `bun run db:push` — OK (11ms, клиент сгенерирован)
+- src/lib/auth.ts (nodejs): hashPassword/verifyPassword (scrypt 64 байта, случайная соль 16б, формат `salt:hex`, timingSafeEqual), createSessionToken/parseSessionToken (`userId.expiry.hmacSHA256(...)`, SECRET=AUTH_SECRET ?? 'avc-dev-secret-2024', TTL 30 дней), getSessionUserId (cookie avt_session), getCurrentUser (по БД), sessionCookieOptions (httpOnly, sameSite lax, path /, maxAge 30д)
+- POST /api/auth/register: username 3–24 [a-zA-Z0-9_а-яА-ЯёЁ.-] + password >=4; занято → 409 {error:"Имя уже занято"}; создаёт + ставит cookie → {user:{id,username}}
+- POST /api/auth/login: verifyPassword → cookie → {user} | 401 {error:"Неверный логин или пароль"}
+- POST /api/auth/logout → {ok:true} + очистка cookie (maxAge 0); GET /api/auth/me → {user|null}
+- /api/library GET: без сессии {user:null, entries:[]}; с сессией {user, entries:LibraryEntryDto[]} по updatedAt desc (DTO без id/userId, updatedAt — ISO string)
+- /api/library PUT: upsert по (userId, animeId) через Prisma create/update-пары полей — обновляются только переданные поля; status валидируется (watching|planned|completed|dropped|on_hold, иначе 400), title обязателен; → {entry}
+- /api/library DELETE ?animeId= → deleteMany (только своё) → {ok:true}; без сессии → 401 {error:"Требуется вход"}
+- /api/aliases GET: алиасы текущего пользователя (createdAt desc), без сессии → {aliases:[]}; POST {targetType?='voice', targetName 1..64, alias 1..48, trim}: дубликат по @@unique возвращает существующий (200); → {alias:{id,targetType,targetName,alias}}; DELETE ?id= → deleteMany по (id, userId) → {ok:true}
+- Проверка: tsc --noEmit по своим файлам — 0 ошибок (остальные ошибки проекта: src/lib/voice/parser.ts — зона задачи 8-b, examples/, skills/ — преждесуществующие); eslint чистый
+- curl через dev-сервер (порт 3000) даёт 500 на новых маршрутах: запущенный процесс держит PrismaClient, сгенерированный ДО db:push (globalThis-кэш в src/lib/db.ts); файл клиента на диске содержит новые модели. ПОЭТОМУ функциональная проверка выполнена напрямую: временный bun-скрипт вызывал все обработчики с NextRequest+cookie — 33/33 ассерта прошли (регистрация/409/400, login 401/200, me, cookie httpOnly, PUT create+partial-update сохраняет непереданное, невалидный status 400, сортировка updatedAt desc, DELETE, алиасы: дедупликация по id, лимиты 48/64, типы, 401, изоляция по userId); скрипт удалён после прогона
+- ВНИМАНИЕ агенту-интегратору (задача 9): чтобы новые маршруты заработали через dev-сервер, нужен перезапуск процесса next dev (либо разовый хак в db.ts с проверкой `if (!db.user)` и созданием свежего клиента) — после любого рестарта всё работает без изменений кода
+
+Stage Summary:
+- Формат ответов: register/login → {user:{id,username}} (+Set-Cookie avt_session=httpOnly); me → {user|null}; library GET → {user|null, entries:[{animeId,title,slug,poster,status,favorite,episode,positionSec,totalEpisodes,currentDub,updatedAt-ISO}]}; PUT → {entry}; DELETE/aliases-DELETE/logout → {ok:true}; aliases GET → {aliases:[{id,targetType,targetName,alias}]}; POST → {alias}; ошибки — {error} с кодами 400/401/409
+- db:push успешен; сессия — подписанная HMAC-cookie (без серверного стора); пароли — scrypt; все данные изолированы по userId; каскадное удаление (onDelete: Cascade)
+
+---
+Task ID: 8-c
+Agent: general-purpose
+Task: Микрофон + STT движки v2
+
+Work Log:
+- src/lib/voice/audio-utils.ts (НОВЫЙ, чистые функции без React): buildAudioConstraints (echoCancellation/noiseSuppression/autoGainControl из настроек, deviceId как {ideal} — не падает на отсутствующем устройстве); createMicChain (source → highpass 70Гц → DynamicsCompressor threshold -24/knee 30/ratio 4 → GainNode → analyser + MediaStreamDestination); rmsLevel (RMS 0..1); sensitivityToRms (vadSensitivity 0..100 → порог RMS 0.06..0.004, лог-шкала, 50 ≈ 0.0155 — проверено юнит-прогоном в bun); encodeWav16kMono (decodeAudioData → OfflineAudioContext 16 кГц mono с gain-узлом → WAV PCM16 c корректным RIFF-заголовком; мягкая нормализация при пиках > 0.98 против клиппинга); bufferToBase64 (чанками по 0x8000); listMicDevices (enumerateDevices, фильтр audioinput; без permission — пустой массив)
+- src/lib/avc/use-voice.ts (переработка): выбор движка по settings.sttEngine — 'browser' (только Web Speech, иначе внятная ошибка), 'server' (сразу MediaRecorder+ASR), 'auto' (browser с тихим fallback на server при сбое start()); browserEngine теперь отражает ФАКТИЧЕСКИ запущенный движок (ставится после recognition.start()/recorder.start(), а не доступность)
+- Серверный движок пишет из ОБРАБОТАННОГО потока: getUserMedia(buildAudioConstraints) → createMicChain → MediaRecorder(destination.stream) — micGain реально усиливает запись; VAD читает тот же analyser (уже усиленный сигнал); порог тишины = sensitivityToRms(settings.vadSensitivity), настройки читаются на старте каждой сессии
+- Web Speech API: задокументировано, что micGain на его внутренний захват повлиять не может; для индикатора держится параллельная лёгкая цепочка source → analyser (startLevelIndicator, только пока voiceStatus=listening, инвалидация по номеру сессии)
+- processRecording: webm-блоб → encodeWav16kMono(blob, micGain) → base64 → POST /api/voice/asr {audio, mime:'audio/wav'} (контракт роута не ломает); 5xx → «Сервис распознавания недоступен», 429/400-сообщения роута прокидываются
+- getUserMedia-ошибки разложены по NotAllowedError/SecurityError (нет доступа), NotFoundError/OverconstrainedError (нет устройства), остальные — общее сообщение
+- Новые поля VoiceApi: micLevel (0..1, raf-цикл с троттлингом 100 мс ≈ 10 раз/с, живёт во время listening, сбрасывается в teardown), interimText (промежуточные результаты Web Speech, очищается при onend/обработке), micDevices + refreshMicDevices (монтирование + ручной рефреш, требует permission)
+- MAX_UTTERANCE_MS 8000 → 12000, MIN_UTTERANCE_MS 700 → 500; max-таймер добавлен и браузерному движку (страховка от зависшего onend)
+- Гонки/утечки: sessionSeqRef инвалидирует асинхронные старты (кнопку отпустили до resolve getUserMedia — запись не начинается); catch серверного старта сначала проверяет поколение, потом teardown (не убивает аудио новой сессии); ensureStream переиспользует поток пока не сменился micDeviceId (иначе пересоздаёт); починен баг оригинала: пустой chunks оставлял processingRef=true навсегда (теперь finally); teardownAudio закрывает и chain-ctx, и light-ctx, гасит raf
+- Сохранено: push-to-talk, always-listening c re-arm 400 мс, wake word, TTS speak(), очистка при unmount, переходы setVoiceStatus (listening → recognizing → executing), Ctrl+Space в page.tsx не тронут
+
+Stage Summary:
+- tsc: 0 ошибок в файлах задачи (parse/parser.ts и examples/skills — чужие/предсущ.); ESLint обоих файлов — чисто
+- Новые поля VoiceApi: micLevel, interimText, micDevices, refreshMicDevices(); browserEngine = фактический движок сессии
+- Как включить gain/sensitivity: Настройки → micGain 1..4 (усиление записи и VAD, серверный движок), vadSensitivity 0..100 (порог авто-стопа по тишине), sttEngine auto|browser|server, тумблеры noiseSuppression/autoGainControl/echoCancellation, micDeviceId (ideal). Для пользователя «я далеко от микрофона»: micGain 2–3 + vadSensitivity 60–75
+
+---
+Task ID: 8-b
+Agent: general-purpose
+Task: Voice Provider Resolver + расширение парсера (контракты v2, баг «переключи на анилибрию»)
+
+Work Log:
+- src/lib/voice/phonetics.ts (НОВЫЙ): phoneticKey (собственная транслитерация кириллица→латиница, только a-z, схлопнутые двойные: «анилибрия»→anilibriya, «AniLibria»→anilibria) + stripCaseEndings (пословно, кириллица, слово ≥5 букв, срез по одному символу в цикле до стабилизации — ВСЕ падежи («анилибрию/анилибрии/анилибрия/анилибри») сходятся к одному стему, латиница не трогается, «дрим каста»→«дрим каст»). Вынесено в отдельный файл, чтобы избежать циклического импорта fuzzy↔provider-resolver
+- src/lib/voice/fuzzy.ts: titleSimilarity теперь дополнительно сравнивает фонетические ключи (phoneticKey) — «ани либрия»≈«AniLibria» без изменения существующих экспортов
+- src/lib/voice/provider-resolver.ts (НОВЫЙ, главный файл): normalizeVoiceName (normalizeForMatch+stripCaseEndings), DubCandidate, DEFAULT_VOICE_ALIASES (AniLibria/StudioBand/Dream Cast/AnimeVost/AniDUB/AniStar/JAM/AnimeGo/SHIZA Project), buildUserAliasMap, resolveVoiceProvider: exact (== name/shortName → 1.0) → alias (DEFAULT+user, нормализованные → 0.97) → translit (фонетические ключи → 0.92) → fuzzy (max similarity/titleSimilarity по нормализованным и фонетическим формам; ни один токен не начинается с той же буквы → cap 0.5); реэкспорт phoneticKey/stripCaseEndings; порог по умолчанию VOICE_CONFIDENCE_ASK
+- src/lib/voice/aliases.ts: COMMAND_ALIASES += Mute/Unmute/ContinueWatching/ShowLibrary/ToggleFavorite/SetWatchStatus; НОВОЕ COMMAND_ALIAS_PARAMS (alias → params: muted/favorite/status), мержится в matchAlias (parser) — alias-путь возвращает валидные параметризованные команды
+- src/lib/voice/parser.ts: LABELS для 7 новых типов (Mute/Unmute/SetWatchStatus/ToggleFavorite/ContinueWatching/ShowLibrary/AddVoiceAlias — чинит tsc после контрактов v2); extractSeek переписан (минуты×60, «полминуты»→30, «полторы минуты»→90, «секунд 30»/«30 секунд», «на тридцать секунд», составные «сто двадцать секунд», «перемотка на 20», отмотай/обратно/влево/вправо, без направления = вперёд); НОВЫЕ извлекатели ДО alias-matching: Mute/Unmute («выключи/убери/без звука», «включи/верни звук»), SetWatchStatus (смотрю/планы/просмотрено/брошено/отложено-на потом; «поставь на паузу» НЕ перехватывается), ToggleFavorite (±избранное), ContinueWatching («продолжить просмотр», «вернись к просмотру», «с того места»), ShowLibrary («открой библиотеку», «мои списки/аниме», «моя коллекция»), AddVoiceAlias (регэкспы «добавь X как команду/алиас для Y», «запомни X для Y», conf 0.9); SelectVoice усилен (extractDub → extractSelectVoice): «переключи(сь)/смени/поменяй/выбери на X» → {name, dub} (хвосты following/previous/ordinal/вкладка/серия отбракованы — «переключись на следующую вкладку» не сломан), «следующая/другая озвучка» → {next:true}, «вторая озвучка» → {index:N}; parserSelfTest расширен 20 → 40 кейсов
+
+Stage Summary:
+- Проверки: parserSelfTest 40/40 PASS (прогон через реальный parseCommand), резолвер-тесты 19/19 PASS: «ани либрию»→AniLibria 0.97 (alias), «дрим каста»→Dream Cast 0.97, «студио бэнд»→StudioBand 0.97, «анимэ вост»→AnimeVost 0.97, «чепуха»→null, «AniLibria»→exact 1.0, user-алиас через buildUserAliasMap→0.97, опечатка «анилибре»→fuzzy; tsc --noEmit по src — 0 ошибок, eslint изменённых файлов чист
+- Осознанное отклонение от примера в ТЗ: stripCaseEndings срезает окончания циклично, поэтому стем «анилибр», а не «анилибри» — так все формы (включая голое «анилибри») дают ОДИН стем; корректность сопоставления важнее литерального вида стема
+- Executor (Task 8-a/9): при резолвинге вызывать resolveVoiceProvider(cmd.params.name||cmd.params.dub, dubs, userAliasMap) c порогами VOICE_CONFIDENCE_AUTO/ASK; parser эмитит и name, и dub для обратной совместимости; SelectVoice {next}/{index} — новые кейсы для executor'а
+
+---
+Task ID: 9-a
+Agent: ZAI (main)
+Task: Интеграция аккаунта/библиотеки/алиасов в executor + API-клиент + хоткеи + дебаунсер (параллельно с 9-b)
+
+Work Log:
+- src/lib/avc/store.ts: +user/library/voiceAliases/libraryOpen/authOpen/voiceConfirm{spoken,match}/prevVolume (init 70) и сеттеры setUser/setLibrary/setVoiceAliases/setLibraryOpen/setAuthOpen/setVoiceConfirm (+внутренний setPrevVolume для Mute); экспортирован тип VoiceConfirmState
+- src/lib/avc/api.ts (НОВЫЙ): чистый транспорт avcApi — me/login(401→«Неверный логин или пароль»)/register/logout/library/putLibrary(401→null НЕ throw, 400→throw от {error})/deleteLibraryEntry/aliases(без сессии→[])/addAlias(401→null)/deleteAlias; credentials same-origin, JSON; store после login/register/logout обновляет вызывающая сторона
+- src/lib/avc/executor.ts: 1) анти-дубль (баг #12) — module-level {hash,ts}, одинаковый normalized < 2500 мс → RESULT «Дубликат команды пропущен»+setLastExecuted+return; ts обновляют успешные И проваленные («пауза пауза» подряд глушится, с интервалом — работает); 2) confirm-gate ДО парсинга: voiceConfirm + «да/да переключай/подтверждаю/точно/давай/первый/1» → confirmVoiceMatch(), «нет/отмена/не/неа/неверно/второй/2» → cancelVoiceMatch(), иной текст → отмена+обычный парсинг (не застревает); 3) SelectVoice через резолвер 8-b: {next} циклически, {index} по списку, {name|dub} → resolveVoiceProvider(dubs, buildUserAliasMap(voiceAliases), ASK): null→«Озвучка «X» не найдена. Доступны: …», ≥0.85→применить+«Озвучка: X (N%)», 0.55–0.85→setVoiceConfirm+«Вы имеете в виду «X»? Скажите ДА или НЕТ»; 4) экспорты confirmVoiceMatch()/cancelVoiceMatch() (pickVideo, toast, «Озвучка: …»/«Отменено»); 5) Mute/Unmute с prevVolume (0 не затирает прежнее; Unmute → prevVolume или 70); 6) SetWatchStatus: без user → setAuthOpen+«Войдите…», без animeId → «Сначала откройте аниме», иначе putLibrary(poster/totalEpisodes из кэша деталей)+upsert library+«{title}: {LABEL}»; 7) ToggleFavorite (статус не трогаем; без параметра — toggle текущего); 8) ContinueWatching: макс updatedAt среди watching (fallback любые), пусто→«Библиотека пуста — скажи "найди …"»; export async function continueWatchingFromEntry(entry) — AnimeCard→navigateToAnime→восстановление currentDub→playEpisode(episode)→positionSec, «Продолжаю: X, серия N»; 9) ShowLibrary → setLibraryOpen(true); 10) AddVoiceAlias: target через resolveVoiceProvider по dubs, fallback — ключи DEFAULT_VOICE_ALIASES как кандидаты; <0.55→«Не знаю такую озвучку»; 401→null→«Войдите, чтобы сохранять алиасы»+auth; успех→upsert voiceAliases+«Запомнил: «X» → Y»; 11) автосинк библиотеки: playEpisode (покрывает Select/Next/Prev/Play) → syncLibraryProgress fire-and-forget, status:'watching' ТОЛЬКО при создании записи (completed/dropped не перетираются), Seek± → positionSec только при существующей записи, ошибки глушатся; 12) switch покрывает все новые типы, default «Команда не поддерживается»
+- src/components/avc/hotkeys.tsx (НОВЫЙ): <Hotkeys/>→null; window keydown capture; игнор input/textarea/select/contenteditable и Ctrl/Meta (Ctrl+Space PTT в page.tsx не задет); Space=TogglePlayPause(preventDefault), ←/→=Seek(Shift?30:10), ↑/↓=Volume, N/P=серии, F=setPlayerFullscreen напрямую, M=Mute/Unmute по volume; всё через executeCommand (пайплайн/история/тосты), e.repeat только стрелкам
+- src/app/page.tsx: импорты AuthDialog/LibraryPanel/VoiceConfirmDialog/Hotkeys/InstallPwa; эффект профиля (avcApi.me()→setUser; если user → Promise.all(library,aliases)→setLibrary/setVoiceAliases; unmount-cancel, ошибки глушатся); смонтированы VoiceConfirmDialog/AuthDialog/LibraryPanel/InstallPwa/Hotkeys; settings-load/Ctrl+Space/автосейв сессии не тронуты
+- ОТКЛОНЕНИЕ: контракт называл InstallPwaHint, фактический экспорт 9-b — InstallPwa; импорт выровнен по факту
+- agent-ctx/9-a-zai.md — запись для следующего агента
+
+Stage Summary:
+- bunx tsc --noEmit: 0 ошибок в src/ (совместно с файлами 9-b; examples/skills — предсуществующие); eslint по своим 5 файлам — чисто
+- dev-сервер: GET / → 200; /api/auth/me → {user:null}; /api/library → {user:null,entries:[]}; /api/aliases → {aliases:[]}
+- Сценарии проверены: дебаунсер не блокирует разные команды; «переключи на анилибрию» → alias 0.97 ≥ AUTO → молча; сомнительная уверенность 0.55–0.85 → «да» применяет / «нет» отмена / посторонний текст — отмена+парсинг; SetWatchStatus без логина открывает auth-dialog
+
+---
+Task ID: 9-b
+Agent: ZAI (frontend)
+Task: UI-интеграция по баг-репортам — плеер (автозапуск/перемотка/звук), библиотека и аккаунты, микрофон-UI, резолвер-дебаг, PWA
+
+Work Log:
+- player.tsx: overlay автозапуска серии (bg-black/60 backdrop-blur, кнопка-круг amber 88px + Play, aria-label «Запустить серию», текст «Нажмите, чтобы запустить» + подсказка про блокировку автозапуска; клик снимает overlay ЛОКАЛЬНЫМ state без перезагрузки iframe, state сбрасывается useEffect'ом по смене url; keyboard Enter/Space; в fullscreen кнопка крупнее — h-28); добавлены кнопки ±30 сек (RotateCcw/RotateCw с бейджем «30», title «Назад/Вперёд на 30 секунд») рядом с ±10; виртуальный таймлайн currentTime/duration (fmtTime, «--:--» при unknown, скрыт <md); Mute/Unmute кнопка Volume2/VolumeX рядом со слайдером (ctrl Mute если volume>0, иначе Unmute); iframe allow += picture-in-picture (lazy НЕ добавлен — медленнее старт); tryPost helper: postMessage(JSON) внутрь iframe в try/catch best-effort перед SeekForward/SeekBackward (avc-seek ±seconds), Play/Pause/TogglePlayPause (avc-play/avc-pause по isPlaying), Mute/Unmute/SetVolume (avc-volume) — выполнение команды executor'ом при этом не блокируется
+- anime-view.tsx: панель «Моя библиотека» под инфо-блоком (рамка zinc-800): кнопка-сердце Heart (filled amber когда entry.favorite, executeCommand ToggleFavorite {favorite: !current}); Select статусов из WATCH_STATUS_LABELS + «Не выбрано» (sentinel '__none__' → SetWatchStatus {status: ''}), placeholder «Статус…»; запись ищется по details.animeId (не по глобальному playback); бейдж статуса (+«Избранное» rose) рядом с заголовком; хинт «Войдите для синхронизации» при !user (клики всё равно шлют executeCommand — executor сам откроет auth)
+- voice-panel.tsx: полоса уровня микрофона h-1.5 под кнопкой (width = micLevel*100%, transition-all duration-75, цвет zinc-600 <30% / amber-400 <70% / rose-500, role=meter с aria-valuenow); interimText курсивом zinc-400 пока listening (aria-live, «…»); бейдж движка «Браузер»/«Сервер» из voice.browserEngine рядом со статусом; существующие элементы (режим, тестовый ввод, последний результат) сохранены
+- header-bar.tsx: кнопка Library (BookOpen, aria «Библиотека», setLibraryOpen(true)) с amber-точкой-бейджем если library.length>0; чип аккаунта (User + username, DropdownMenu) с «Выйти» (avcApi.logout() → setUser(null)+setLibrary([])+setVoiceAliases([])+toast) либо кнопка «Войти» → setAuthOpen(true)
+- auth-dialog.tsx (НОВЫЙ): Dialog по store.authOpen; Tabs Вход/Регистрация; username+password (type=password, autoComplete), ошибки сервера текстом rose (role=alert); успех: setUser → закрыть → avcApi.library()/aliases() → setLibrary/setVoiceAliases → toast «С возвращением, {username}!» / «Добро пожаловать…»; кнопки min-h-11, Enter в пароле = сабмит, Loader2 на busy
+- library-panel.tsx (НОВЫЙ): Sheet side=right w-full sm:max-w-[420px]; табы Продолжить|Смотрю|В планах|Просмотрено|Брошено|Отложено|Избранное (scrollable TabsList); «Продолжить» = episode!=null, sort updatedAt desc; карточка: постер img w-14 h-20 object-cover, title, «Серия N из M», прогресс-бар episode/total, Play → continueWatchingFromEntry(entry) + закрытие панели; клик по карточке (role=button, Enter/Space) = то же; в статус-табах dropdown смены статуса (STATUS_ICONS + WATCH_STATUS_LABELS) → avcApi.putLibrary({animeId,title,slug,poster,status}) → merge в store.library (null → «Требуется вход»), кнопка Trash2 → avcApi.deleteLibraryEntry → filter store (false → тост-ошибка); stopPropagation на действиях; пустое состояние с подсказкой «найди Берсерка»; !user → заглушка + «Войти» (закрыть library → setAuthOpen(true)); список avc-scroll overflow-y-auto
+- voice-confirm-dialog.tsx (НОВЫЙ): Dialog по voiceConfirm!==null ({spoken, match}); «Уточним озвучку», «Вы говорите: "{spoken}"», крупно match.name + бейдж confidence% цветом по matchedVia (exact/alias/translit/fuzzy); «Да, переключить» (amber, confirmVoiceMatch(), autoFocus через onOpenAutoFocus) / «Нет, отмена» (outline, cancelVoiceMatch()); закрытие крестом/оверлеем = cancelVoiceMatch (с защитой от двойного вызова, если кнопка уже очистила store); подсказка «Скажите название точнее или выберите озвучку на странице аниме»
+- install-pwa.tsx (НОВЫЙ, mounted в layout.tsx): локальный тип BeforeInstallPromptEvent; beforeinstallprompt → preventDefault + сохранить; ненавязчивый Card fixed bottom-3 left-3 «Установить AnimeVC на устройство» + «Установить» (event.prompt()) + крестик (localStorage 'avc-pwa-dismissed'='1'); НЕ показывать при dismissed / display-mode: standalone / appinstalled; SSR-safe return null
+- settings-dialog.tsx: реорганизован в Tabs Общие|Микрофон|Озвучки (существующие секции сохранены внутри «Общие», контент скроллится, TabsList фикс). «Микрофон»: Select sttEngine auto/browser/server с русскими подписями; Select устройства из listMicDevices (тот же источник, что voice.micDevices — диалог не может принимать voice-проп из-за запрета править page.tsx; список обновляется при открытии + кнопка RefreshCw; пусто → хинт «Разрешите доступ к микрофону», Select disabled); Slider micGain 1..4 step 0.25 + «×{micGain}» + подсказка «2–3 если далеко»; Slider vadSensitivity 0..100 + «Выше = лучше ловит тихую речь»; Switch noiseSuppression/autoGainControl/echoCancellation; «Проверить микрофон»: getUserMedia(buildAudioConstraints) → createMicChain(micGain) → MediaRecorder(destination.stream) 3.5с с живым уровнем (rmsLevel по rAF, та же цветовая шкала) → encodeWav16kMono(blob, 1) (gain уже применён в цепочке — без двойного усиления) → bufferToBase64 → POST /api/voice/asr {audio, mime:'audio/wav'} → «Распознано: "…"»/ошибка; кнопка disabled в процессе + Loader2; cleanup (tracks/ctx/raf) при закрытии диалога. «Озвучки»: список voiceAliases «alias → targetName» + X → avcApi.deleteAlias(id); форма алиас+официальное имя → avcApi.addAlias(target, alias) → setVoiceAliases([...cur, row]) (null → «Войдите, чтобы сохранять алиасы»); Collapsible «Встроенные варианты произношения» со всеми DEFAULT_VOICE_ALIASES; debounce PUT /api/settings не тронут (шлёт весь settings — новые поля полетели автоматически)
+- help-dialog.tsx: новые группы «Звук» (выключи/убери/включи/верни звук), «Перемотка» (20 секунд, 2 минуты назад, полминуты, «секунд 30», «сто двадцать секунд»), «Библиотека» (в смотрю/планы/просмотрено/брошено/отложено, избранное, продолжить просмотр, открой библиотеку), «Озвучки» (переключи на анилибрию, следующая/вторая озвучка, добавь X как команду для Y); секция «Горячие клавиши» (Ctrl+Space, Space, ←/→, Shift+←/→=30с, ↑/↓, N/P, F, M) в виде kbd-чипов; финальная заметка про переспрос озвучки
+- debug-panel.tsx: секция «Резолвер озвучек» (FlaskConical): Input + «Проверить» → resolveVoiceProvider(spoken, кандидаты, buildUserAliasMap(voiceAliases)); кандидаты — dubs из getCachedDetails(playback.animeId, playback.animeSlug) если открыто аниме, иначе ключи DEFAULT_VOICE_ALIASES как {name,shortName}; результат name + бейдж confidence%·matchedVia цветом по via / «Совпадений ниже порога»; Enter в поле тоже запускает. Секция «Статус»: username / «не залогинен», записей в библиотеке, алиасов, движок STT; copyDebug расширен (user + library); пайплайн и диагностика сохранены
+- mini-player.tsx: виртуальный таймлайн mm:ss/mm:ss (fmtTime) под инфо-строкой, кнопка Mute/Unmute (Volume2/VolumeX) перед слайдером громкости (executeCommand Mute/Unmute)
+- PWA: scripts/make-icons.mjs (sharp, SVG: rounded-квадрат #09090b + amber play-треугольник со stroke-linejoin=round + две rose дуги-микрофона; argv-размеры, дефолт 192+512; maskable 512 с artwork в safe-zone 10% и full-bleed фоном без rx) — выполнен, public/icons/{icon-192,icon-512,icon-maskable-512}.png на диске (192x192/512x512/512x512 PNG); public/manifest.webmanifest (name/short_name, start_url /, display standalone, bg #09090b, theme #f59e0b, lang ru, 3 иконки); layout.tsx: metadata.manifest, appleWebApp{capable, black-translucent, AnimeVC}, icons → /icons/icon-{192,512}.png + apple, applicationName; export const viewport: Viewport {themeColor '#f59e0b', device-width, initialScale 1, maximumScale 1}; <InstallPwa /> смонтирован в layout (page.tsx у 9-a не тронут)
+- src/lib/db.ts (межзонный фикс по рецепту 8-a): isStaleClient() — если глобальный PrismaClient создан до появления модели User (db.user undefined), гасим его и создаём свежий; причина 500 на /api/auth/* — dev-процесс удерживал клиент и Turbopack-чанк @prisma/client, сгенерированные ДО db:push (в свежем процессе bun клиент был с User, в dev-сервере — нет; правка db.ts без рестарта не помогала из-за персистентного кэша Turbopack). Рестарт dev-сервера + патч → register/login/me/library PUT·DELETE/aliases POST·DELETE проверены curl'ом (200/401 пути), тестовый пользователь и его данные удалены из БД
+- ВАЖНО для сборщиков: InstallPwa смонтирован в layout.tsx — НЕ дублировать в page.tsx. AuthDialog/LibraryPanel/VoiceConfirmDialog монтирует 9-a в page.tsx (по контракту store они уже существуют и управляются executor'ом)
+
+Stage Summary:
+- bunx tsc --noEmit: 0 ошибок вне examples/skills (предсуществующие); eslint по всем 14 файлам задачи + db.ts + make-icons.mjs — чисто
+- Страница 200, manifest 200, иконки 200; пайплайн, диагностика, история, тестовый ввод не сломаны
+- Пользовательские сценарии закрыты: автозапуск кликом без перезагрузки iframe, ±10/±30 + таймлайн + mute, избранное/статусы на странице аниме, библиотека-панель с продолжением просмотра, вход/регистрация с догрузкой данных, индикатор уровня + interim + движок, тест микрофона с живым уровнем, алиасы озвучек с дефолтами, дебаг-резолвер, PWA-баннер + manifest + иконки
+
+---
+Task ID: 10
+Agent: ZAI (main)
+Task: Финальная верификация (lint + tsc + Agent Browser E2E) и фиксы
+
+Work Log:
+- Исправлен двойной монтаж InstallPwa (layout.tsx + page.tsx) — оставлен только в layout.tsx
+- bun run lint: 0 ошибок; tsc --noEmit: src/ чист (остаточные ошибки только в предсуществующих examples/, skills/)
+- Smoke-тесты curl: / (200), /api/auth/me, /manifest.webmanifest (200), /icons/icon-192.png (200), /api/aliases без сессии → «Требуется вход»
+- Agent Browser E2E (золотой путь): сессия восстановлена→отклонена; «найди берсерка» → 3 живых варианта; выбор «1» → страница Берсерка с панелью «Моя библиотека»
+- Резолвер озвучек LIVE: «включи озвучку сербина» → «Озвучка Сербин (100%)» (падеж снят); «снербин» → 86% auto; «снрбин» → 83% → ДИАЛОГ «Уточним озвучку» → «Да» применяет
+- Негатив: «переключи на анилибрию» → «не найдена. Доступны: MC Entertainment, Сербин, Amber, ConeVoice, Субтитры, Гоблин»
+- Регистрация couchviewer через диалог; «добавь в избранное» → ❤️ в библиотеке; автосинк «Смотрю, серия 4»; «продолжить просмотр» → «Продолжаю: Берсерк, серия 4»
+- Оверлей автозапуска плеера («Нажмите, чтобы запустить») появляется и снимается кликом без перезагрузки iframe; кнопки ±10/±30, mute, таймлайн --:--/23:39
+- Настройки: вкладка Микрофон (движок STT, устройство, усиление ×1-4, чувствительность 0-100, тест микрофона), вкладка Озвучки — алиас «ани либрия»→AniLibria добавлен через форму и сохранён в БД (кнопка удаления видна)
+- Hotkeys: Space=play/pause, M=mute проверены; мобайл 390px — сетки/чипы/футер корректны; browser errors/console — чисто
+- dev.log: без ошибок
+
+Stage Summary:
+- Все 6 пунктов баг-репорта закрыты и проверены end-to-end в браузере: (1) автозапуск серии оверлеем, (2) аккаунт+библиотека статусов, (3) UI/PWA-Android manifest+иконки, (4) усиление/чувствительность микрофона+WAV 16к ASR, (5) перемотка ±10/±30/минуты голосом и клавишами, (6) Voice Provider Resolver с падежами/транслитом/алиасами/порогами 0.85-0.55 и обучением алиасам

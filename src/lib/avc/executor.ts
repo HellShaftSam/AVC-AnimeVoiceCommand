@@ -4,28 +4,86 @@
  * и REST API адаптера. Импортируется только из клиентского кода.
  *
  * Пайплайн executeText:
- *   RAW → normalize (parseCommand) → [LLM fallback] → выполнение по очереди
+ *   RAW → [подтверждение озвучки «да/нет» — до парсинга] → normalize (parseCommand)
+ *   → [анти-дубль < 2.5 c] → [LLM fallback] → выполнение по очереди
  *   → pipeline steps → история → lastExecuted → voiceMessage
+ *
+ * Task 9-a: SelectVoice через Voice Provider Resolver (с подтверждением при
+ * сомнительной уверенности), Mute/Unmute, SetWatchStatus/ToggleFavorite/
+ * ContinueWatching/ShowLibrary/AddVoiceAlias, автосинхронизация библиотеки.
  */
 import { toast } from '@/hooks/use-toast'
 import { rankMatches } from '@/lib/voice/fuzzy'
 import { LABELS, parseCommand } from '@/lib/voice/parser'
 import {
+  buildUserAliasMap,
+  DEFAULT_VOICE_ALIASES,
+  DubCandidate,
+  resolveVoiceProvider,
+} from '@/lib/voice/provider-resolver'
+import { avcApi } from './api'
+import type { PutLibraryPayload } from './api'
+import {
   AnimeCard,
   AnimeDetails,
   BrowserContext,
   CommandResult,
+  LibraryEntryDto,
   SiteSectionId,
   TabKind,
   VideoEntry,
   VoiceCommand,
   VoiceCommandType,
+  VOICE_CONFIDENCE_ASK,
+  VOICE_CONFIDENCE_AUTO,
+  VoiceProviderMatch,
+  WATCH_STATUS_LABELS,
+  WatchStatus,
 } from './types'
 import { makeTabSnapshot, useAvcStore } from './store'
 
 // --- кэш деталей (модульный, переживает переключения вкладок) ------------------
 
 const detailsCache = new Map<number, AnimeDetails>()
+
+// --- анти-дубль команд (баг #12) ------------------------------------------------
+
+/** Одна и та же команда подряд в пределах 2.5 с — пропускается */
+const DEBOUNCE_MS = 2500
+let lastCommand: { hash: string; ts: number } | null = null
+
+/** Быстрая нормализация для фраз подтверждения (пунктуация → пробелы) */
+function simpleNormalize(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Голосовое подтверждение предложенной озвучки */
+const CONFIRM_YES = new Set([
+  'да',
+  'да переключай',
+  'подтверждаю',
+  'точно',
+  'давай',
+  'первый',
+  'первая',
+  'первое',
+  '1',
+])
+const CONFIRM_NO = new Set([
+  'нет',
+  'отмена',
+  'не',
+  'неа',
+  'неверно',
+  'второй',
+  'вторая',
+  'второе',
+  '2',
+])
 
 // --- служебные ----------------------------------------------------------------
 
@@ -148,6 +206,94 @@ function applyDetailsToPlayback(details: AnimeDetails | null, card?: AnimeCard):
   st.setPlayer(null, null)
 }
 
+// --- библиотека (аккаунт) -------------------------------------------------------
+
+/** Заменить/добавить запись библиотеки в store */
+function upsertLibraryEntry(entry: LibraryEntryDto): void {
+  const st = useAvcStore.getState()
+  const exists = st.library.some((e) => e.animeId === entry.animeId)
+  st.setLibrary(
+    exists
+      ? st.library.map((e) => (e.animeId === entry.animeId ? entry : e))
+      : [...st.library, entry],
+  )
+}
+
+/**
+ * Автосинхронизация прогресса просмотра после открытия серии (fire-and-forget:
+ * не блокирует основной поток, ошибки глушатся). Статус 'watching' передаётся
+ * только при СОЗДАНИИ записи — 'completed'/'dropped' не перетираются.
+ */
+function syncLibraryProgress(details: AnimeDetails | null): void {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!st.user || pb.animeId === null) return
+  const existing = st.library.find((e) => e.animeId === pb.animeId) ?? null
+  void avcApi
+    .putLibrary({
+      animeId: pb.animeId,
+      title: pb.animeTitle ?? existing?.title ?? 'Без названия',
+      slug: pb.animeSlug ?? existing?.slug ?? null,
+      poster: details?.poster ?? existing?.poster ?? null,
+      ...(existing ? {} : { status: 'watching' as WatchStatus }),
+      episode: pb.currentEpisode ?? existing?.episode ?? null,
+      totalEpisodes: details
+        ? details.episodesTotal ??
+          (details.episodesAired > 0 ? details.episodesAired : (existing?.totalEpisodes ?? null))
+        : (existing?.totalEpisodes ?? null),
+      currentDub: pb.currentDub ?? existing?.currentDub ?? null,
+    })
+    .then((entry) => {
+      if (entry) upsertLibraryEntry(entry)
+    })
+    .catch(() => undefined)
+}
+
+type LibraryUpdateResult =
+  | { ok: true; entry: LibraryEntryDto }
+  | { ok: false; message: string }
+
+/** putLibrary для ТЕКУЩЕГО открытого аниме (статус/избранное). Без user — открывает auth. */
+async function updateLibraryForCurrentAnime(patch: {
+  status?: WatchStatus
+  favorite?: boolean
+}): Promise<LibraryUpdateResult> {
+  const st = useAvcStore.getState()
+  if (!st.user) {
+    st.setAuthOpen(true)
+    return { ok: false, message: 'Войдите в аккаунт, чтобы вести библиотеку' }
+  }
+  const pb = st.playback
+  if (pb.animeId === null) return { ok: false, message: 'Сначала откройте аниме' }
+  const existing = st.library.find((e) => e.animeId === pb.animeId) ?? null
+  const details = getCachedDetails(pb.animeId, pb.animeSlug)
+  const payload: PutLibraryPayload = {
+    animeId: pb.animeId,
+    title: pb.animeTitle ?? existing?.title ?? 'Без названия',
+    slug: pb.animeSlug ?? existing?.slug ?? null,
+    poster: details?.poster ?? existing?.poster ?? null,
+    episode: pb.currentEpisode ?? existing?.episode ?? null,
+    totalEpisodes: details
+      ? details.episodesTotal ?? (details.episodesAired > 0 ? details.episodesAired : null)
+      : (existing?.totalEpisodes ?? null),
+    currentDub: pb.currentDub ?? existing?.currentDub ?? null,
+  }
+  if (patch.status !== undefined) payload.status = patch.status
+  else if (!existing) payload.status = 'watching' // новая запись — базовый статус
+  if (patch.favorite !== undefined) payload.favorite = patch.favorite
+  try {
+    const entry = await avcApi.putLibrary(payload)
+    if (!entry) {
+      useAvcStore.getState().setAuthOpen(true)
+      return { ok: false, message: 'Войдите в аккаунт, чтобы вести библиотеку' }
+    }
+    upsertLibraryEntry(entry)
+    return { ok: true, entry }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Ошибка библиотеки' }
+  }
+}
+
 /** Синхронизация playback, если вкладка аниме открыта напрямую (сессия и т.п.) */
 export function syncPlaybackToDetails(details: AnimeDetails): void {
   const st = useAvcStore.getState()
@@ -247,6 +393,7 @@ async function playEpisode(episode: number): Promise<CommandResult> {
     currentDub: pb.currentDub ?? video.dubName,
   })
   st.setPlayer(video.iframeUrl, video.playerName)
+  syncLibraryProgress(details)
   toast({ description: `▶ Серия ${episode}` })
   return ok(`Серия ${episode}`)
 }
@@ -295,28 +442,248 @@ async function executeSelectOption(cmd: VoiceCommand): Promise<CommandResult> {
   return navigateToAnime(item, false)
 }
 
+/** Применить выбранную озвучку: запомнить и, если серия открыта, перезапустить плеер */
+function applyDubChoice(details: AnimeDetails, dubName: string): void {
+  const st = useAvcStore.getState()
+  st.patchPlayback({ currentDub: dubName })
+  const ep = st.playback.currentEpisode
+  if (ep !== null) {
+    const video = pickVideo(details, ep, dubName)
+    if (video) st.setPlayer(video.iframeUrl, video.playerName)
+  }
+}
+
 async function executeSelectVoice(cmd: VoiceCommand): Promise<CommandResult> {
-  const query = paramString(cmd, 'dub')
-  if (!query) return fail('Не указана озвучка')
   const st = useAvcStore.getState()
   if (!st.playback.animeId) return fail('Сначала откройте аниме')
   const details = await fetchDetails(st.playback.animeId)
   if (!details) return fail('Не удалось загрузить данные аниме')
-  if (details.dubs.length === 0) return fail('Для этого аниме нет доступных озвучек')
-  const ranked = rankMatches(query, details.dubs, (d) => `${d.shortName} ${d.name}`)
-  const best = ranked[0]
-  if (!best || best.score < 0.4) {
-    const available = details.dubs.map((d) => d.shortName).slice(0, 6).join(', ')
-    return fail(`Озвучка «${query}» не найдена. Доступны: ${available}`)
+  const dubs = details.dubs
+  if (dubs.length === 0) return fail('Для этого аниме нет доступных озвучек')
+
+  // {next: true} — циклически следующая озвучка
+  if (cmd.params.next === true) {
+    const curIdx = dubs.findIndex((d) => d.name === st.playback.currentDub)
+    const next = dubs[(curIdx + 1) % dubs.length]
+    applyDubChoice(details, next.name)
+    return ok(`Озвучка: ${next.name}`)
   }
-  st.patchPlayback({ currentDub: best.item.name })
-  const ep = useAvcStore.getState().playback.currentEpisode
-  if (ep !== null) {
-    // сохранение выбранной озвучки при переключении серии: обновляем плеер
-    const video = pickVideo(details, ep, best.item.name)
-    if (video) st.setPlayer(video.iframeUrl, video.playerName)
+
+  // {index: N} — N-я озвучка в списке
+  const idx = paramNumber(cmd, 'index')
+  if (idx !== null) {
+    if (idx < 1 || idx > dubs.length) {
+      return fail(`Озвучка №${idx} не найдена. Доступно озвучек: ${dubs.length}`)
+    }
+    const chosen = dubs[idx - 1]
+    applyDubChoice(details, chosen.name)
+    return ok(`Озвучка: ${chosen.name}`)
   }
-  return ok(`Озвучка: ${best.item.shortName}`)
+
+  // {name} — резолвинг через Voice Provider Resolver (Task 8-b)
+  const spoken = paramString(cmd, 'name') || paramString(cmd, 'dub')
+  if (!spoken) return fail('Не указана озвучка')
+  const aliasMap = buildUserAliasMap(
+    useAvcStore.getState().voiceAliases.map((r) => ({
+      targetName: r.targetName,
+      alias: r.alias,
+    })),
+  )
+  const match = resolveVoiceProvider(
+    spoken,
+    dubs.map((d) => ({ name: d.name, shortName: d.shortName })),
+    aliasMap,
+    VOICE_CONFIDENCE_ASK,
+  )
+  if (!match) {
+    const available = dubs.map((d) => d.shortName).slice(0, 6).join(', ')
+    return fail(`Озвучка «${spoken}» не найдена. Доступны: ${available}`)
+  }
+  if (match.confidence >= VOICE_CONFIDENCE_AUTO) {
+    // уверенное совпадение — переключаем молча
+    applyDubChoice(details, match.name)
+    return ok(`Озвучка: ${match.name} (${Math.round(match.confidence * 100)}%)`)
+  }
+  // 0.55..0.85 — спрашиваем подтверждение (диалог + голос «да/нет»)
+  useAvcStore.getState().setVoiceConfirm({ spoken, match })
+  return ok(`Вы имеете в виду «${match.name}»? Скажите ДА или НЕТ`)
+}
+
+// --- подтверждение озвучки (голос «да/нет» / диалог) ------------------------------
+
+/** Пользователь подтвердил предложенную озвучку (диалог/голос «да») */
+export function confirmVoiceMatch(): void {
+  const st = useAvcStore.getState()
+  const vc = st.voiceConfirm
+  if (!vc) return
+  st.setVoiceConfirm(null)
+  void (async () => {
+    try {
+      const animeId = useAvcStore.getState().playback.animeId
+      const details = animeId !== null ? await fetchDetails(animeId) : null
+      if (!details) {
+        useAvcStore.getState().setVoiceMessage('Не удалось применить озвучку')
+        toast({ variant: 'destructive', description: 'Не удалось применить озвучку' })
+        return
+      }
+      applyDubChoice(details, vc.match.name)
+      const msg = `Озвучка: ${vc.match.name} (${Math.round(vc.match.confidence * 100)}%)`
+      useAvcStore.getState().setVoiceMessage(msg)
+      toast({ description: msg })
+    } catch {
+      toast({ variant: 'destructive', description: 'Не удалось применить озвучку' })
+    }
+  })()
+}
+
+/** Пользователь отклонил предложенную озвучку (диалог/голос «нет») */
+export function cancelVoiceMatch(): void {
+  const st = useAvcStore.getState()
+  if (!st.voiceConfirm) return
+  st.setVoiceConfirm(null)
+  st.setVoiceMessage('Отменено')
+}
+
+// --- аккаунт: статус просмотра / избранное / продолжить / библиотека / алиасы ------
+
+const WATCH_STATUSES: readonly WatchStatus[] = [
+  'watching',
+  'planned',
+  'completed',
+  'dropped',
+  'on_hold',
+]
+
+async function executeSetWatchStatus(cmd: VoiceCommand): Promise<CommandResult> {
+  const statusRaw = paramString(cmd, 'status')
+  if (!(WATCH_STATUSES as readonly string[]).includes(statusRaw)) {
+    return fail(`Неизвестный статус просмотра: ${statusRaw || '—'}`)
+  }
+  const status = statusRaw as WatchStatus
+  const res = await updateLibraryForCurrentAnime({ status })
+  if (!res.ok) return fail(res.message)
+  const title = useAvcStore.getState().playback.animeTitle ?? res.entry.title
+  return ok(`${title}: ${WATCH_STATUS_LABELS[status]}`)
+}
+
+async function executeToggleFavorite(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const existing =
+    st.playback.animeId !== null
+      ? (st.library.find((e) => e.animeId === st.playback.animeId) ?? null)
+      : null
+  // favorite приходит от парсера; без параметра — честный toggle текущего состояния
+  const favorite =
+    cmd.params.favorite === true
+      ? true
+      : cmd.params.favorite === false
+        ? false
+        : !(existing?.favorite ?? false)
+  const res = await updateLibraryForCurrentAnime({ favorite })
+  if (!res.ok) return fail(res.message)
+  const title = useAvcStore.getState().playback.animeTitle ?? res.entry.title
+  return ok(favorite ? `Добавлено в избранное: ${title}` : `Убрано из избранного: ${title}`)
+}
+
+/**
+ * Продолжить просмотр из записи библиотеки: открыть аниме, восстановить
+ * озвучку и серию (и позицию, если сохранена). Экспортируется для UI
+ * (кнопка «Продолжить» в LibraryPanel).
+ */
+export async function continueWatchingFromEntry(entry: LibraryEntryDto): Promise<void> {
+  const card: AnimeCard = {
+    animeId: entry.animeId,
+    slug: entry.slug ?? '',
+    title: entry.title,
+    poster: entry.poster,
+    year: null,
+    rating: null,
+    status: null,
+    type: null,
+  }
+  await navigateToAnime(card, false)
+  const st = useAvcStore.getState()
+  if (entry.currentDub) st.patchPlayback({ currentDub: entry.currentDub })
+  if (entry.episode !== null && entry.episode > 0) {
+    const res = await playEpisode(entry.episode)
+    if (!res.success) {
+      toast({ variant: 'destructive', description: res.message })
+      return
+    }
+    if (entry.positionSec !== null && entry.positionSec > 0) {
+      useAvcStore.getState().patchPlayback({ currentTime: entry.positionSec })
+    }
+  }
+}
+
+async function executeContinueWatching(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  if (st.library.length === 0) {
+    return fail('Библиотека пуста — скажи «найди ...» чтобы начать')
+  }
+  // свежая запись среди «смотрю», иначе — любая свежая
+  const watching = st.library.filter((e) => e.status === 'watching')
+  const pool = watching.length > 0 ? watching : st.library
+  const latest = pool.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b))
+  try {
+    await continueWatchingFromEntry(latest)
+  } catch (e) {
+    return fail('Не удалось продолжить просмотр', e instanceof Error ? e.message : String(e))
+  }
+  return ok(`Продолжаю: ${latest.title}${latest.episode ? `, серия ${latest.episode}` : ''}`)
+}
+
+async function executeAddVoiceAlias(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const alias = paramString(cmd, 'alias')
+  const target = paramString(cmd, 'target')
+  if (!alias || !target) return fail('Укажите алиас и название озвучки')
+
+  const aliasMap = buildUserAliasMap(
+    st.voiceAliases.map((r) => ({ targetName: r.targetName, alias: r.alias })),
+  )
+
+  // 1) резолвим target по озвучкам текущего аниме (если открыто)
+  let match: VoiceProviderMatch | null = null
+  if (st.playback.animeId !== null) {
+    const details = await fetchDetails(st.playback.animeId)
+    if (details && details.dubs.length > 0) {
+      match = resolveVoiceProvider(
+        target,
+        details.dubs.map((d) => ({ name: d.name, shortName: d.shortName })),
+        aliasMap,
+        VOICE_CONFIDENCE_ASK,
+      )
+    }
+  }
+  // 2) fallback — встроенный словарь известных озвучек
+  if (!match) {
+    const defaults: DubCandidate[] = Object.keys(DEFAULT_VOICE_ALIASES).map((k) => ({
+      name: k,
+      shortName: k,
+    }))
+    match = resolveVoiceProvider(target, defaults, aliasMap, VOICE_CONFIDENCE_ASK)
+  }
+  if (!match) return fail(`Не знаю такую озвучку: «${target}»`)
+
+  try {
+    const row = await avcApi.addAlias(match.name, alias, 'voice')
+    if (!row) {
+      useAvcStore.getState().setAuthOpen(true)
+      return fail('Войдите, чтобы сохранять алиасы')
+    }
+    const cur = useAvcStore.getState().voiceAliases
+    useAvcStore
+      .getState()
+      .setVoiceAliases(
+        cur.some((r) => r.id === row.id)
+          ? cur.map((r) => (r.id === row.id ? row : r))
+          : [row, ...cur],
+      )
+    return ok(`Запомнил: «${alias}» → ${match.name}`)
+  } catch (e) {
+    return fail('Не удалось сохранить алиас', e instanceof Error ? e.message : String(e))
+  }
 }
 
 async function executeEpisodeCommand(cmd: VoiceCommand): Promise<CommandResult> {
@@ -364,7 +731,33 @@ function executeSeek(cmd: VoiceCommand): CommandResult {
   const max = pb.duration > 0 ? pb.duration : Number.POSITIVE_INFINITY
   const next = clamp(pb.currentTime + delta, 0, max)
   st.patchPlayback({ currentTime: next })
+  // позиция синхронизируется в библиотеку (fire-and-forget, только если запись есть)
+  if (st.user && pb.animeId !== null) {
+    const existing = st.library.find((e) => e.animeId === pb.animeId)
+    if (existing) {
+      void avcApi
+        .putLibrary({ animeId: pb.animeId, title: existing.title, positionSec: Math.round(next) })
+        .then((entry) => {
+          if (entry) upsertLibraryEntry(entry)
+        })
+        .catch(() => undefined)
+    }
+  }
   return ok(`${delta > 0 ? 'Вперёд' : 'Назад'} на ${Math.abs(seconds)} с`)
+}
+
+function executeMuteUnmute(cmd: VoiceCommand): CommandResult {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (cmd.type === VoiceCommandType.Mute) {
+    // запоминаем громкость для восстановления (0 не затирает прежнее значение)
+    st.setPrevVolume(pb.volume > 0 ? pb.volume : st.prevVolume)
+    st.patchPlayback({ volume: 0 })
+    return ok('Звук выключен')
+  }
+  const v = st.prevVolume > 0 ? st.prevVolume : 70
+  st.patchPlayback({ volume: v })
+  return ok(`Громкость ${v}%`)
 }
 
 function executeVolume(cmd: VoiceCommand): CommandResult {
@@ -528,6 +921,21 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
     case VoiceCommandType.ShowHelp:
       useAvcStore.getState().setHelpOpen(true)
       return ok('Открываю справку')
+    case VoiceCommandType.Mute:
+    case VoiceCommandType.Unmute:
+      return executeMuteUnmute(cmd)
+    case VoiceCommandType.SetWatchStatus:
+      return executeSetWatchStatus(cmd)
+    case VoiceCommandType.ToggleFavorite:
+      return executeToggleFavorite(cmd)
+    case VoiceCommandType.ContinueWatching:
+      return executeContinueWatching()
+    case VoiceCommandType.ShowLibrary: {
+      useAvcStore.getState().setLibraryOpen(true)
+      return ok('Библиотека открыта')
+    }
+    case VoiceCommandType.AddVoiceAlias:
+      return executeAddVoiceAlias(cmd)
     case VoiceCommandType.Unknown:
       return fail('Команда не распознана')
     default:
@@ -574,9 +982,45 @@ export async function executeText(
   initial.resetPipeline()
   step('RAW', raw)
 
+  // --- подтверждение озвучки ДО парсинга: «...анилибрию?» → «да» ---------------
+  const vc = useAvcStore.getState().voiceConfirm
+  if (vc) {
+    const t = simpleNormalize(raw)
+    const isYes = CONFIRM_YES.has(t)
+    const isNo = CONFIRM_NO.has(t)
+    if (isYes || isNo) {
+      const result = isYes
+        ? ok(`Озвучка: ${vc.match.name} (${Math.round(vc.match.confidence * 100)}%)`)
+        : ok('Отменено')
+      step('RESULT', `✓ ${result.message}`)
+      if (isYes) confirmVoiceMatch()
+      else cancelVoiceMatch()
+      const st = useAvcStore.getState()
+      st.setLastExecuted({ raw, result })
+      st.setVoiceMessage(result.message)
+      return { raw, normalized: raw, commands: [], results: [result] }
+    }
+    // любой другой текст: снимаем подтверждение и продолжаем обычный парсинг,
+    // чтобы диалог не «застревал» (исправление можно произнести сразу)
+    cancelVoiceMatch()
+    step('RESULT', '✓ Подтверждение отменено — выполняю команду')
+  }
+
   const context = getBrowserContext()
   const parsed = parseCommand(raw, context)
   step('NORMALIZED', parsed.normalized || raw)
+
+  // --- анти-дубль: та же команда подряд в пределах 2.5 с — пропустить (баг #12) ---
+  const hash = (parsed.normalized || raw).trim().toLowerCase()
+  const now = Date.now()
+  if (lastCommand && lastCommand.hash === hash && now - lastCommand.ts < DEBOUNCE_MS) {
+    const skip = ok('Дубликат команды пропущен')
+    step('RESULT', '✓ Дубликат команды пропущен')
+    const st = useAvcStore.getState()
+    st.setLastExecuted({ raw, result: skip })
+    st.setVoiceMessage(skip.message)
+    return { raw, normalized: parsed.normalized, commands: [], results: [skip] }
+  }
 
   let commands = parsed.commands
   let usedLlm = false
@@ -634,6 +1078,10 @@ export async function executeText(
       }
     }
   }
+
+  // Успешные И проваленные команды обновляют ts: «пауза пауза» подряд — дубль,
+  // но с интервалом больше DEBOUNCE_MS та же команда выполняется снова
+  lastCommand = { hash, ts: Date.now() }
 
   const final = results[results.length - 1]
   if (!final.success) {

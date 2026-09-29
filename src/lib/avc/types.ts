@@ -49,6 +49,13 @@ export enum VoiceCommandType {
   ShowEpisodes = 'ShowEpisodes',
   ShowHelp = 'ShowHelp',
   SelectOption = 'SelectOption', // выбор варианта из списка найденного (1..N)
+  Mute = 'Mute',
+  Unmute = 'Unmute',
+  SetWatchStatus = 'SetWatchStatus', // «добавь в смотрю / в планы / просмотрено / брошено / отложено»
+  ToggleFavorite = 'ToggleFavorite', // «добавь в избранное» / «убери из избранного»
+  ContinueWatching = 'ContinueWatching', // «продолжить просмотр»
+  ShowLibrary = 'ShowLibrary', // «открой библиотеку»
+  AddVoiceAlias = 'AddVoiceAlias', // «добавь "ани либрия" как команду для AniLibria»
   Unknown = 'Unknown',
 }
 
@@ -82,6 +89,42 @@ export type SiteSectionId =
   | 'schedule'
   | 'top100'
   | 'random'
+
+// ---------------------------------------------------------------------------
+// Аккаунт и библиотека (статусы просмотра)
+// ---------------------------------------------------------------------------
+
+export type WatchStatus = 'watching' | 'planned' | 'completed' | 'dropped' | 'on_hold'
+
+export const WATCH_STATUS_LABELS: Record<WatchStatus, string> = {
+  watching: 'Смотрю',
+  planned: 'В планах',
+  completed: 'Просмотрено',
+  dropped: 'Брошено',
+  on_hold: 'Отложено',
+}
+
+/** Запись библиотеки, как её отдаёт/принимает /api/library */
+export interface LibraryEntryDto {
+  animeId: number
+  title: string
+  slug: string | null
+  poster: string | null
+  status: WatchStatus
+  favorite: boolean
+  /** Последняя открытая серия */
+  episode: number | null
+  /** Сохранённая позиция в секундах (виртуальный таймлайн) */
+  positionSec: number | null
+  totalEpisodes: number | null
+  currentDub: string | null
+  updatedAt: string
+}
+
+export interface UserInfoDto {
+  id: string
+  username: string
+}
 
 export interface PlaybackContext {
   animeId: number | null
@@ -173,6 +216,7 @@ export interface PipelineStep {
 }
 
 export type VoiceMode = 'push-to-talk' | 'always-listening'
+export type SttEngine = 'auto' | 'browser' | 'server'
 
 export interface AppSettings {
   baseUrl: string
@@ -188,6 +232,18 @@ export interface AppSettings {
   couchMode: boolean
   saveHistory: boolean
   llmFallback: boolean
+  // --- Микрофон и распознавание (улучшенный голосовой ввод) ---
+  /** Программное усиление микрофона 1..4 (WebAudio GainNode) */
+  micGain: number
+  /** Чувствительность VAD 0..100: выше = срабатывает от тише речи */
+  vadSensitivity: number
+  /** Какой движок STT использовать: авто / браузерный / серверный (Whisper) */
+  sttEngine: SttEngine
+  noiseSuppression: boolean
+  autoGainControl: boolean
+  echoCancellation: boolean
+  /** deviceId выбранного микрофона ('' = по умолчанию) */
+  micDeviceId: string
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -204,6 +260,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   couchMode: false,
   saveHistory: true,
   llmFallback: true,
+  micGain: 1,
+  vadSensitivity: 50,
+  sttEngine: 'auto',
+  noiseSuppression: true,
+  autoGainControl: true,
+  echoCancellation: true,
+  micDeviceId: '',
 }
 
 // ---------------------------------------------------------------------------
@@ -219,4 +282,32 @@ export interface BrowserTab {
   /** sectionId | query | slug */
   payload: Record<string, unknown>
   createdAt: number
+}
+
+// ---------------------------------------------------------------------------
+// Резолвер озвучек (Voice Provider Resolver) — пороги принятия решения
+// ---------------------------------------------------------------------------
+
+/** >= AUTO — переключаем молча */
+export const VOICE_CONFIDENCE_AUTO = 0.85
+/** >= ASK — спрашиваем подтверждение; ниже — отказ */
+export const VOICE_CONFIDENCE_ASK = 0.55
+
+export interface VoiceProviderMatch {
+  /** Название на сайте (как в dubs[].name) */
+  name: string
+  shortName: string
+  confidence: number
+  matchedVia: 'exact' | 'alias' | 'translit' | 'fuzzy'
+}
+
+/** Пользовательские алиасы озвучек (из БД) */
+export type VoiceAliasMap = Record<string, string[]> // нормализованное имя озвучки -> варианты
+
+/** Строка алиаса, как её отдаёт /api/aliases */
+export interface VoiceAliasRow {
+  id: string
+  targetType: string
+  targetName: string
+  alias: string
 }

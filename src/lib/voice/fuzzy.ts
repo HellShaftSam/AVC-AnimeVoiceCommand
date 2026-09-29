@@ -1,7 +1,10 @@
 /**
  * Fuzzy matching для нечёткого поиска аниме и озвучек (мастер-промпт #15).
  * Levenshtein distance + нормализация + сравнение по токенам.
+ * Task 8-b: добавлено сравнение фонетических ключей (транслит) —
+ * «ани либрия» и «AniLibria» дают близкие ключи 'anilibriya'/'anilibria'.
  */
+import { phoneticKey } from './phonetics'
 
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0
@@ -75,7 +78,16 @@ export function titleSimilarity(query: string, title: string): number {
   }
   const jaccard = inter / Math.max(qTokens.size, tTokens.size)
 
-  return Math.max(direct, contains, jaccard)
+  // фонетическое сравнение (транслит): «анилибрия» ~ «AniLibria»
+  let phonetic = 0
+  const qPh = phoneticKey(q)
+  const tPh = phoneticKey(t)
+  if (qPh && tPh) {
+    if (qPh === tPh) phonetic = 0.92
+    else phonetic = similarity(qPh, tPh)
+  }
+
+  return Math.max(direct, contains, jaccard, phonetic)
 }
 
 export interface FuzzyMatch<T> {

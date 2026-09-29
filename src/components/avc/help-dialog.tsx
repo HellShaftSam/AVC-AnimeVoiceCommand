@@ -69,8 +69,40 @@ const GROUPS: CommandGroup[] = [
     ],
   },
   {
-    title: 'Озвучка',
-    items: ['озвучка anidub', 'перевод fronda', 'озвучка анимекон', 'дубляж'],
+    title: 'Звук',
+    items: ['выключи звук', 'убери звук', 'включи звук', 'верни звук'],
+  },
+  {
+    title: 'Перемотка',
+    items: [
+      'перемотай на 20 секунд',
+      'на 2 минуты назад',
+      'вперёд на полминуты',
+      'секунд 30 назад',
+      'сто двадцать секунд вперёд',
+    ],
+  },
+  {
+    title: 'Библиотека',
+    items: [
+      'добавь в смотрю',
+      'добавь в планы',
+      'просмотрено',
+      'брошено',
+      'отложи на потом',
+      'добавь в избранное / убери из избранного',
+      'продолжить просмотр',
+      'открой библиотеку',
+    ],
+  },
+  {
+    title: 'Озвучки',
+    items: [
+      'переключи на анилибрию',
+      'следующая озвучка',
+      'вторая озвучка',
+      'добавь X как команду для Y',
+    ],
   },
   {
     title: 'Вкладки',
@@ -83,6 +115,17 @@ const GROUPS: CommandGroup[] = [
       'вперед',
     ],
   },
+]
+
+const HOTKEYS: { keys: string; action: string }[] = [
+  { keys: 'Ctrl + Space', action: 'Диктовка (удерживать)' },
+  { keys: 'Space', action: 'Пауза / воспроизведение' },
+  { keys: '← / →', action: 'Перемотка на 10 секунд' },
+  { keys: 'Shift + ← / →', action: 'Перемотка на 30 секунд' },
+  { keys: '↑ / ↓', action: 'Громкость' },
+  { keys: 'N / P', action: 'Следующая / предыдущая серия' },
+  { keys: 'F', action: 'Полный экран' },
+  { keys: 'M', action: 'Выключить / включить звук' },
 ]
 
 export function HelpDialog() {
@@ -118,10 +161,30 @@ export function HelpDialog() {
           ))}
         </div>
 
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400/90">
+            Горячие клавиши
+          </h3>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {HOTKEYS.map((hk) => (
+              <li
+                key={hk.keys}
+                className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 px-2.5 py-1.5 text-xs"
+              >
+                <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-amber-300">
+                  {hk.keys}
+                </kbd>
+                <span className="text-zinc-400">{hk.action}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <p className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs leading-relaxed text-zinc-400">
           Если локальный парсер не уверен во фразе, включается LLM-fallback — команда будет
           понята гибче (отключается в Настройках → Приватность). Wake word: включите в
-          настройках, чтобы команды срабатывали только после слова-активатора.
+          настройках, чтобы команды срабатывали только после слова-активатора. При неуверенном
+          названии озвучки приложение переспросит перед переключением.
         </p>
       </DialogContent>
     </Dialog>

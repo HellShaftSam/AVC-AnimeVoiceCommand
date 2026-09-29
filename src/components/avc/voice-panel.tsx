@@ -44,6 +44,13 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   const listening = voiceStatus === 'listening'
   const pushToTalk = voiceMode === 'push-to-talk'
 
+  // Живой уровень микрофона 0..1 (обновляется ~10 раз/с, пока идёт listening)
+  const micLevelPct = Math.round(Math.min(1, Math.max(0, voice.micLevel)) * 100)
+  const levelColor =
+    micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-amber-400' : 'bg-rose-500'
+  const interim = listening && voice.interimText.trim() ? voice.interimText.trim() : null
+  const engineLabel = voice.browserEngine ? 'Браузер' : 'Сервер'
+
   const micHandlers = pushToTalk
     ? {
         onPointerDown: () => void voice.startPushToTalk(),
@@ -65,24 +72,40 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
       <div className="flex min-w-0 items-center gap-3">
-        <button
-          {...micHandlers}
-          disabled={!voice.isMicSupported}
-          aria-label={
-            pushToTalk
-              ? 'Микрофон: удерживайте для записи'
-              : 'Микрофон: переключить постоянное слушание'
-          }
-          aria-pressed={pushToTalk ? undefined : listening}
-          className={cn(
-            'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:opacity-40',
-            listening
-              ? 'animate-pulse border-rose-300/60 bg-rose-500 text-white shadow-[0_0_26px_rgba(244,63,94,0.55)]'
-              : 'border-amber-300/50 bg-amber-400 text-zinc-950 shadow-[0_0_18px_rgba(251,191,36,0.35)] hover:bg-amber-300',
-          )}
-        >
-          <Mic className="h-6 w-6" aria-hidden />
-        </button>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <button
+            {...micHandlers}
+            disabled={!voice.isMicSupported}
+            aria-label={
+              pushToTalk
+                ? 'Микрофон: удерживайте для записи'
+                : 'Микрофон: переключить постоянное слушание'
+            }
+            aria-pressed={pushToTalk ? undefined : listening}
+            className={cn(
+              'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:opacity-40',
+              listening
+                ? 'animate-pulse border-rose-300/60 bg-rose-500 text-white shadow-[0_0_26px_rgba(244,63,94,0.55)]'
+                : 'border-amber-300/50 bg-amber-400 text-zinc-950 shadow-[0_0_18px_rgba(251,191,36,0.35)] hover:bg-amber-300',
+            )}
+          >
+            <Mic className="h-6 w-6" aria-hidden />
+          </button>
+          {/* Уровень микрофона: zinc-600 < 30% < amber-400 < 70% < rose-500 */}
+          <div
+            className="h-1.5 w-14 overflow-hidden rounded-full bg-zinc-800"
+            role="meter"
+            aria-label="Уровень микрофона"
+            aria-valuenow={micLevelPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className={cn('h-full rounded-full transition-all duration-75', levelColor)}
+              style={{ width: `${micLevelPct}%` }}
+            />
+          </div>
+        </div>
         <div className="min-w-0 hidden sm:block">
           <div
             className={cn(
@@ -100,7 +123,19 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             ) : (
               statusLine(voiceStatus, voiceMessage)
             )}
+            {/* Бейдж фактического движка распознавания */}
+            <span
+              className="ml-1.5 inline-block rounded border border-zinc-700 px-1 py-px align-middle text-[10px] font-normal leading-4 text-zinc-500"
+              title="Движок распознавания"
+            >
+              {engineLabel}
+            </span>
           </div>
+          {interim && (
+            <div className="truncate text-xs italic text-zinc-400" aria-live="polite">
+              «{interim}»
+            </div>
+          )}
           <div
             className={cn(
               'truncate text-xs',

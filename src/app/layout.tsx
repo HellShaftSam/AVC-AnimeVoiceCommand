@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { InstallPwa } from "@/components/avc/install-pwa";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,9 +19,27 @@ export const metadata: Metadata = {
   description:
     "Голосовое управление аниме-сайтом: поиск, каталоги, серии, озвучки, плеер и вкладки — командами на русском языке.",
   keywords: ["аниме", "голосовое управление", "YummyAnime", "аниме онлайн", "плеер"],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+  applicationName: "AnimeVC",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "AnimeVC",
   },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f59e0b",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -35,6 +54,7 @@ export default function RootLayout({
       >
         {children}
         <Toaster />
+        <InstallPwa />
       </body>
     </html>
   );

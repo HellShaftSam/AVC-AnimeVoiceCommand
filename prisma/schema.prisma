@@ -39,3 +39,50 @@ model TabSession {
   active    Boolean  @default(false)
   updatedAt DateTime @updatedAt
 }
+
+// Пользователь (прототип: username + scrypt-хеш, сессия через подписанную cookie)
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  library      UserLibraryEntry[]
+  aliases      VoiceAlias[]
+}
+
+// Библиотека аниме пользователя (статусы просмотра, избранное, прогресс)
+model UserLibraryEntry {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  animeId        Int
+  title          String
+  slug           String?
+  poster         String?
+  status         String   @default("watching") // watching|planned|completed|dropped|on_hold
+  favorite       Boolean  @default(false)
+  episode        Int?
+  positionSec    Float?
+  totalEpisodes  Int?
+  currentDub     String?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, animeId])
+  @@index([userId, updatedAt])
+}
+
+// Пользовательские алиасы (озвучки/аниме/секции/команды) для голосового резолвера
+model VoiceAlias {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetType String   @default("voice") // voice | anime | section | command
+  targetName String   // напр. "AniLibria" (официальное имя на сайте)
+  alias      String   // напр. "ани либрия"
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, targetType, targetName, alias])
+}
+
+// regenerated for fresh client (task 9-b)

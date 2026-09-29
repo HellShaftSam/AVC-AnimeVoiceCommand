@@ -7,10 +7,14 @@
  * Диалоги: варианты поиска, настройки, справка, отладка, сессия.
  */
 import { useEffect, useState } from 'react'
+import { avcApi } from '@/lib/avc/api'
+import { AuthDialog } from '@/components/avc/auth-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
 import { HeaderBar } from '@/components/avc/header-bar'
 import { HelpDialog } from '@/components/avc/help-dialog'
 import { HistoryPanel } from '@/components/avc/history-panel'
+import { Hotkeys } from '@/components/avc/hotkeys'
+import { LibraryPanel } from '@/components/avc/library-panel'
 import { MiniPlayer } from '@/components/avc/mini-player'
 import { PendingOptionsDialog } from '@/components/avc/pending-options-dialog'
 import { QuickSections } from '@/components/avc/quick-sections'
@@ -18,6 +22,7 @@ import { SessionRestoreDialog } from '@/components/avc/session-restore-dialog'
 import { SettingsDialog } from '@/components/avc/settings-dialog'
 import { TabContent } from '@/components/avc/tab-content'
 import { TabsBar } from '@/components/avc/tabs-bar'
+import { VoiceConfirmDialog } from '@/components/avc/voice-confirm-dialog'
 import { VoicePanel } from '@/components/avc/voice-panel'
 import { useVoice } from '@/lib/avc/use-voice'
 import { useAvcStore } from '@/lib/avc/store'
@@ -47,6 +52,30 @@ export default function Page() {
         }
       })
       .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Загрузка профиля: пользователь + библиотека + алиасы (один раз при монтировании)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const me = await avcApi.me()
+        if (cancelled) return
+        const st = useAvcStore.getState()
+        st.setUser(me)
+        if (me) {
+          const [entries, aliases] = await Promise.all([avcApi.library(), avcApi.aliases()])
+          if (cancelled) return
+          st.setLibrary(entries)
+          st.setVoiceAliases(aliases)
+        }
+      } catch {
+        // сервер недоступен — работаем анонимно, без крэша
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -123,6 +152,10 @@ export default function Page() {
       <HelpDialog />
       {!couchMode && <DebugPanel />}
       <SessionRestoreDialog onResolved={() => setSessionResolved(true)} />
+      <VoiceConfirmDialog />
+      <AuthDialog />
+      <LibraryPanel />
+      <Hotkeys />
     </div>
   )
 }
