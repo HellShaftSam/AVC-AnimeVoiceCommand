@@ -24,6 +24,12 @@ import {
 import { avcApi } from './api'
 import type { PutLibraryPayload } from './api'
 import {
+  hasStickyActivation,
+  playerWindowAvailable,
+  sendPlayerCommand,
+  storeToPlayerVolume,
+} from './player-bridge'
+import {
   AnimeCard,
   AnimeDetails,
   BrowserContext,
@@ -716,9 +722,19 @@ function executePlayPause(cmd: VoiceCommand): Promise<CommandResult> {
     (cmd.type === VoiceCommandType.TogglePlayPause && !pb.isPlaying)
   if (wantPlay) {
     if (!pb.currentEpisode && pb.animeId) return playEpisode(1)
+    // РЕАЛЬНЫЙ запуск: player_play в iframe. Голосовая сессия уже дала документу
+    // «липкую» активацию (клик по микрофону/Ctrl+Space) + iframe has allow="autoplay"
+    // → play() со звуком легален без единого клика руками.
+    const sent = sendPlayerCommand({ key: 'player_play' })
     st.patchPlayback({ isPlaying: true })
-    return Promise.resolve(ok('Воспроизведение'))
+    if (sent && !hasStickyActivation()) {
+      // Единственный честный случай «не выходит без рук»: страница загружена,
+      // микрофон разрешён заранее, но ни одного жеста ещё не было.
+      toast({ description: 'Кликните один раз в любом месте — это разблокирует звук и голосовой запуск' })
+    }
+    return Promise.resolve(ok(sent ? 'Воспроизведение' : 'Воспроизведение (плеер не открыт)'))
   }
+  sendPlayerCommand({ key: 'player_pause' })
   st.patchPlayback({ isPlaying: false })
   return Promise.resolve(ok('Пауза'))
 }
@@ -731,6 +747,9 @@ function executeSeek(cmd: VoiceCommand): CommandResult {
   const max = pb.duration > 0 ? pb.duration : Number.POSITIVE_INFINITY
   const next = clamp(pb.currentTime + delta, 0, max)
   st.patchPlayback({ currentTime: next })
+  // РЕАЛЬНАЯ перемотка: player_seek принимает АБСОЛЮТНУЮ секунду (плеер сам
+  // клампит к длительности). currentTime в store — из событий плеера.
+  const sent = sendPlayerCommand({ key: 'player_seek', value: next })
   // позиция синхронизируется в библиотеку (fire-and-forget, только если запись есть)
   if (st.user && pb.animeId !== null) {
     const existing = st.library.find((e) => e.animeId === pb.animeId)
@@ -743,6 +762,9 @@ function executeSeek(cmd: VoiceCommand): CommandResult {
         .catch(() => undefined)
     }
   }
+  if (!sent && playerWindowAvailable()) {
+    return ok(`${delta > 0 ? 'Вперёд' : 'Назад'} на ${Math.abs(seconds)} с (плеер ещё загружается)`)
+  }
   return ok(`${delta > 0 ? 'Вперёд' : 'Назад'} на ${Math.abs(seconds)} с`)
 }
 
@@ -753,10 +775,12 @@ function executeMuteUnmute(cmd: VoiceCommand): CommandResult {
     // запоминаем громкость для восстановления (0 не затирает прежнее значение)
     st.setPrevVolume(pb.volume > 0 ? pb.volume : st.prevVolume)
     st.patchPlayback({ volume: 0 })
+    sendPlayerCommand({ key: 'player_set_volume', value: { muted: true, volume: 0 } })
     return ok('Звук выключен')
   }
   const v = st.prevVolume > 0 ? st.prevVolume : 70
   st.patchPlayback({ volume: v })
+  sendPlayerCommand({ key: 'player_set_volume', value: { muted: false, volume: storeToPlayerVolume(v) } })
   return ok(`Громкость ${v}%`)
 }
 
@@ -773,6 +797,7 @@ function executeVolume(cmd: VoiceCommand): CommandResult {
     volume = clamp(pb.volume + delta, 0, 100)
   }
   st.patchPlayback({ volume })
+  sendPlayerCommand({ key: 'player_set_volume', value: { volume: storeToPlayerVolume(volume) } })
   return ok(`Громкость ${volume}%`)
 }
 

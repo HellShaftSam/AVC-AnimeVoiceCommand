@@ -1,7 +1,8 @@
 'use client'
 /**
- * MiniPlayer — компактный плеер в нижней панели: инфо о тайтле + виртуальный
- * таймлайн, управление (prev/-10/play/+10/next), громкость + mute, fullscreen.
+ * MiniPlayer — компактный плеер в нижней панели: инфо о тайтле + реальный
+ * таймлайн (из событий плеера), управление (prev/-10/play/+10/next),
+ * громкость + mute, fullscreen. Команды идут через executor → player-bridge.
  */
 import {
   Loader2,
@@ -18,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { executeCommand } from '@/lib/avc/executor'
+import { sendPlayerCommand, storeToPlayerVolume } from '@/lib/avc/player-bridge'
 import { useAvcStore } from '@/lib/avc/store'
 import { VoiceCommandType } from '@/lib/avc/types'
 
@@ -64,7 +66,7 @@ export function MiniPlayer() {
           </span>
           {executing && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-amber-400" aria-hidden />}
         </div>
-        {/* Виртуальный таймлайн */}
+        {/* Реальный таймлайн из событий плеера */}
         <div className="mt-0.5 font-mono text-[11px] tabular-nums text-zinc-500">
           <span className="text-zinc-300">{fmtTime(currentTime)}</span>
           <span className="mx-1 text-zinc-600">/</span>
@@ -119,7 +121,13 @@ export function MiniPlayer() {
           aria-label="Громкость"
           onValueChange={(v: number[]) => {
             const val = Array.isArray(v) ? v[0] : volume
-            if (typeof val === 'number') patchPlayback({ volume: val })
+            if (typeof val === 'number') {
+              patchPlayback({ volume: val })
+              sendPlayerCommand({
+                key: 'player_set_volume',
+                value: { volume: storeToPlayerVolume(val), muted: false },
+              })
+            }
           }}
           className="w-full [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
         />

@@ -271,3 +271,51 @@ Work Log:
 
 Stage Summary:
 - Все 6 пунктов баг-репорта закрыты и проверены end-to-end в браузере: (1) автозапуск серии оверлеем, (2) аккаунт+библиотека статусов, (3) UI/PWA-Android manifest+иконки, (4) усиление/чувствительность микрофона+WAV 16к ASR, (5) перемотка ±10/±30/минуты голосом и клавишами, (6) Voice Provider Resolver с падежами/транслитом/алиасами/порогами 0.85-0.55 и обучением алиасам
+
+---
+Task ID: 11
+Agent: ZAI (main)
+Task: Голосовой запуск серии без клика — реальный протокол плеера Aksor (postMessage bridge)
+
+Work Log:
+- ИССЛЕДОВАНИЕ: скачал embed-страницу player.aksor.tv + бандл /assets/index-CRO05xQc.js, реверсом
+  нашёл ПОЛНЫЙ двусторонний API (валидатор di() + диспетчер te() в бандле):
+  * команды (объекты, не JSON-строки): {key:'player_play'}, {key:'player_pause'},
+    {key:'player_seek', value:<АБСОЛЮТНАЯ секунда>}, {key:'player_set_volume', value:{volume?:0..2, muted?:bool}},
+    {key:'player_set_source', value:{url,...}} (резерв)
+  * события в родителя: player_play, player_pause, player_video_started, kodik_player_video_ended,
+    kodik_player_time_update{value}, kodik_player_duration_update{value}, player_volume_change{value:{muted,volume 0..2}}
+  * причина бага: старый код слал выдуманные {type:'avc-play'} — парсер плеера требует e.key и молча игнорил
+- src/lib/avc/player-bridge.ts (НОВЫЙ): registerPlayerWindow/sendPlayerCommand/parsePlayerEvent
+  (строгий парсер-зеркало di()), storeToPlayerVolume/playerToStoreVolume (0..100 ↔ 0..2),
+  hasStickyActivation() через navigator.userActivation
+- src/components/avc/player.tsx: окно iframe регистрируется в мосту; window message listener
+  фильтрует e.source===contentWindow и льёт РЕАЛЬНОЕ состояние в store (isPlaying, currentTime,
+  duration, volume); АВТО-СТАРТ серии: при url-изменении, если есть sticky activation
+  (клик по микрофону/Ctrl+Space/'Разрешить' — всегда есть в голосовой сессии), шлём player_play
+  через 0.7с и 2с; оверлей «Скажите „запусти“ или нажмите» выводится из dismissedUrl!==url (без
+  setState в эффекте), снимается голосом/кликом/автоматом по событию player_play; ctrl() упрощён
+  (одна точка входа — executor); слайдер громкости шлёт player_set_volume
+- src/lib/avc/executor.ts: executePlayPause → player_play/player_pause (+тост-подсказка при
+  отсутствии sticky activation — единственный честный случай клика), executeSeek → player_seek
+  (абсолютная цель из реального currentTime), executeMuteUnmute/executeVolume → player_set_volume
+- src/lib/voice/aliases.ts: Play-триггеры + 'запусти', 'запуск', 'плей', 'играй' (однословные —
+  только точное совпадение, 'запусти пятую серию' остаётся SelectEpisode через OPEN_TRIGGERS)
+- help-dialog.tsx: «запусти — старт серии голосом, без клика»; mini-player.tsx: реальный таймлайн,
+  слайдер громкости через мост
+- E2E Agent Browser: «найди берсерка»→«первый»→«Включить серию 1» → оверлей → клик → плеер РЕАЛЬНО
+  играет (seek-слайдер плеера 3.1с, его кнопка Play→Pause); «пауза» голосом → реальная пауза
+  (время замерло, кнопка →Play); «запусти» → Play, время пошло; «перемотай вперед на 30 секунд» →
+  реальный скачок в плеере (25с+30с≈66с); «выключи звук» → кнопка плеера сменилась на Unmute;
+  наш таймлайн 1:17/23:36 и 1:33/23:36 — живое время/длительность из kodik_player_* событий
+  (23:36 = 1416с из API); мобильный 390px футер ок; dev.log/console/errors чисто; lint+tsc 0 ошибок
+
+Stage Summary:
+- Серия запускается БЕЗ РУК: открытие серии при активной голосовой сессии стартует автоматически
+  (sticky activation от клика микрофона + allow="autoplay" → легальный play() со звуком в
+  кросс-доменном iframe); голосом работают ВООБЩЕ ВСЕ функции плеера: запуск/пауза/перемотка
+  (±секунды/минуты)/громкость/mute — не виртуальные тумблеры, а реальные команды Aksor;
+  таймлайн и длительность теперь фактические (события плеера), а не выдуманные
+- Ограничение задокументировано честно: если пользователь ни разу не кликнул/не нажал клавишу
+  в этой сессии (микрофон разрешён заранее, always-listening сам стартовал), браузер запрещает
+  звук — в этом случае тост подскажет один клик, после которого весь сеанс снова без рук

@@ -1,21 +1,31 @@
 'use client'
 /**
  * Player — iframe-плеер с overlay-управлением: prev/-30/-10/play/+10/+30/next,
- * таймлайн (виртуальный), громкость + mute, полный экран.
+ * таймлайн (реальный, из событий плеера), громкость + mute, полный экран.
  *
  * Особенности:
  *  - Один и тот же iframe сохраняется при переходе в fullscreen (меняются только
  *    CSS-классы контейнера).
- *  - Overlay «Нажмите, чтобы запустить»: браузеры блокируют автозапуск со звуком —
- *    один клик по overlay снимает его БЕЗ перезагрузки iframe (локальный state,
- *    сбрасывается при смене url).
- *  - postMessage best-effort (tryPost): шлём свои команды внутрь iframe на случай,
- *    если сторонний плеер их поддержит. Никогда не блокирует выполнение команды.
+ *  - РЕАЛЬНЫЙ протокол управления (player-bridge.ts): команды player_play/pause/
+ *    seek/set_volume внутрь iframe + события плеера (время, длительность,
+ *    громкость, старт/пауза) обратно в store. Таймлайн и isPlaying — не выдумка,
+ *    а фактическое состояние плеера.
+ *  - АВТО-ЗАПУСК СЕРИИ: после открытия новой серии, если у документа есть
+ *    «липкая» user activation (голосовая сессия всегда даёт её — клик по кнопке
+ *    микрофона или Ctrl+Space), шлём player_play автоматически через 0.7с/2с.
+ *    Серия стартует БЕЗ единого клика; при успехе плеер присылает player_play
+ *    и оверлей снимается сам.
+ *  - Overlay «Скажите „запусти“ или нажмите»: показывается, пока плеер не
+ *    подтвердил старт. Снимается ТРЕМЯ способами: (1) голосом — «запусти»;
+ *    (2) кликом (традиционный путь); (3) автоматически, когда пришло событие
+ *    старта от плеера. Если активации ещё нет — голосовой запуск подскажет
+ *    кликнуть один раз (тост), после чего весь оставшийся сеанс — без рук.
  */
 import { useEffect, useRef, useState } from 'react'
 import {
   Loader2,
   Maximize,
+  Mic,
   Minimize,
   Pause,
   Play,
@@ -29,6 +39,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { executeCommand } from '@/lib/avc/executor'
+import {
+  hasStickyActivation,
+  parsePlayerEvent,
+  playerToStoreVolume,
+  registerPlayerWindow,
+  sendPlayerCommand,
+  storeToPlayerVolume,
+} from '@/lib/avc/player-bridge'
 import { useAvcStore } from '@/lib/avc/store'
 import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
@@ -57,12 +75,85 @@ export function Player() {
   const executing = useAvcStore((s) => s.voiceStatus === 'executing')
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  /** Overlay автозапуска: показывается для каждой новой серии, скрывается кликом */
-  const [startOverlay, setStartOverlay] = useState(false)
+  /** URL серии, для которой старт-оверлей уже снят (голосом/кликом/событием плеера).
+   *  Новый url → dismissedUrl !== url → оверлей появляется сам, без эффекта. */
+  const [dismissedUrl, setDismissedUrl] = useState<string | null>(null)
+  const startOverlay = Boolean(url) && url !== dismissedUrl
+  /** Подтверждён ли старт (событие от плеера) — для авто-попыток */
+  const startedRef = useRef(false)
 
-  // Новая серия → снова показываем overlay автозапуска
+  /** Снять оверлей для текущей серии */
+  const dismissOverlay = (why: 'click' | 'player-event'): void => {
+    setDismissedUrl(useAvcStore.getState().playerIframeUrl)
+    if (why === 'click') {
+      // реальный клик даёт активацию → play() со звуком разрешён
+      sendPlayerCommand({ key: 'player_play' })
+    }
+  }
+
+  // Регистрируем окно плеера в мосту (executor шлёт команды через мост)
   useEffect(() => {
-    setStartOverlay(Boolean(url))
+    if (iframeRef.current?.contentWindow) {
+      registerPlayerWindow(iframeRef.current.contentWindow)
+    }
+    return () => registerPlayerWindow(null)
+  }, [url])
+
+  // РЕАЛЬНЫЕ события плеера → store (время, длительность, громкость, старт/пауза)
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      // только сообщения именно от нашего iframe (не от рекламных и т.п.)
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return
+      const ev = parsePlayerEvent(e.data)
+      if (!ev) return
+      const st = useAvcStore.getState()
+      switch (ev.key) {
+        case 'player_play':
+        case 'player_video_started':
+          startedRef.current = true
+          st.patchPlayback({ isPlaying: true })
+          setDismissedUrl(st.playerIframeUrl) // старт подтверждён — оверлей снимается сам
+          break
+        case 'player_pause':
+          st.patchPlayback({ isPlaying: false })
+          break
+        case 'kodik_player_video_ended':
+          startedRef.current = true
+          st.patchPlayback({ isPlaying: false })
+          setDismissedUrl(st.playerIframeUrl)
+          break
+        case 'kodik_player_time_update':
+          st.patchPlayback({ currentTime: ev.value })
+          break
+        case 'kodik_player_duration_update':
+          st.patchPlayback({ duration: ev.value })
+          break
+        case 'player_volume_change':
+          st.patchPlayback({ volume: playerToStoreVolume(ev.value.volume) })
+          break
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  // Новая серия → АВТО-ЗАПУСК (без клика, если активация уже есть)
+  useEffect(() => {
+    startedRef.current = false
+    if (!url) return
+    // Голосовая сессия всегда даёт «липкую» активацию (клик по микрофону /
+    // Ctrl+Space / «Разрешить») → play() со звуком в iframe легален без клика.
+    const tryAutoStart = () => {
+      if (startedRef.current) return
+      if (!hasStickyActivation()) return // нет активации — ждём оверлей/голос
+      sendPlayerCommand({ key: 'player_play' })
+    }
+    const t1 = window.setTimeout(tryAutoStart, 700) // плеер успел инициализироваться
+    const t2 = window.setTimeout(tryAutoStart, 2000) // страховка (медленная загрузка)
+    return () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+    }
   }, [url])
 
   // Esc — выход из полного экрана
@@ -75,53 +166,8 @@ export function Player() {
     return () => window.removeEventListener('keydown', onKey)
   }, [fullscreen, setFullscreen])
 
-  /** postMessage внутрь iframe — best-effort, в try/catch (плеер может не поддерживать) */
-  const tryPost = (msg: Record<string, unknown>) => {
-    const win = iframeRef.current?.contentWindow
-    if (!win) return
-    try {
-      win.postMessage(JSON.stringify(msg), '*')
-    } catch {
-      // ignore — кросс-доменный iframe может запретить postMessage
-    }
-  }
-
-  const ctrl = (
-    type: VoiceCommandType,
-    params: Record<string, string | number | boolean> = {},
-  ): void => {
-    // best-effort: попробуем донести команду до плеера напрямую
-    const sec = Number(params.seconds ?? 0)
-    switch (type) {
-      case VoiceCommandType.SeekForward:
-        tryPost({ type: 'avc-seek', seconds: sec || 10 })
-        break
-      case VoiceCommandType.SeekBackward:
-        tryPost({ type: 'avc-seek', seconds: -(sec || 10) })
-        break
-      case VoiceCommandType.Play:
-        tryPost({ type: 'avc-play' })
-        break
-      case VoiceCommandType.Pause:
-        tryPost({ type: 'avc-pause' })
-        break
-      case VoiceCommandType.TogglePlayPause:
-        tryPost(isPlaying ? { type: 'avc-pause' } : { type: 'avc-play' })
-        break
-      case VoiceCommandType.Mute:
-        tryPost({ type: 'avc-volume', volume: 0 })
-        break
-      case VoiceCommandType.Unmute: {
-        const st = useAvcStore.getState()
-        tryPost({ type: 'avc-volume', volume: st.playback.volume > 0 ? st.playback.volume : 70 })
-        break
-      }
-      case VoiceCommandType.SetVolume:
-        tryPost({ type: 'avc-volume', volume: Number(params.volume ?? volume) })
-        break
-      default:
-        break
-    }
+  /** Кнопки управления: одна точка входа — executor (он шлёт команды через мост) */
+  const ctrl = (type: VoiceCommandType, params: Record<string, string | number | boolean> = {}): void => {
     void executeCommand({ type, params, confidence: 1, label: '' })
   }
 
@@ -165,24 +211,21 @@ export function Player() {
           </div>
         )}
 
-        {/* Overlay автозапуска: браузеры блокируют автоплей со звуком.
-            Клик снимает overlay локальным state — iframe НЕ перезагружается. */}
+        {/* Overlay запуска: виден, пока плеер не подтвердил старт. Снимается
+            голосом («запусти» → player_play → событие player_play от плеера),
+            кликом или автоматически при успешном авто-старте. iframe НЕ
+            перезагружается ни в одном из вариантов. */}
         {url && startOverlay && (
           <div
             className="absolute inset-0 z-10 flex cursor-pointer flex-col items-center justify-center gap-4 bg-black/60 backdrop-blur-sm"
-            onClick={() => {
-              setStartOverlay(false)
-              // best-effort: попросим плеер начать воспроизведение
-              tryPost({ type: 'avc-play' })
-            }}
+            onClick={() => dismissOverlay('click')}
             role="button"
             tabIndex={0}
             aria-label="Запустить серию"
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                setStartOverlay(false)
-                tryPost({ type: 'avc-play' })
+                dismissOverlay('click')
               }
             }}
           >
@@ -199,10 +242,13 @@ export function Player() {
             </button>
             <div className="px-6 text-center">
               <p className="text-base font-semibold text-zinc-100 sm:text-lg">
-                Нажмите, чтобы запустить
+                Скажите «запусти» или нажмите
               </p>
-              <p className="mt-1 text-xs text-zinc-400 sm:text-sm">
-                Браузеры блокируют автозапуск со звуком — одного клика достаточно
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-zinc-400 sm:text-sm">
+                <Mic className="h-3.5 w-3.5 text-amber-300" aria-hidden />
+                {hasStickyActivation()
+                  ? 'Голосовой запуск активен — серия стартует автоматически'
+                  : 'Один клик (или старт микрофона) включает голосовое управление'}
               </p>
             </div>
           </div>
@@ -254,7 +300,7 @@ export function Player() {
           <SkipForward className="h-5 w-5" />
         </Button>
 
-        {/* Виртуальный таймлайн: currentTime / duration */}
+        {/* Реальный таймлайн из событий плеера (kodik_player_time_update/duration_update) */}
         <div className="ml-1 hidden items-center gap-1 font-mono text-xs tabular-nums text-zinc-400 md:flex">
           <span className="text-zinc-200">{fmtTime(currentTime)}</span>
           <span className="text-zinc-600">/</span>
@@ -282,6 +328,11 @@ export function Player() {
               const val = Array.isArray(v) ? v[0] : volume
               if (typeof val === 'number') {
                 useAvcStore.getState().patchPlayback({ volume: val })
+                // реальная громкость в плеер (0..2); mute сбрасываем
+                sendPlayerCommand({
+                  key: 'player_set_volume',
+                  value: { volume: storeToPlayerVolume(val), muted: false },
+                })
               }
             }}
             className="w-full [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
