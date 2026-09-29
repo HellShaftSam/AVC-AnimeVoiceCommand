@@ -43,6 +43,7 @@ import {
   hasStickyActivation,
   parsePlayerEvent,
   playerToStoreVolume,
+  pushPlayerVolume,
   registerPlayerWindow,
   sendPlayerCommand,
   storeToPlayerVolume,
@@ -81,6 +82,28 @@ export function Player() {
   const startOverlay = Boolean(url) && url !== dismissedUrl
   /** Подтверждён ли старт (событие от плеера) — для авто-попыток */
   const startedRef = useRef(false)
+  /** URL серии, для которой громкость уже протолкнута по событию плеера
+   *  (гарантия снятия persist-мьюта плеера — см. pushPlayerVolume) */
+  const volumePushedRef = useRef<string | null>(null)
+  /** Окно синхронизации громкости: открыто с момента смены серии до первого
+   *  проталкивания громкости приложения. Входящие player_volume_change в это
+   *  окно игнорируются: плеер при загрузке восстанавливает СВОЙ persist-мьют
+   *  и шлёт volume_change{muted:true, volume:0} — если его принять, store
+   *  станет 0, и наша же логика «уважать volume 0» закрепит чужой мьют.
+   *  После нашего push окно закрывается — реальные изменения громкости
+   *  пользователем в UI плеера принимаются как обычно. */
+  const volumeSyncOpenRef = useRef(true)
+
+  /** Гарантированное снятие собственного мьюта плеера: по первому событию
+   *  (в этот момент его видео-элемент u уже создан и команда не будет потеряна) */
+  const ensureVolumePushed = (): void => {
+    const st = useAvcStore.getState()
+    const currentUrl = st.playerIframeUrl
+    if (!currentUrl || volumePushedRef.current === currentUrl) return
+    volumePushedRef.current = currentUrl
+    pushPlayerVolume(st.playback.volume)
+    volumeSyncOpenRef.current = false
+  }
 
   /** Снять оверлей для текущей серии */
   const dismissOverlay = (why: 'click' | 'player-event'): void => {
@@ -113,6 +136,7 @@ export function Player() {
           startedRef.current = true
           st.patchPlayback({ isPlaying: true })
           setDismissedUrl(st.playerIframeUrl) // старт подтверждён — оверлей снимается сам
+          ensureVolumePushed() // снимаем persist-мьют плеера (если ещё не снят)
           break
         case 'player_pause':
           st.patchPlayback({ isPlaying: false })
@@ -124,11 +148,18 @@ export function Player() {
           break
         case 'kodik_player_time_update':
           st.patchPlayback({ currentTime: ev.value })
+          // страховка: если события play были пропущены (перезагрузка страницы,
+          // медленная инициализация) — первый timeupdate тоже гарантирует,
+          // что видео-элемент существует и громкость можно применить
+          ensureVolumePushed()
           break
         case 'kodik_player_duration_update':
           st.patchPlayback({ duration: ev.value })
           break
         case 'player_volume_change':
+          // в окне синхронизации старта серии игнорируем: это не выбор
+          // пользователя, а восстановление persist-мьюта плеера
+          if (volumeSyncOpenRef.current) break
           st.patchPlayback({ volume: playerToStoreVolume(ev.value.volume) })
           break
       }
@@ -140,12 +171,17 @@ export function Player() {
   // Новая серия → АВТО-ЗАПУСК (без клика, если активация уже есть)
   useEffect(() => {
     startedRef.current = false
+    volumePushedRef.current = null
+    volumeSyncOpenRef.current = true
     if (!url) return
     // Голосовая сессия всегда даёт «липкую» активацию (клик по микрофону /
     // Ctrl+Space / «Разрешить») → play() со звуком в iframe легален без клика.
     const tryAutoStart = () => {
       if (startedRef.current) return
       if (!hasStickyActivation()) return // нет активации — ждём оверлей/голос
+      // громкость — best-effort (плеер может быть ещё не готов), гарантия —
+      // ensureVolumePushed() по первому событию плеера
+      pushPlayerVolume(useAvcStore.getState().playback.volume)
       sendPlayerCommand({ key: 'player_play' })
     }
     const t1 = window.setTimeout(tryAutoStart, 700) // плеер успел инициализироваться

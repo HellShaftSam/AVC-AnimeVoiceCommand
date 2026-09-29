@@ -111,6 +111,28 @@ export function playerToStoreVolume(v2: number): number {
   return Math.round(Math.min(1, Math.max(0, v2 / 2)) * 100)
 }
 
+/**
+ * Протолкнуть громкость приложения в плеер (+ снять его собственный persist-мьют).
+ *
+ * Баг «плеер стартует на Mute»: Aksor хранит громкость/mute в СВОЁМ localStorage
+ * (aksor-player-volume / aksor-player-muted, пишутся при КАЖДОЙ установке W()) и
+ * восстанавливает их при каждом открытии серии. Один раз заглох — мьютится всегда.
+ * pushPlayerVolume(volume>0) перезаписывает эту память: {volume, muted:false};
+ * при volume===0 (пользователь сам замьютил) уважает выбор: {volume:0, muted:true}.
+ * Вызывать при старте серии: по таймерам авто-старта (best-effort — плеер может
+ * быть ещё не готов: его диспетчер делает if(!u) return) и ГАРАНТИРОВАННО по
+ * первому событию от плеера (см. player.tsx) — там u уже точно существует.
+ */
+export function pushPlayerVolume(volume100: number): boolean {
+  return sendPlayerCommand({
+    key: 'player_set_volume',
+    value: {
+      volume: storeToPlayerVolume(volume100),
+      muted: volume100 <= 0,
+    },
+  })
+}
+
 // --- пользовательская активация ---------------------------------------------------
 
 /**
