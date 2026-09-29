@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Настройки приложения (key-value): baseUrl сайта, голос, плеер и т.д.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// История голосовых команд (только текст, без аудио)
+model CommandHistoryEntry {
+  id         String   @id @default(cuid())
+  raw        String
+  normalized String
+  command    String
+  params     String   @default("{}")
+  confidence Float
+  success    Boolean
+  message    String?
+  source     String   @default("voice") // voice | text | gui | llm
+  createdAt  DateTime @default(now())
+}
+
+// Сохранённая сессия вкладок
+model TabSession {
+  id        String   @id @default(cuid())
+  position  Int
+  kind      String // home | section | search | anime | player
+  title     String
+  url       String   @default("")
+  payload   String   @default("{}") // JSON: sectionId / animeId / query / episode / dub
+  active    Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
