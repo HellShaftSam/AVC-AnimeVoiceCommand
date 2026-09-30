@@ -45,6 +45,7 @@ import {
   playerToStoreVolume,
   pushPlayerVolume,
   registerPlayerWindow,
+  requestPlayerTime,
   sendPlayerCommand,
   storeToPlayerVolume,
 } from '@/lib/avc/player-bridge'
@@ -93,6 +94,11 @@ export function Player() {
    *  После нашего push окно закрывается — реальные изменения громкости
    *  пользователем в UI плеера принимаются как обычно. */
   const volumeSyncOpenRef = useRef(true)
+  /** Дожим авто-старта: kodik может грузиться дольше наших таймеров 0.7с/2с —
+   *  первое ЖИВОЕ событие от плеера означает, что его диспетчер существует,
+   *  и play стоит повторить (ограничено счётчиком попыток). */
+  const autoRetryCountRef = useRef(0)
+  const autoRetryTimerRef = useRef<number | null>(null)
 
   /** Гарантированное снятие собственного мьюта плеера: по первому событию
    *  (в этот момент его видео-элемент u уже создан и команда не будет потеряна) */
@@ -103,6 +109,19 @@ export function Player() {
     volumePushedRef.current = currentUrl
     pushPlayerVolume(st.playback.volume)
     volumeSyncOpenRef.current = false
+  }
+
+  /** Повтор play по первому событию плеера (см. autoRetryCountRef) */
+  const retryAutoStart = (): void => {
+    if (startedRef.current || autoRetryCountRef.current >= 5) return
+    autoRetryCountRef.current += 1
+    if (autoRetryTimerRef.current !== null) window.clearTimeout(autoRetryTimerRef.current)
+    autoRetryTimerRef.current = window.setTimeout(() => {
+      autoRetryTimerRef.current = null
+      if (startedRef.current || !hasStickyActivation()) return
+      pushPlayerVolume(useAvcStore.getState().playback.volume)
+      sendPlayerCommand({ key: 'player_play' })
+    }, 400)
   }
 
   /** Снять оверлей для текущей серии */
@@ -130,6 +149,9 @@ export function Player() {
       const ev = parsePlayerEvent(e.data)
       if (!ev) return
       const st = useAvcStore.getState()
+      // плеер мог загрузиться позже таймеров авто-старта — первое живое событие
+      // гарантирует существование его диспетчера: дожимаем play
+      if (!startedRef.current) retryAutoStart()
       switch (ev.key) {
         case 'player_play':
         case 'player_video_started':
@@ -156,6 +178,10 @@ export function Player() {
         case 'kodik_player_duration_update':
           st.patchPlayback({ duration: ev.value })
           break
+        case 'player_user_seek':
+          // пользователь перемотал в UI самого плеера — синхронизируем таймлайн
+          st.patchPlayback({ currentTime: ev.value })
+          break
         case 'player_volume_change':
           // в окне синхронизации старта серии игнорируем: это не выбор
           // пользователя, а восстановление persist-мьюта плеера
@@ -173,6 +199,11 @@ export function Player() {
     startedRef.current = false
     volumePushedRef.current = null
     volumeSyncOpenRef.current = true
+    autoRetryCountRef.current = 0
+    if (autoRetryTimerRef.current !== null) {
+      window.clearTimeout(autoRetryTimerRef.current)
+      autoRetryTimerRef.current = null
+    }
     if (!url) return
     // Голосовая сессия всегда даёт «липкую» активацию (клик по микрофону /
     // Ctrl+Space / «Разрешить») → play() со звуком в iframe легален без клика.
@@ -184,11 +215,27 @@ export function Player() {
       pushPlayerVolume(useAvcStore.getState().playback.volume)
       sendPlayerCommand({ key: 'player_play' })
     }
+    // Seek-kick для KODIK: его state machine может не создать видео-элемент
+    // от одного play() (эмпирика: до первого seek метод get_time отвечает
+    // undefined, а ПЕРВЫЙ же seek мгновенно даёт video_started). Если к 3.8с
+    // старт так и не подтверждён — толкаем микро-seek (+0.2с) и play ещё раз.
+    // У aksor безвредно: там startedRef давно true, и kick не выполняется.
+    const tryKickStart = () => {
+      if (startedRef.current) return
+      if (!hasStickyActivation()) return
+      const pb = useAvcStore.getState().playback
+      sendPlayerCommand({ key: 'player_seek', value: Math.max(0, pb.currentTime) + 0.2 })
+      sendPlayerCommand({ key: 'player_play' })
+    }
     const t1 = window.setTimeout(tryAutoStart, 700) // плеер успел инициализироваться
     const t2 = window.setTimeout(tryAutoStart, 2000) // страховка (медленная загрузка)
+    const t3 = window.setTimeout(tryKickStart, 3800) // kodik: создать видео и стартовать
+    const t4 = window.setTimeout(tryKickStart, 5500) // kodik: страховка kick'а
     return () => {
       window.clearTimeout(t1)
       window.clearTimeout(t2)
+      window.clearTimeout(t3)
+      window.clearTimeout(t4)
     }
   }, [url])
 
@@ -201,6 +248,17 @@ export function Player() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [fullscreen, setFullscreen])
+
+  // Поллинг точного времени (get_time → kodik_player_time): kodik шлёт
+  // time_update только при увеличении времени — после перемотки назад его
+  // таймлайн без поллинга «замер» бы до догната. Для aksor безвредно.
+  useEffect(() => {
+    if (!url || !isPlaying) return
+    const id = window.setInterval(() => {
+      requestPlayerTime()
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [url, isPlaying])
 
   /** Кнопки управления: одна точка входа — executor (он шлёт команды через мост) */
   const ctrl = (type: VoiceCommandType, params: Record<string, string | number | boolean> = {}): void => {

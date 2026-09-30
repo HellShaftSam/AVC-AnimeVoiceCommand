@@ -357,3 +357,53 @@ Stage Summary:
   приложение проталкивает в плеер громкость из настроек и снимает persist-мьют (однократно
   вылечив его и на будущее); если пользователь сам замьютил голосом — его выбор уважается,
   «включи звук» возвращает громкость
+
+---
+Task ID: 13
+Agent: ZAI (main)
+Task: «Не работает перемотка серий в плеере kodik, а громкость/пауза работают» — мультипротокольный player bridge
+
+Work Log:
+- ДИАГНОСТИКА: YummyAnime отдаёт серии через НЕСКОЛЬКО плееров: player.aksor.tv (протокол Task 11/12),
+  kodikplayer.com (озвучки Amber/ConeVoice/INSOMNIA/Swimming Cat и др.), alloha.yani.tv, video.sibnet.ru,
+  ru.yummyani.me/iframeCVH.html. Kodik МОЛЧА игнорирует aksor-команды {key:'player_seek'} и пр. —
+  «работа» громкости/паузы была оптической иллюзией optimistic-обновлений store (реальный плеер их не получал).
+- РЕВЕРС БАНДЛА KODIK (app.player_single.9abf69e8....js) + ЖИВЫЕ postMessage-тесты в E2E:
+  * команды ТОЛЬКО через конверт {key:'kodik_player_api', value:{method:...}}: play (до загрузки плеера
+    запускает загрузку — fallback p()), pause, seek {seconds: АБСОЛЮТНАЯ сек — проверено 10/60/70},
+    volume {0..1}, mute, unmute, speed {0.25..2}, get_time → ответ kodik_player_time (без монотонного фильтра)
+  * события: kodik_player_* (+ голое video_started), volume_change {volume:0..1, muted},
+    seek {time} — эхо перемотки из UI плеера; time_update шлётся ТОЛЬКО при увеличении времени
+    (после отката назад молчит до «догона»)
+  * ШКАЛА ГРОМКОСТИ У ОБОИХ 0..1 (aksor: set 0.7 → эхо {volume:0.7}) — прежний «0..2 буст» фантом,
+    деление на 2 в playerToStoreVolume занижало громкость событий вдвое — УДАЛЕНО
+  * aksor принимает и конверт kodik_player_api (общий движок Kodik)
+- НАЙДЕН КОСЯК AUTO-СТАРТА: navigator.userActivation.hasStickyActivation НЕ СУЩЕСТВУЕТ (имя из черновика) —
+  реальное API hasBeenActive → hasStickyActivation() всегда false, авто-старт молча не работал НИКОГДА
+- src/lib/avc/player-bridge.ts (переписан): sendPlayerCommand шлёт КАЖДУЮ команду в ОБОИХ форматах
+  (aksor-ключи + kodik-конверт; каждый плеер исполняет свою, двойное исполнение идемпотентно);
+  parsePlayerEvent понимает оба протокола (+player_user_seek, get_time-ответы); requestPlayerTime();
+  шкалы 0..1; исправлен hasStickyActivation
+- src/components/avc/player.tsx: player_user_seek → синк таймлайна при перемотке в UI плеера;
+  get_time-поллинг 1с при isPlaying (компенсация монотонного фильтра kodik — таймлайн не «замерает»
+  после отката); retryAutoStart — дожим play по первому живому событию (kodik грузится дольше 0.7/2с);
+  seek-kick на 3.8с/5.5с — state machine kodik стартует от ПЕРВОГО seek (эмпирика: до seek get_time
+  отвечает undefined, после seek мгновенно video_started)
+- E2E (agent-browser, живые postMessage-замеры): AKSOR — авто-старт без клика, голосовые
+  пауза (время замерло 190.3=190.3)/запусти (190→193)/+30с (27.5→60.2)/-40с и -30с (178.8→156.2)/
+  громкость 50 (эхо 0.5)/выключи-включи звук (0→0.5 восстановление) — ВСЁ РЕАЛЬНОЕ;
+  KODIK — авто-старт с kick без клика (push 0.7 принят, video_started, оверлей снялся сам),
+  +30с → 51.45 точное эхо kodik_player_seek, -15с → 36.45, громкость 30 → эхо {volume:0.3},
+  mute/unmute голосом работают; get_time-поллинг живой; мобильный 390px футер ок;
+  lint+tsc (src) 0 ошибок; dev.log чист
+
+Stage Summary:
+- Перемотка/громкость/пауза/старт теперь работают на ОБОИХ семействах плееров (aksor + kodik):
+  мост переводит команды в оба проводных формата, события обоих нормализуются в store,
+  громкость 0..1 единая (заодно вылечено двойное занижение громкости при синке событий)
+- Попутно исправлен фатальный косяк авто-старта (hasBeenActive vs hasStickyActivation) —
+  серии стартуют по голосу реально, а не только в Theory™
+- Известные ограничения: alloha.yani.tv / video.sibnet.ru / iframeCVH.html — свои протоколы,
+  команды к ним по-прежнему не доставляются (кандидаты на отдельный Task); реальное ПРОИГРЫВАНИЕ
+  kodik в headless песочницы блокирует autoplay-политика (у пользователя с реальными кликами играет —
+  все команды/события верифицированы живыми замерами)
