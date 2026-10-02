@@ -407,3 +407,22 @@ Stage Summary:
   команды к ним по-прежнему не доставляются (кандидаты на отдельный Task); реальное ПРОИГРЫВАНИЕ
   kodik в headless песочницы блокирует autoplay-политика (у пользователя с реальными кликами играет —
   все команды/события верифицированы живыми замерами)
+
+---
+Task ID: github-save-1
+Agent: Z.ai Code (main)
+Task: Сохранение исходников — скачивание из приложения + подключение GitHub (HellShaftSam/AVC-AnimeVoiceCommand)
+
+Work Log:
+- Обнаружено: electron-app/ и /home/z/exe-build в этой среде ОТСУТСТВУЮТ (потеряны между сессиями); веб-часть src/ уцелела полностью
+- Проверено окружение: git 2.47.3 + .git (6 коммитов, remote нет), gh CLI отсутствует → выбран OAuth Device Flow (curl, client_id gh CLI 178c6fc778ccc68e1d6a, scope=repo)
+- Создан src/app/api/download-source/route.ts: zip исходников на лету (исключены node_modules/.next/.git/.env*/*.db/*.log/skills/upload/...), EXPORT_MANIFEST.txt внутри архива
+- HeaderBar: кнопка Download → /api/download-source (ghost icon, a11y-лейблы)
+- Проверено curl: HTTP 200, 394 KB, 176 файлов, секретов нет; agent-browser: кнопка в шапке рендерится, dev.log чистый, lint 0 ошибок
+- .gitignore дополнен (db/*.db, .zscripts/, upload/, tool-results/, download/, agent-ctx/); git rm --cached для runtime-файлов; коммит 68b9729
+- Запущен device flow: user_code A028-FBFA (15 мин) + фоновый poller (/tmp/.gh-device-status) + watcher: при успехе — credential store, remote origin → HellShaftSam/AVC-AnimeVoiceCommand, push -u origin main (статусы /tmp/.gh-push-status, .gh-push.log)
+
+Stage Summary:
+- Исходники теперь скачиваются кнопкой из шапки приложения в любой момент (zip ~400KB, без секретов)
+- GitHub-пуш автоматизируется сразу после ввода пользователем кода авторизации в браузере
+- electron-app/ (EXE-обёртка) потерян в этой среде — требует восстановления в отдельной задаче (в архив не попал, помечено в манифесте)
