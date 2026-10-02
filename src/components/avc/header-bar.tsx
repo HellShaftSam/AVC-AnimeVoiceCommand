@@ -19,6 +19,7 @@ import {
   LogIn,
   LogOut,
   Mic,
+  PackageOpen,
   RefreshCw,
   Settings,
 } from 'lucide-react'
@@ -241,6 +242,23 @@ export function HeaderBar() {
           onClick={() => setSettingsOpen(true)}
         >
           <Settings className="h-5 w-5" />
+        </Button>
+        {/* Скачать EXE-сборку (GitHub Releases, всегда последняя) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          aria-label="Скачать EXE для Windows (GitHub Releases)"
+          title="Скачать EXE для Windows (GitHub Releases)"
+          className="h-11 w-11"
+        >
+          <a
+            href="https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <PackageOpen className="h-5 w-5" />
+          </a>
         </Button>
         {/* Скачать исходники проекта (zip без секретов/мусора) */}
         <Button
