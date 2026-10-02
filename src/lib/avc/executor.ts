@@ -28,6 +28,7 @@ import {
   sendPlayerCommand,
   storeToPlayerVolume,
 } from './player-bridge'
+import { siteProfileUrl } from './site-urls'
 import {
   AnimeCard,
   AnimeDetails,
@@ -317,8 +318,9 @@ export async function openSiteProfile(): Promise<CommandResult> {
         : 'Вы не вошли в аккаунт YummyAnime',
     )
   }
-  const base = st.settings.baseUrl.replace(/\/+$/, '')
-  const url = acc.user.userId ? `${base}/users/id${acc.user.userId}` : `${base}/profile`
+  const base = st.settings.baseUrl
+  // /profile на сайте НЕТ (404): id → /users/id{N}, иначе главная (там форма «Вход»)
+  const url = siteProfileUrl(base, acc.user.userId)
   try {
     window.open(url, '_blank', 'noopener')
     return ok(`Профиль ${acc.user.username ?? ''} на сайте`)

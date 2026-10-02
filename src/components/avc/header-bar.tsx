@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { accountLogout, checkAccount, refreshAccount } from '@/lib/avc/executor'
+import { siteProfileUrl } from '@/lib/avc/site-urls'
 import { useAvcStore } from '@/lib/avc/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -159,11 +160,9 @@ export function HeaderBar() {
               <DropdownMenuSeparator className="bg-zinc-800" />
               <DropdownMenuItem
                 onClick={() => {
-                  const base = useAvcStore.getState().settings.baseUrl.replace(/\/+$/, '')
-                  const url = user.userId
-                    ? `${base}/users/id${user.userId}`
-                    : `${base}/profile`
-                  window.open(url, '_blank', 'noopener')
+                  const base = useAvcStore.getState().settings.baseUrl
+                  // /profile на сайте НЕТ (404): при известном id — /users/id{N}, иначе главная
+                  window.open(siteProfileUrl(base, user.userId), '_blank', 'noopener')
                 }}
                 className="gap-2"
               >

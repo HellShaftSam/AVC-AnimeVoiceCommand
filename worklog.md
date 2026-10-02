@@ -471,3 +471,22 @@ Stage Summary:
 - Аккаунт = реальная сессия YummyAnime; сайт — источник истины; кеш read-only с TTL
 - Контракт Electron-моста: main читает cookie yummyani.me из persistent webview-профиля → POST /api/yummy/session {cookie} (реализация в EXE-обёртке при её восстановлении)
 - Честные ограничения: избранное может быть недоступно (сайт не документировал формат) — показываем причину, не выдумываем данные; в веб-версии без Electron сессию подтвердить нельзя (browser не отдаёт чужие cookie) — это задокументировано в UI
+
+---
+Task ID: yummy-login-fix-1
+Agent: Z.ai Code (main)
+Task: Фикс «Не работает вход в аккаунт» — YummyAnime 404 при входе
+
+Work Log:
+- ДИАГНОЗ (живые curl-запросы): GET https://old.yummyani.me/login → 404, /profile → 404; сайт сам жив (главная 200). Отдельной страницы входа НЕТ — форма «Вход» ВСТРОЕНА в главную (form action="/login/" method=post + вход через Telegram/VK/Shikimori, /register=200)
+- Найдено 4 места с битыми URL: auth-dialog (открывал /login → 404 — жалоба пользователя), library-panel (открывал /profile → 404), header-bar и executor.openSiteProfile (fallback на /profile → 404)
+- СОЗДАН src/lib/avc/site-urls.ts: siteBase/siteProfileUrl/siteLoginUrl — единственный источник URL-правил сайта с документацией фактов (что 404, что 200)
+- auth-dialog ПЕРЕПИСАН: «Открыть сайт для входа» → главная сайта (форма «Вход» вверху); НОВОЕ: ручной мост cookie для web-версии (сворачиваемая секция: DevTools → Cookies → вставить строку → POST /api/yummy/session — сайт проверяет реально); инструкции обновлены; диалог сделал скроллируемым (max-h-85vh)
+- header-bar / library-panel / executor: /profile → siteProfileUrl(id → /users/id{N}, иначе главная)
+- ВЕРИФИКАЦИЯ (curl + agent-browser): POST /api/yummy/session с фейковым cookie → реальный сайт ответил 401 → state=sessionExpired с честным сообщением (полный путь cookie-моста работает); DELETE → loggedOut; клик «Открыть сайт для входа» → новая вкладка https://old.yummyani.me/ (200, заголовок сайта); мобильный 390px — диалог скроллится, все кнопки ≥44px; console errors 0; lint 0
+- Тестовые cookie после проверки удалены (DELETE /api/yummy/session)
+
+Stage Summary:
+- Вход в аккаунт починен: кнопка ведёт на РЕАЛЬНУЮ страницу с формой входа (главная сайта), а не на 404
+- Web-версия получила рабочий способ входа (ручная передача cookie с валидацией реальным сайтом); в EXE-сборке путь прежний — автоматический мост из webview (реализуется при восстановлении electron-app/)
+- Все 4 битых URL сайта исправлены через один хелпер site-urls.ts (без хардкода в компонентах)

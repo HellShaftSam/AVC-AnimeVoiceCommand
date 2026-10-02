@@ -12,6 +12,7 @@ import { BookOpen, ExternalLink, Heart, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { avcApi } from '@/lib/avc/api'
 import { continueWatchingFromLast, getLastWatched, openAnimeByRef } from '@/lib/avc/executor'
+import { siteProfileUrl } from '@/lib/avc/site-urls'
 import { useAvcStore } from '@/lib/avc/store'
 import type { YummyFavoriteItem, YummyFavoritesResult } from '@/lib/avc/types'
 import { Button } from '@/components/ui/button'
@@ -137,8 +138,17 @@ export function LibraryPanel() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Открыть избранное на сайте"
-              onClick={() => window.open('https://old.yummyani.me/profile', '_blank', 'noopener')}
+              aria-label="Открыть профиль и избранное на сайте"
+              onClick={() =>
+                window.open(
+                  siteProfileUrl(
+                    useAvcStore.getState().settings.baseUrl,
+                    account.state === 'loggedIn' ? account.user?.userId ?? null : null,
+                  ),
+                  '_blank',
+                  'noopener',
+                )
+              }
               className="h-9 w-9 text-zinc-400 hover:text-amber-300"
             >
               <ExternalLink className="h-4 w-4" aria-hidden />
