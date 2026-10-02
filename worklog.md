@@ -426,3 +426,23 @@ Stage Summary:
 - Исходники теперь скачиваются кнопкой из шапки приложения в любой момент (zip ~400KB, без секретов)
 - GitHub-пуш автоматизируется сразу после ввода пользователем кода авторизации в браузере
 - electron-app/ (EXE-обёртка) потерян в этой среде — требует восстановления в отдельной задаче (в архив не попал, помечено в манифесте)
+
+---
+Task ID: github-save-2
+Agent: Z.ai Code (main)
+Task: Завершение подключения GitHub — токен получен, пуш выполнен
+
+Work Log:
+- Первый device-код A028-FBFA истёк (фоновые процессы убиты между ходами; сессия headless)
+- Выпущен новый код 9AC5-F594; пользователь авторизовался; токен получен polling'ом в живой сессии
+- Credential store настроен (~/.git-credentials, chmod 600, токен нигде не выведен в чат)
+- Remote origin = https://github.com/HellShaftSam/AVC-AnimeVoiceCommand.git
+- Пуш отклонён: на remote был GitHub Initial commit (только README.md) → fetch + merge --allow-unrelated-histories, конфликт README решён в пользу проекта; push 630a08a..9f86d8a OK
+- SECURITY AUDIT: .env оказался в истории (с 1-го коммита, уехал на GitHub) — внутри только локальный путь SQLite (file:/home/z/my-project/db/custom.db), реальных секретов НЕТ; git rm --cached .env + push 187938b; форс-пуш истории НЕ делал (не требуется, нет секрета; по правилам — только с разрешения)
+- Финал: origin/main = 156 файлов, src/ + prisma/ + конфиги + worklog; local == remote (main...origin/main чисто)
+
+Stage Summary:
+- РЕПОЗИТОР ПОДКЛЮЧЁН И СИНХРОНИЗИРОВАН: https://github.com/HellShaftSam/AVC-AnimeVoiceCommand (private), ветка main, история сохранена
+- Теперь исходники можно тянуть/пушить напрямую: git pull / git push (credential store активен)
+- Кнопка скачивания zip в шапке приложения остаётся как резервный канал экспорта
+- В репозитории НЕТ electron-app/ (обёртка EXE потеряна в этой среде) — задача на восстановление отдельно
