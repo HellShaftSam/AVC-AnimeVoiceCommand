@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Линт гоняем отдельно (bun run lint); CI-сборка EXE не должна падать на стиле
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   reactStrictMode: false,
 };
 

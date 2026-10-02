@@ -23,6 +23,14 @@
     {
       "from": "../public",
       "to": "next-app/public"
+    },
+    {
+      "from": "../db",
+      "to": "db"
+    },
+    {
+      "from": "../node_modules/.prisma",
+      "to": "next-app/node_modules/.prisma"
     }
   ],
   "win": {

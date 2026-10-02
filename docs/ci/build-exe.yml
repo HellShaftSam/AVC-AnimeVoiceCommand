@@ -1,0 +1,107 @@
+name: Build Windows EXE
+
+# Автоматическая сборка portable EXE при каждом обновлении main.
+# Готовый файл публикуется в Releases:
+#   https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest
+# Ручной запуск: вкладка Actions → Build Windows EXE → Run workflow.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'worklog.md'
+      - 'upload/**'
+      - 'tool-results/**'
+      - 'download/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-exe-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # --- Next.js UI (standalone-сервер внутри EXE) ---
+
+      - name: Install UI dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Create runtime SQLite database
+        env:
+          # Относительно prisma/schema.prisma → <root>/db/custom.db
+          DATABASE_URL: 'file:../db/custom.db'
+        run: npx prisma db push --skip-generate --accept-data-loss
+
+      - name: Build Next.js (standalone)
+        env:
+          DATABASE_URL: 'file:../db/custom.db'
+        run: npm run build
+
+      # --- Electron-оболочка → portable EXE ---
+
+      - name: Install Electron shell dependencies
+        working-directory: electron-app
+        run: npm install --no-audit --no-fund
+
+      - name: Build portable EXE
+        working-directory: electron-app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          echo "Building AVC-Anime portable v$VERSION"
+          npx electron-builder --win portable --config electron-builder.json \
+            --config.extraMetadata.version="$VERSION" --publish never
+          ls -la dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVC-Anime-Portable-1.0.${{ github.run_number }}
+          path: electron-app/dist/*.exe
+          if-no-files-found: error
+
+      # --- Публикация в Releases (всегда доступно по /releases/latest) ---
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AVC-Anime EXE — build #${{ github.run_number }}
+          body: |
+            **Portable Windows EXE (x64)** — автоматическая сборка из коммита ${{ github.sha }}.
+
+            **Файл:** `AVC-Anime-Portable-1.0.${{ github.run_number }}.exe` (см. Assets ниже)
+
+            - Не требует установки: один EXE, данные — в профиле пользователя
+            - Встроенный Next.js UI (свой локальный сервер, интернет нужен для сайта)
+            - Постоянная сессия YummyAnime: вход один раз — на реальном сайте
+            - Голосовые команды (микрофон), история, алиасы — локально в SQLite
+            - Пароли и cookie никогда не покидают профиль сайта
+
+            Постоянная ссылка на последнюю сборку:
+            https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest
+          files: electron-app/dist/*.exe
+          fail_on_unmatched_files: true
+          make_latest: true

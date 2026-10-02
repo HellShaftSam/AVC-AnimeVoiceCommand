@@ -138,7 +138,8 @@ async function startNextServer() {
       PORT: String(port),
       HOSTNAME: '127.0.0.1',
       NODE_ENV: 'production',
-      DATABASE_URL: `file:${dbTarget}`,
+      // Windows-пути с "\" ломают file:-URL Prisma — всегда прямые слэши
+      DATABASE_URL: `file:${dbTarget.split(path.sep).join('/')}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
