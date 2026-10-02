@@ -52,6 +52,9 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Electron shell runtime (код electron-app коммитим, зависимости и сборку — нет)
+electron-app/node_modules/
+electron-app/dist/
 # runtime data (не в git)
 db/*.db
 db/*.db-*

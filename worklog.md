@@ -490,3 +490,47 @@ Stage Summary:
 - Вход в аккаунт починен: кнопка ведёт на РЕАЛЬНУЮ страницу с формой входа (главная сайта), а не на 404
 - Web-версия получила рабочий способ входа (ручная передача cookie с валидацией реальным сайтом); в EXE-сборке путь прежний — автоматический мост из webview (реализуется при восстановлении electron-app/)
 - Все 4 битых URL сайта исправлены через один хелпер site-urls.ts (без хардкода в компонентах)
+
+---
+Task ID: auth-frontend-1
+Agent: full-stack-developer
+Task: UI аутентификации по новой спеке (секции 4/15/16/20/22): auth-dialog без cookie-моста, diagnostics-dialog, точка входа в debug-panel
+
+Work Log:
+- Прочитаны worklog.md (последние записи) и AUTHENTICATION_AUDIT.md; сверены контракты: api.ts (getElectronBridge/avcApi), types.ts (YummyAccountSnapshot/YummyAuthSelfTestReport), store.ts (yummyAccount/setYummyAccount/authOpen), site-urls.ts (siteLoginUrl/siteBase) — файлы api/types/store/executor не тронуты
+- СТАРЫЙ auth-dialog.tsx изучен через git show HEAD (сохранил стиль: zinc-тема, amber-акценты, min-h-11, Dialog max-h-[85vh] sm:max-w-md)
+- auth-dialog.tsx ПЕРЕПИСАН (спека, секция 4): cookie-мост (ручная вставка cookie, ChevronDown-аккордеон, textarea) ПОЛНОСТЬЮ УДАЛЁН; мост определяется в useEffect (SSR-safe, без hasElectronBridge() в render)
+  * EXE-режим: большая amber-кнопка «Войти через YummyAnime» → avcApi.openLoginWindow() (busy: Loader2+disabled); пока окно открыто — status-строка «Открыто окно сайта — завершите вход там. Это окно закроется автоматически после входа.»; по резолву setYummyAccount(snap): loggedIn → toast «Вы вошли как {username}» + закрытие диалога, иначе → toast snap.message; вторичная outline-кнопка «Проверить аккаунт» → avcApi.verifyAuthentication() (тот же паттерн)
+  * Web-режим: честный блок «Постоянная сессия сайта живёт в EXE-сборке — в веб-режиме вход в аккаунт недоступен.» + «Открыть сайт для входа» (window.open(siteLoginUrl(baseUrl), '_blank', 'noopener')) + «Проверить» (avcApi.yummyAccount(true) → toast с сообщением снимка)
+  * Внизу мелкий текст о безопасности: пароли/cookie не хранятся, сессия — в постоянном профиле сайта
+- diagnostics-dialog.tsx СОЗДАН (спека, секция 20): Dialog sm:max-w-lg max-h-[85vh] overflow-y-auto, заголовок Stethoscope; шапка-<dl> без секретов: Сайт (hostname из settings.baseUrl), Сессия «Постоянная (EXE)/Недоступна (web)», Состояние (локализованные подписи шести состояний YummyAuthState), Пользователь, Профиль (доступен/нет/—), Последняя проверка (lastSync → toLocaleTimeString('ru-RU')), Сеть ONLINE/OFFLINE (navigator.onLine, цвет emerald/rose); снимок при открытии: useEffect(open) → avcApi.yummyAccount(false) в ЛОКАЛЬНЫЙ state (view = local ?? store)
+  * «Запустить тест аутентификации» (amber, min-h-11): avcApi.authSelfTest(); null (web) → toast «Диагностика доступна в EXE-сборке»; отчёт в состоянии компонента: ranAt + «Сеть оболочки», КРУПНЫЕ бейджи persistence/loginDetection/logoutDetection (PASS=emerald/FAIL=rose/SKIP=zinc/BLOCKED=amber), шаги: имя + бейдж статуса + detail
+  * «Сбросить сессию сайта» — ОПАСНОЕ действие (секция 22): двухшаговое подтверждение через AlertDialog (предупреждение об очистке профиля + бэкап); performReset: avcApi.resetYummySession() → resetResult-блок с message/backupPath + toast; web → null → toast «Сброс сессии доступен в EXE-сборке»; после сброса avcApi.yummyAccount(false) → setYummyAccount + локальная шапка
+- debug-panel.tsx: МИНИМАЛЬНЫЙ дифф — +1 import (DiagnosticsDialog), +1 иконка Activity, +1 state authDiagOpen, кнопка «Диагностика входа YummyAnime» (outline, min-h-11, Activity) в существующий ряд, DiagnosticsDialog рендерится sibling'ом Sheet'а (фрагмент, без вложенных порталов)
+- ВЕРИФИКАЦИЯ (bun run lint = 0 ошибок; tsc --noEmit — чисто по src/, ошибки только в несвязанных examples/ и skills/; agent-browser): web-режим — auth-dialog показывает честный блок БЕЗ cookie-UI, «Проверить» → toast «Постоянная сессия YummyAnime живёт в EXE-сборке…»; diagnostics: шапка (Сайт old.yummyani.me / Сессия Недоступна (web) / Состояние Недоступно / Сеть ONLINE), selftest → toast «Диагностика доступна в EXE-сборке», сброс → AlertDialog → toast «Сброс сессии доступен в EXE-сборке»; mobile 390px: оба диалога 358px, влезают без переполнения; console errors 0
+- rg "syncYummySession|yummyLogout\(|/api/yummy/session" src/components — 0 совпадений (cookie-мост вычищен из UI; avcApi.yummyLogout остаётся в api.ts/executor.ts по контракту, не в моих файлах)
+
+Stage Summary:
+- Вход через YummyAnime: пароль только на сайте в собственном окне; EXE — окно сайта через мост с busy/status-UX и авторезолвом после закрытия; web — честная недоступность + открытие сайта, cookie-мост удалён (запрет секций 15/16 соблюдён)
+- Диагностика входа (секция 20) доступна из отладочной панели: не-секретная шапка, selftest-отчёт с цветовыми бейджами, опасный сброс сессии за двухшаговым подтверждением с бэкапом (секция 22)
+- Контракт api.ts/types.ts/store.ts использован как есть (0 отклонений); компоненты SSR-safe (мост/сеть определяются в useEffect), адаптив 390px, aria-атрибуты на месте, тексты на русском
+
+---
+Task ID: auth-prod-1
+Agent: Z.ai Code (main)
+Task: Production-ready аутентификация YummyAnime — постоянная браузерная сессия (по 26-секционной спеке)
+
+Work Log:
+- АУДИТ → AUTHENTICATION_AUDIT.md (архитектура, интеграция, что менять/не менять). Прошлая схема (ручная вставка cookie → POST /api/yummy/session) УДАЛЕНА: запрещена секциями 15/16 (cookie не пересекают границу рендерера/API)
+- ВЕРИФИКАЦИЯ ЖИВОГО САЙТА: /login=404 (форма «Вход» встроена в главную), /api/profile 401/200, logout=.logout-btn→POST /api/profile/logout (из собственного JS сайта), маркеры #current_user_id/#user_nickname, success→location.reload(), ошибка «Неправильный логин!», hCaptcha #h-captcha. ЛОВУШКА: img static.yani.tv/users/ у гостя = аватары авторов озвучек (НЕ сигнал входа)
+- УДАЛЕНО: api/yummy/session route, session-store.ts, cookie-методы из adapter.ts; /api/yummy/account|favorites → честные web-ответы
+- СОЗДАНО electron-app/: auth/yummy-auth-adapter.cjs (ВСЯ детекция, секция 23), auth/authentication-service.cjs (машина состояний UNKNOWN/CHECKING/LOGGED_OUT/LOGIN_REQUIRED/LOGGING_IN/LOGGED_IN/SESSION_EXPIRED/ERROR; event-driven детекция did-navigate/dom-ready + safety-net 2s + timeout 5мин; капча/ошибка — мониторинг без обхода; logout через сайт + UI-fallback; favorites внутри сессии; resetSession с бэкапом профиля), auth/account-store.cjs (не-секретный снимок, 0600, атомарно), main.cjs (partition persist:yummyanime, IPC, ad-shield, packaged Next-сервер, --auth-selftest), preload.cjs (contextBridge avcElectron), electron-builder.json (portable EXE), tools/auth-selftest.cjs, README.md (сборка+тест-матрица)
+- ФРОНТ (субагент auth-frontend-1): auth-dialog переписан (EXE: «Войти через YummyAnime» → окно сайта, busy, авто-тосты; web: честный блок без cookie), diagnostics-dialog (секция 20: безопасные поля, Run Authentication Test, сброс с 2-step AlertDialog), вход в debug-panel
+- api.ts/types.ts/executor.ts: Electron-first (getElectronBridge), изоляция lastWatched по userId (секция 14, миграция legacy), logout возвращает снапшот сайта; page.tsx: подписки onAccountChanged/onAuthStatus
+- ТЕСТЫ РЕАЛЬНЫМ ELECTRON 33.2.0 (xvfb, песочница): selftest --auth-selftest → ВСЕ PASS (сеть ONLINE, детекция входа/состояния/выхода, персистентность: 11 cookie на диске, пережили рестарт процесса); полный прогон приложения: bridge в рендерере, getAccountState→live loggedOut, getFavorites→честная недоступность, openLoginWindow→реальное окно сайта→закрытие→финальная верификация→LOGGED_OUT (без ложного успеха); детекция-скрипт исполнен в реальном Chromium на живом сайте (гостевые сигналы совпали)
+- Регресс: lint 0 (electron-app/** в eslint-ignores), поиск OK («Наруто»), voice interpret OK (OpenTop100), консоль 0 ошибок, БЛОКИРОВАНО-честно: TEST A-positive/D-full/H — нужен реальный аккаунт (пароли у нас быть не могут)
+
+Stage Summary:
+- Аутентификация = постоянная сессия сайта в Electron; сайт — источник истины; пароли/cookie не покидают профиль (секция 3/15/16 спеки соблюдены буквально)
+- Веб-режим честно сообщает «доступно в EXE»; EXE — полный цикл входа/выхода/диагностики
+- Сборка EXE: bun run build (корень) → npm run dist (electron-app) → portable exe; selftest: npm run auth:test

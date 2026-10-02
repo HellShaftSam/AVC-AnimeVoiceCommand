@@ -4,8 +4,9 @@
  * резолвер озвучек, статус приложения, диагностика сайта и копирование отладки.
  */
 import { useState } from 'react'
-import { CheckCircle2, Copy, FlaskConical, Loader2, Stethoscope, XCircle } from 'lucide-react'
+import { Activity, CheckCircle2, Copy, FlaskConical, Loader2, Stethoscope, XCircle } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
+import { DiagnosticsDialog } from '@/components/avc/diagnostics-dialog'
 import { getCachedDetails } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
 import type { PipelineStep, VoiceProviderMatch } from '@/lib/avc/types'
@@ -61,6 +62,7 @@ export function DebugPanel() {
   const sttEngine = useAvcStore((s) => s.settings.sttEngine)
   const [diag, setDiag] = useState<DiagResult[] | null>(null)
   const [diagLoading, setDiagLoading] = useState(false)
+  const [authDiagOpen, setAuthDiagOpen] = useState(false)
   const [resolverInput, setResolverInput] = useState('')
   const [resolverResult, setResolverResult] = useState<{
     match: VoiceProviderMatch | null
@@ -118,43 +120,53 @@ export function DebugPanel() {
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col border-zinc-800 bg-zinc-950 sm:max-w-md"
-      >
-        <SheetHeader>
-          <SheetTitle className="text-zinc-100">Отладка</SheetTitle>
-          <SheetDescription className="text-zinc-500">
-            Пайплайн распознавания и состояние адаптера
-          </SheetDescription>
-        </SheetHeader>
+    <>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="right"
+          className="flex w-full flex-col border-zinc-800 bg-zinc-950 sm:max-w-md"
+        >
+          <SheetHeader>
+            <SheetTitle className="text-zinc-100">Отладка</SheetTitle>
+            <SheetDescription className="text-zinc-500">
+              Пайплайн распознавания и состояние адаптера
+            </SheetDescription>
+          </SheetHeader>
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void runDiagnostics()}
-            disabled={diagLoading}
-            className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
-          >
-            {diagLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <Stethoscope className="h-4 w-4" aria-hidden />
-            )}
-            Диагностика YummyAnime
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void copyDebug()}
-            className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
-          >
-            <Copy className="h-4 w-4" aria-hidden />
-            Копировать отладку
-          </Button>
-        </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void runDiagnostics()}
+              disabled={diagLoading}
+              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+            >
+              {diagLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Stethoscope className="h-4 w-4" aria-hidden />
+              )}
+              Диагностика YummyAnime
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAuthDiagOpen(true)}
+              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+            >
+              <Activity className="h-4 w-4" aria-hidden />
+              Диагностика входа YummyAnime
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void copyDebug()}
+              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+            >
+              <Copy className="h-4 w-4" aria-hidden />
+              Копировать отладку
+            </Button>
+          </div>
 
         {diag && (
           <ul className="space-y-1.5 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2.5">
@@ -284,7 +296,11 @@ export function DebugPanel() {
             )
           })}
         </div>
-      </SheetContent>
-    </Sheet>
+        </SheetContent>
+      </Sheet>
+
+      {/* Диагностика входа YummyAnime (отдельный диалог, секция 20 спеки) */}
+      <DiagnosticsDialog open={authDiagOpen} onOpenChange={setAuthDiagOpen} />
+    </>
   )
 }

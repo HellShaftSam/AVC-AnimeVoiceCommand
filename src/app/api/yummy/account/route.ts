@@ -1,33 +1,29 @@
 /**
- * GET /api/yummy/account — состояние аккаунта YummyAnime (реальная сессия сайта).
+ * GET /api/yummy/account — состояние аккаунта YummyAnime.
  *
- *   GET /api/yummy/account             → с учётом TTL-кэша
- *   GET /api/yummy/account?refresh=1   → принудительная проверка (секция 41)
+ * АРХИТЕКТУРА (спецификация «Production-Ready Authentication», секции 3/15/16):
+ *   Сессия сайта живёт ТОЛЬКО в постоянном браузерном профиле Electron-оболочки
+ *   (partition 'persist:yummyanime'). Cookie не пересекают границу рендерера и
+ *   не передаются в Next.js API — поэтому сервер не может и не должен знать
+ *   состояние сессии.
  *
- * Ответ: YummyAccountSnapshot { state, user, lastSync, source, message }.
- * Секреты (cookie) наружу не отдаются (секция 37).
+ *   - EXE-сборка: UI получает снимок через IPC (window.avcElectron), этот роут
+ *     не используется для аутентифицированных данных.
+ *   - Веб-режим (браузер без оболочки): честно сообщаем, что аккаунт
+ *     доступен только в EXE. Ничего не выдумываем.
  */
-import { NextRequest, NextResponse } from 'next/server'
-import { getAdapter } from '@/lib/sites/yummy/adapter'
+import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function GET(req: NextRequest) {
-  const refresh = req.nextUrl.searchParams.get('refresh') === '1'
-  try {
-    const snapshot = await getAdapter().getAccountState({ refresh })
-    return NextResponse.json(snapshot)
-  } catch (e) {
-    return NextResponse.json(
-      {
-        state: 'unavailable',
-        user: null,
-        lastSync: null,
-        source: 'error',
-        message: e instanceof Error ? e.message : 'Ошибка проверки аккаунта',
-      },
-      { status: 500 },
-    )
-  }
+export async function GET() {
+  return NextResponse.json({
+    state: 'unavailable',
+    user: null,
+    lastSync: null,
+    source: 'no-session',
+    message:
+      'Сессия YummyAnime живёт в EXE-сборке (постоянный профиль сайта). В веб-режиме аккаунт недоступен.',
+  })
 }

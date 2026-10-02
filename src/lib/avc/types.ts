@@ -141,6 +141,37 @@ export interface YummyFavoriteItem {
   poster: string | null
 }
 
+// --- Диагностика аутентификации (спецификация, секция 20) --------------------
+
+export type YummySelfTestStatus = 'PASS' | 'FAIL' | 'SKIP' | 'BLOCKED'
+
+/** Один шаг диагностического отчёта (только безопасные данные) */
+export interface YummyAuthSelfTestStep {
+  name: string
+  status: YummySelfTestStatus
+  /** Человекочитаемая деталь БЕЗ cookie/токенов/паролей (секция 15) */
+  detail: string
+}
+
+/** Безопасный отчёт самопроверки аутентификации YummyAnime */
+export interface YummyAuthSelfTestReport {
+  ranAt: string
+  website: string
+  /** Тип браузерной сессии: постоянный профиль (требование секции 3) */
+  sessionKind: 'persistent' | 'unknown'
+  /** Машина состояний AuthenticationService (секция 5) */
+  authState: string
+  authenticated: boolean
+  username: string | null
+  profileAvailable: boolean
+  lastVerifiedAt: string | null
+  persistence: YummySelfTestStatus
+  loginDetection: YummySelfTestStatus
+  logoutDetection: YummySelfTestStatus
+  network: 'ONLINE' | 'OFFLINE'
+  steps: YummyAuthSelfTestStep[]
+}
+
 /** Ответ адаптера по избранному. unavailable = честно сообщаем, а не выдумываем */
 export interface YummyFavoritesResult {
   available: boolean

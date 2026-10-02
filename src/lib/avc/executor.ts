@@ -240,8 +240,22 @@ function applyDetailsToPlayback(details: AnimeDetails | null, card?: AnimeCard):
  * Локальная сессионная метка «последнее открытое аниме» — только для голосовой
  * команды «продолжить просмотр». Это состояние ПРИЛОЖЕНИЯ (не аккаунта):
  * сайт продолжает вести свои статусы/прогресс у себя.
+ *
+ * ИЗОЛЯЦИЯ АККАУНТОВ (спецификация, секция 14): метка хранится ПО АККАУНТАМ —
+ * ключ `avc:lastWatched:{accountKey}`, где accountKey = userId сайта (не-секретный
+ * идентификатор) либо 'anon'. Данные разных аккаунтов и гостя не смешиваются;
+ * пароли/cookie идентификаторами НЕ используются.
  */
-const LAST_WATCHED_KEY = 'avc:lastWatched'
+const LAST_WATCHED_PREFIX = 'avc:lastWatched'
+const LAST_WATCHED_LEGACY_KEY = 'avc:lastWatched' // до изоляции — глобальный ключ
+
+/** Безопасный идентификатор локального слота аккаунта (userId сайта или 'anon') */
+function lastWatchedKey(): string {
+  const acc = useAvcStore.getState().yummyAccount
+  const id = acc.state === 'loggedIn' ? acc.user?.userId : null
+  const safe = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon'
+  return `${LAST_WATCHED_PREFIX}:${safe}`
+}
 
 export interface LastWatched {
   animeId: number
@@ -255,7 +269,17 @@ export interface LastWatched {
 
 export function getLastWatched(): LastWatched | null {
   try {
-    const raw = localStorage.getItem(LAST_WATCHED_KEY)
+    const key = lastWatchedKey()
+    let raw = localStorage.getItem(key)
+    if (raw === null && key !== LAST_WATCHED_LEGACY_KEY) {
+      // Миграция старой глобальной метки в слот 'anon' (однократно)
+      const legacy = localStorage.getItem(LAST_WATCHED_LEGACY_KEY)
+      if (legacy !== null) {
+        localStorage.setItem(`${LAST_WATCHED_PREFIX}:anon`, legacy)
+        localStorage.removeItem(LAST_WATCHED_LEGACY_KEY)
+        raw = legacy
+      }
+    }
     if (!raw) return null
     const v = JSON.parse(raw) as LastWatched
     if (typeof v?.animeId !== 'number' || typeof v?.slug !== 'string') return null
@@ -279,7 +303,7 @@ function rememberLastWatched(): void {
     at: Date.now(),
   }
   try {
-    localStorage.setItem(LAST_WATCHED_KEY, JSON.stringify(entry))
+    localStorage.setItem(lastWatchedKey(), JSON.stringify(entry))
   } catch {
     /* localStorage может быть недоступен — метка просто не сохранится */
   }
@@ -345,22 +369,18 @@ export async function checkAccount(): Promise<CommandResult> {
   }
 }
 
-/** Выйти из аккаунта: уведомляем сайт, чистим локальную сессию (best-effort) */
+/** Выйти из аккаунта: выход выполняется ЧЕРЕЗ САЙТ в постоянной сессии (секция 10) */
 export async function accountLogout(): Promise<CommandResult> {
   try {
-    await avcApi.yummyLogout()
-  } catch {
-    /* даже если сайт недоступен — локальная сессия уже очищена на сервере */
+    // Сайт сам инвалидирует сессию (POST /api/profile/logout внутри её контекста),
+    // Electron-сервис подтверждает состояние и возвращает не-секретный снимок.
+    const snap = await avcApi.yummyLogout()
+    useAvcStore.getState().setYummyAccount(snap)
+    const who = snap.user?.username
+    return ok(who ? `Вы вышли из аккаунта YummyAnime (${who})` : 'Вы вышли из аккаунта YummyAnime')
+  } catch (e) {
+    return fail('Не удалось выйти через сайт', e instanceof Error ? e.message : String(e))
   }
-  const st = useAvcStore.getState()
-  st.setYummyAccount({
-    state: 'loggedOut',
-    user: null,
-    lastSync: new Date().toISOString(),
-    source: 'no-session',
-    message: 'Вы вышли из аккаунта',
-  })
-  return ok('Вы вышли из аккаунта YummyAnime')
 }
 
 /** Синхронизация playback, если вкладка аниме открыта напрямую (сессия и т.п.) */

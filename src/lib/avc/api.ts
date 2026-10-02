@@ -1,17 +1,22 @@
 /**
  * Anime Voice Controller — клиент API (thin client).
  *
- * Аккаунт: РЕАЛЬНАЯ сессия YummyAnime (сайт — источник истины). Локального
- * аккаунта и локальной библиотеки больше нет — есть только:
- *   /api/yummy/account    — состояние аккаунта (профиль с сайта)
- *   /api/yummy/session    — мост cookie-сессии из Electron-webview / выход
- *   /api/yummy/favorites  — избранное с сайта
- *   /api/aliases          — глобальные алиасы озвучек
+ * АУТЕНТИФИКАЦИЯ (спецификация «Production-Ready YummyAnime Authentication»):
+ *   Сессия сайта живёт ТОЛЬКО в постоянном браузерном профиле Electron
+ *   (partition 'persist:yummyanime') и не покидает главный процесс:
+ *     - EXE: снимки аккаунта/избранного приходят через IPC-мост
+ *       window.avcElectron (НЕ-секретные данные — секция 15);
+ *     - Web (браузер без оболочки): честные «недоступно» ответы без выдумок.
+ *   Cookie/пароли/токены через этот слой НЕ передаются никогда.
  *
- * Правила ошибок: ошибки сервера → throw Error({error}); сетевые сбои аккаунта
- * не бросаются — приходят как snapshot с state='unavailable' (offline behavior).
+ * Публичные данные сайта (поиск/каталог/детали) идут через Next API как раньше.
  */
-import type { VoiceAliasRow, YummyAccountSnapshot, YummyFavoritesResult } from './types'
+import type {
+  VoiceAliasRow,
+  YummyAccountSnapshot,
+  YummyAuthSelfTestReport,
+  YummyFavoritesResult,
+} from './types'
 
 /** Достать сообщение об ошибке из ответа сервера ({error} или статус) */
 async function readError(res: Response): Promise<string> {
@@ -37,43 +42,107 @@ async function jsonFetch(url: string, init?: RequestInit): Promise<Response> {
   })
 }
 
+// --- IPC-мост Electron (создаётся preload'ом оболочки) -----------------------
+
+/** Контракт preload-моста EXE-сборки. Все методы возвращают НЕ-секретные данные. */
+export interface AvcElectronBridge {
+  platform: 'electron'
+  getAccountState(refresh?: boolean): Promise<YummyAccountSnapshot>
+  openLoginWindow(): Promise<YummyAccountSnapshot>
+  verifyAuthentication(): Promise<YummyAccountSnapshot>
+  logout(): Promise<YummyAccountSnapshot>
+  getFavorites(refresh?: boolean): Promise<YummyFavoritesResult>
+  resetYummySession(): Promise<{ ok: boolean; backupPath: string | null; message: string }>
+  runAuthSelfTest(): Promise<YummyAuthSelfTestReport>
+  onAccountChanged(cb: (snap: YummyAccountSnapshot) => void): () => void
+  /** Статусы входа из main-процесса (капча/ошибка/успех) для toast */
+  onAuthStatus?(cb: (msg: string) => void): () => void
+}
+
+/** Есть ли мост EXE-сборки (в обычном браузере отсутствует) */
+export function getElectronBridge(): AvcElectronBridge | null {
+  if (typeof window === 'undefined') return null
+  const bridge = (window as unknown as { avcElectron?: AvcElectronBridge }).avcElectron
+  return bridge && bridge.platform === 'electron' ? bridge : null
+}
+
+const WEB_UNAVAILABLE: YummyAccountSnapshot = {
+  state: 'unavailable',
+  user: null,
+  lastSync: null,
+  source: 'no-session',
+  message:
+    'Постоянная сессия YummyAnime живёт в EXE-сборке. В веб-режиме состояние аккаунта недоступно.',
+}
+
 export const avcApi = {
   /**
-   * Состояние аккаунта YummyAnime. refresh=true — принудительная проверка,
-   * минуя TTL-кэш (кнопки «Проверить», возврат с сайта после входа).
+   * Состояние аккаунта YummyAnime (Electron-first).
+   * refresh=true — принудительная проверка на сайте (минуя кеш сервиса).
    */
   async yummyAccount(refresh = false): Promise<YummyAccountSnapshot> {
-    const res = await jsonFetch(`/api/yummy/account${refresh ? '?refresh=1' : ''}`)
-    if (!res.ok) throw new Error(await readError(res))
-    return (await res.json()) as YummyAccountSnapshot
+    const bridge = getElectronBridge()
+    if (bridge) return bridge.getAccountState(refresh)
+    return WEB_UNAVAILABLE
+  },
+
+  /** Открыть окно входа на реальный сайт (только EXE). Резолв после закрытия окна. */
+  async openLoginWindow(): Promise<YummyAccountSnapshot> {
+    const bridge = getElectronBridge()
+    if (!bridge) {
+      return {
+        ...WEB_UNAVAILABLE,
+        message: 'Вход выполняется в окне сайта — доступно в EXE-сборке.',
+      }
+    }
+    return bridge.openLoginWindow()
+  },
+
+  /** Полная проверка аутентификации через сайт (verifyAuthentication) */
+  async verifyAuthentication(): Promise<YummyAccountSnapshot> {
+    const bridge = getElectronBridge()
+    if (bridge) return bridge.verifyAuthentication()
+    return WEB_UNAVAILABLE
+  },
+
+  /** Выход ЧЕРЕЗ САЙТ (сайт инвалидирует сессию), затем локальное подтверждение */
+  async yummyLogout(): Promise<YummyAccountSnapshot> {
+    const bridge = getElectronBridge()
+    if (bridge) return bridge.logout()
+    return {
+      ...WEB_UNAVAILABLE,
+      state: 'loggedOut',
+      message: 'Веб-режим: аккаунт YummyAnime не подключён.',
+    }
   },
 
   /**
-   * Мост сессии: передать cookie yummyani.me серверному адаптеру
-   * (в Electron это делает главный процесс из persistent-профиля webview).
-   * Возвращает снимок аккаунта сразу после сохранения — сайт проверяет сессию.
+   * Избранное с сайта. EXE — через IPC (данные сессии main-процесса);
+   * web — честная недоступность (available=false с причиной).
    */
-  async syncYummySession(cookie: string): Promise<YummyAccountSnapshot> {
-    const res = await jsonFetch('/api/yummy/session', {
-      method: 'POST',
-      body: JSON.stringify({ cookie }),
-    })
-    if (!res.ok) throw new Error(await readError(res))
-    const body = (await res.json()) as { account: YummyAccountSnapshot }
-    return body.account
-  },
-
-  /** Выход: сайт уведомляется (best-effort), локальная сессия стирается */
-  async yummyLogout(): Promise<void> {
-    const res = await jsonFetch('/api/yummy/session', { method: 'DELETE' })
-    if (!res.ok) throw new Error(await readError(res))
-  },
-
-  /** Избранное с сайта (available=false — честная причина, а не выдуманные данные) */
   async yummyFavorites(refresh = false): Promise<YummyFavoritesResult> {
-    const res = await jsonFetch(`/api/yummy/favorites${refresh ? '?refresh=1' : ''}`)
-    if (!res.ok) throw new Error(await readError(res))
-    return (await res.json()) as YummyFavoritesResult
+    const bridge = getElectronBridge()
+    if (bridge) return bridge.getFavorites(refresh)
+    return {
+      available: false,
+      items: [],
+      reason: 'Избранное живёт в постоянной сессии сайта — доступно в EXE-сборке',
+      lastSync: null,
+    }
+  },
+
+  /** Диагностический selftest аутентификации (только EXE; web → null) */
+  async authSelfTest(): Promise<YummyAuthSelfTestReport | null> {
+    const bridge = getElectronBridge()
+    if (!bridge) return null
+    return bridge.runAuthSelfTest()
+  },
+
+  /** Сброс постоянной сессии сайта (backup + явное подтверждение в UI, секция 22) */
+  async resetYummySession(): Promise<{ ok: boolean; backupPath: string | null; message: string } | null> {
+    const bridge = getElectronBridge()
+    if (!bridge) return null
+    return bridge.resetYummySession()
   },
 
   /** Пользовательские алиасы озвучек (глобальные) */

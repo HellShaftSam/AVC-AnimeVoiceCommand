@@ -7,7 +7,7 @@
  * Диалоги: варианты поиска, настройки, справка, отладка, сессия.
  */
 import { useEffect, useState } from 'react'
-import { avcApi } from '@/lib/avc/api'
+import { avcApi, getElectronBridge } from '@/lib/avc/api'
 import { AuthDialog } from '@/components/avc/auth-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
 import { HeaderBar } from '@/components/avc/header-bar'
@@ -57,7 +57,7 @@ export default function Page() {
     }
   }, [])
 
-  // Загрузка: аккаунт YummyAnime (реальная сессия сайта) + алиасы (один раз)
+  // Загрузка: аккаунт YummyAnime (Electron-first) + алиасы (один раз)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -74,8 +74,25 @@ export default function Page() {
         // сервер/сайт недоступны — работаем дальше (offline behavior)
       }
     })()
+    // EXE-сборка: главный процесс владеет постоянной сессией сайта и сам
+    // сообщает об изменениях состояния (вход/выход/истечение) — подписываемся.
+    const bridge = getElectronBridge()
+    let unsubscribe: (() => void) | null = null
+    let unsubscribeStatus: (() => void) | null = null
+    if (bridge) {
+      unsubscribe = bridge.onAccountChanged((snap) => {
+        if (cancelled) return
+        useAvcStore.getState().setYummyAccount(snap)
+      })
+      // Статусы входа (капча/неверный пароль/успех) — из окна сайта в toast
+      unsubscribeStatus = bridge.onAuthStatus?.((msg) => {
+        if (!cancelled && msg) toast({ description: msg })
+      }) ?? null
+    }
     return () => {
       cancelled = true
+      unsubscribe?.()
+      unsubscribeStatus?.()
     }
   }, [])
 
