@@ -52,3 +52,11 @@ prompt
 server.log
 # Skills directory
 /skills/
+# runtime data (не в git)
+db/*.db
+db/*.db-*
+.zscripts/
+upload/
+tool-results/
+download/
+agent-ctx/

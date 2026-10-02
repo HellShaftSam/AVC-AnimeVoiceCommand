@@ -9,6 +9,7 @@ import {
   BookOpen,
   Bug,
   CircleHelp,
+  Download,
   Loader2,
   LogIn,
   LogOut,
@@ -165,6 +166,19 @@ export function HeaderBar() {
           onClick={() => setSettingsOpen(true)}
         >
           <Settings className="h-5 w-5" />
+        </Button>
+        {/* Скачать исходники проекта (zip без секретов/мусора) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          aria-label="Скачать исходники проекта (zip)"
+          title="Скачать исходники проекта (zip)"
+          className="h-11 w-11"
+        >
+          <a href="/api/download-source" download>
+            <Download className="h-5 w-5" />
+          </a>
         </Button>
       </nav>
     </header>
