@@ -647,7 +647,6 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
 // ---------------------------------------------------------------------------
 
 function VoiceAliasesSettings() {
-  const user = useAvcStore((s) => s.user)
   const voiceAliases = useAvcStore((s) => s.voiceAliases)
   const setVoiceAliases = useAvcStore((s) => s.setVoiceAliases)
   const [aliasInput, setAliasInput] = useState('')
@@ -700,12 +699,6 @@ function VoiceAliasesSettings() {
         </p>
       </div>
 
-      {!user && (
-        <p className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5 text-xs text-zinc-400">
-          Войдите, чтобы сохранять алиасы
-        </p>
-      )}
-
       {voiceAliases.length > 0 && (
         <ul className="space-y-1.5">
           {voiceAliases.map((row) => (
@@ -732,7 +725,7 @@ function VoiceAliasesSettings() {
         </ul>
       )}
 
-      {user && (
+      {(
         <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
           <div className="space-y-1.5">
             <Label htmlFor="avc-alias-input" className="text-xs text-zinc-400">

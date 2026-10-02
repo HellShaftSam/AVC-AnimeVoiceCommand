@@ -8,9 +8,9 @@
  *   → [анти-дубль < 2.5 c] → [LLM fallback] → выполнение по очереди
  *   → pipeline steps → история → lastExecuted → voiceMessage
  *
- * Task 9-a: SelectVoice через Voice Provider Resolver (с подтверждением при
- * сомнительной уверенности), Mute/Unmute, SetWatchStatus/ToggleFavorite/
- * ContinueWatching/ShowLibrary/AddVoiceAlias, автосинхронизация библиотеки.
+ * Task 10-a (thin client): аккаунт = РЕАЛЬНАЯ сессия YummyAnime. Статусы/избранное
+ * ведутся на сайте — голос честно объясняет и открывает сайт; «продолжить
+ * просмотр» работает по локальной сессионной метке последнего открытого тайтла.
  */
 import { toast } from '@/hooks/use-toast'
 import { rankMatches } from '@/lib/voice/fuzzy'
@@ -22,7 +22,6 @@ import {
   resolveVoiceProvider,
 } from '@/lib/voice/provider-resolver'
 import { avcApi } from './api'
-import type { PutLibraryPayload } from './api'
 import {
   hasStickyActivation,
   playerWindowAvailable,
@@ -34,7 +33,6 @@ import {
   AnimeDetails,
   BrowserContext,
   CommandResult,
-  LibraryEntryDto,
   SiteSectionId,
   TabKind,
   VideoEntry,
@@ -43,8 +41,6 @@ import {
   VOICE_CONFIDENCE_ASK,
   VOICE_CONFIDENCE_AUTO,
   VoiceProviderMatch,
-  WATCH_STATUS_LABELS,
-  WatchStatus,
 } from './types'
 import { makeTabSnapshot, useAvcStore } from './store'
 
@@ -155,6 +151,31 @@ export async function fetchDetails(idOrSlug: number | string): Promise<AnimeDeta
   return data
 }
 
+/**
+ * Открыть аниме по ссылке с сайта (панель избранного): если известен только
+ * slug — сначала резолвим детали по slug, затем открываем вкладку.
+ */
+export async function openAnimeByRef(ref: {
+  slug: string
+  animeId: number | null
+  title: string
+}): Promise<void> {
+  const details =
+    (ref.animeId !== null ? await fetchDetails(ref.animeId) : null) ??
+    (ref.slug ? await fetchDetails(ref.slug) : null)
+  const card: AnimeCard = {
+    animeId: details?.animeId ?? ref.animeId ?? 0,
+    slug: details?.slug ?? ref.slug,
+    title: details?.title ?? ref.title,
+    poster: details?.poster ?? null,
+    year: details?.year ?? null,
+    rating: details?.rating ?? null,
+    status: details?.status ?? null,
+    type: details?.type ?? null,
+  }
+  await navigateToAnime(card, false, details)
+}
+
 export function getCachedDetails(
   animeId: number | null,
   slug: string | null,
@@ -212,92 +233,132 @@ function applyDetailsToPlayback(details: AnimeDetails | null, card?: AnimeCard):
   st.setPlayer(null, null)
 }
 
-// --- библиотека (аккаунт) -------------------------------------------------------
-
-/** Заменить/добавить запись библиотеки в store */
-function upsertLibraryEntry(entry: LibraryEntryDto): void {
-  const st = useAvcStore.getState()
-  const exists = st.library.some((e) => e.animeId === entry.animeId)
-  st.setLibrary(
-    exists
-      ? st.library.map((e) => (e.animeId === entry.animeId ? entry : e))
-      : [...st.library, entry],
-  )
-}
+// --- аккаунт YummyAnime (thin client) ------------------------------------------
 
 /**
- * Автосинхронизация прогресса просмотра после открытия серии (fire-and-forget:
- * не блокирует основной поток, ошибки глушатся). Статус 'watching' передаётся
- * только при СОЗДАНИИ записи — 'completed'/'dropped' не перетираются.
+ * Локальная сессионная метка «последнее открытое аниме» — только для голосовой
+ * команды «продолжить просмотр». Это состояние ПРИЛОЖЕНИЯ (не аккаунта):
+ * сайт продолжает вести свои статусы/прогресс у себя.
  */
-function syncLibraryProgress(details: AnimeDetails | null): void {
-  const st = useAvcStore.getState()
-  const pb = st.playback
-  if (!st.user || pb.animeId === null) return
-  const existing = st.library.find((e) => e.animeId === pb.animeId) ?? null
-  void avcApi
-    .putLibrary({
-      animeId: pb.animeId,
-      title: pb.animeTitle ?? existing?.title ?? 'Без названия',
-      slug: pb.animeSlug ?? existing?.slug ?? null,
-      poster: details?.poster ?? existing?.poster ?? null,
-      ...(existing ? {} : { status: 'watching' as WatchStatus }),
-      episode: pb.currentEpisode ?? existing?.episode ?? null,
-      totalEpisodes: details
-        ? details.episodesTotal ??
-          (details.episodesAired > 0 ? details.episodesAired : (existing?.totalEpisodes ?? null))
-        : (existing?.totalEpisodes ?? null),
-      currentDub: pb.currentDub ?? existing?.currentDub ?? null,
-    })
-    .then((entry) => {
-      if (entry) upsertLibraryEntry(entry)
-    })
-    .catch(() => undefined)
+const LAST_WATCHED_KEY = 'avc:lastWatched'
+
+export interface LastWatched {
+  animeId: number
+  slug: string
+  title: string
+  poster: string | null
+  episode: number | null
+  currentDub: string | null
+  at: number
 }
 
-type LibraryUpdateResult =
-  | { ok: true; entry: LibraryEntryDto }
-  | { ok: false; message: string }
-
-/** putLibrary для ТЕКУЩЕГО открытого аниме (статус/избранное). Без user — открывает auth. */
-async function updateLibraryForCurrentAnime(patch: {
-  status?: WatchStatus
-  favorite?: boolean
-}): Promise<LibraryUpdateResult> {
-  const st = useAvcStore.getState()
-  if (!st.user) {
-    st.setAuthOpen(true)
-    return { ok: false, message: 'Войдите в аккаунт, чтобы вести библиотеку' }
-  }
-  const pb = st.playback
-  if (pb.animeId === null) return { ok: false, message: 'Сначала откройте аниме' }
-  const existing = st.library.find((e) => e.animeId === pb.animeId) ?? null
-  const details = getCachedDetails(pb.animeId, pb.animeSlug)
-  const payload: PutLibraryPayload = {
-    animeId: pb.animeId,
-    title: pb.animeTitle ?? existing?.title ?? 'Без названия',
-    slug: pb.animeSlug ?? existing?.slug ?? null,
-    poster: details?.poster ?? existing?.poster ?? null,
-    episode: pb.currentEpisode ?? existing?.episode ?? null,
-    totalEpisodes: details
-      ? details.episodesTotal ?? (details.episodesAired > 0 ? details.episodesAired : null)
-      : (existing?.totalEpisodes ?? null),
-    currentDub: pb.currentDub ?? existing?.currentDub ?? null,
-  }
-  if (patch.status !== undefined) payload.status = patch.status
-  else if (!existing) payload.status = 'watching' // новая запись — базовый статус
-  if (patch.favorite !== undefined) payload.favorite = patch.favorite
+export function getLastWatched(): LastWatched | null {
   try {
-    const entry = await avcApi.putLibrary(payload)
-    if (!entry) {
-      useAvcStore.getState().setAuthOpen(true)
-      return { ok: false, message: 'Войдите в аккаунт, чтобы вести библиотеку' }
-    }
-    upsertLibraryEntry(entry)
-    return { ok: true, entry }
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Ошибка библиотеки' }
+    const raw = localStorage.getItem(LAST_WATCHED_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw) as LastWatched
+    if (typeof v?.animeId !== 'number' || typeof v?.slug !== 'string') return null
+    return v
+  } catch {
+    return null
   }
+}
+
+/** Запомнить текущее playback-состояние как «последнее открытое» (fire-and-forget) */
+function rememberLastWatched(): void {
+  const pb = useAvcStore.getState().playback
+  if (pb.animeId === null) return
+  const entry: LastWatched = {
+    animeId: pb.animeId,
+    slug: pb.animeSlug ?? '',
+    title: pb.animeTitle ?? 'Без названия',
+    poster: null,
+    episode: pb.currentEpisode,
+    currentDub: pb.currentDub,
+    at: Date.now(),
+  }
+  try {
+    localStorage.setItem(LAST_WATCHED_KEY, JSON.stringify(entry))
+  } catch {
+    /* localStorage может быть недоступен — метка просто не сохранится */
+  }
+}
+
+/** Открыть страницу тайтла на РЕАЛЬНОМ сайте (управление статусами/избранным там) */
+function openOnSite(slug: string | null, path = ''): boolean {
+  const base = useAvcStore.getState().settings.baseUrl.replace(/\/+$/, '')
+  const url = slug ? `${base}/catalog/item/${slug}${path}` : `${base}${path}`
+  try {
+    window.open(url, '_blank', 'noopener')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Проверить аккаунт и положить снимок в store (для голосовых команд и UI) */
+export async function refreshAccount(
+  refresh = true,
+): Promise<import('./types').YummyAccountSnapshot> {
+  const snap = await avcApi.yummyAccount(refresh)
+  useAvcStore.getState().setYummyAccount(snap)
+  return snap
+}
+
+/** Открыть профиль на сайте (если не залогинен — открыть диалог входа) */
+export async function openSiteProfile(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const acc = st.yummyAccount.state === 'loggedIn' ? st.yummyAccount : await refreshAccount()
+  if (acc.state !== 'loggedIn' || !acc.user) {
+    st.setAuthOpen(true)
+    return fail(
+      acc.state === 'sessionExpired'
+        ? 'Сессия YummyAnime истекла — войдите снова'
+        : 'Вы не вошли в аккаунт YummyAnime',
+    )
+  }
+  const base = st.settings.baseUrl.replace(/\/+$/, '')
+  const url = acc.user.userId ? `${base}/users/id${acc.user.userId}` : `${base}/profile`
+  try {
+    window.open(url, '_blank', 'noopener')
+    return ok(`Профиль ${acc.user.username ?? ''} на сайте`)
+  } catch (e) {
+    return fail('Не удалось открыть сайт', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** Проверить аккаунт по голосовой команде: «проверь аккаунт» */
+export async function checkAccount(): Promise<CommandResult> {
+  try {
+    const acc = await refreshAccount(true)
+    if (acc.state === 'loggedIn' && acc.user) {
+      return ok(`Вы вошли как ${acc.user.username ?? 'без имени'}`)
+    }
+    if (acc.state === 'sessionExpired') return fail('Сессия YummyAnime истекла — войдите снова')
+    if (acc.state === 'unavailable') return fail('Сайт недоступен — проверьте интернет')
+    useAvcStore.getState().setAuthOpen(true)
+    return fail('Вы не вошли в аккаунт YummyAnime')
+  } catch (e) {
+    return fail('Не удалось проверить аккаунт', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** Выйти из аккаунта: уведомляем сайт, чистим локальную сессию (best-effort) */
+export async function accountLogout(): Promise<CommandResult> {
+  try {
+    await avcApi.yummyLogout()
+  } catch {
+    /* даже если сайт недоступен — локальная сессия уже очищена на сервере */
+  }
+  const st = useAvcStore.getState()
+  st.setYummyAccount({
+    state: 'loggedOut',
+    user: null,
+    lastSync: new Date().toISOString(),
+    source: 'no-session',
+    message: 'Вы вышли из аккаунта',
+  })
+  return ok('Вы вышли из аккаунта YummyAnime')
 }
 
 /** Синхронизация playback, если вкладка аниме открыта напрямую (сессия и т.п.) */
@@ -399,7 +460,7 @@ async function playEpisode(episode: number): Promise<CommandResult> {
     currentDub: pb.currentDub ?? video.dubName,
   })
   st.setPlayer(video.iframeUrl, video.playerName)
-  syncLibraryProgress(details)
+  rememberLastWatched()
   toast({ description: `▶ Серия ${episode}` })
   return ok(`Серия ${episode}`)
 }
@@ -552,56 +613,50 @@ export function cancelVoiceMatch(): void {
 
 // --- аккаунт: статус просмотра / избранное / продолжить / библиотека / алиасы ------
 
-const WATCH_STATUSES: readonly WatchStatus[] = [
-  'watching',
-  'planned',
-  'completed',
-  'dropped',
-  'on_hold',
-]
-
+/**
+ * «добавь в смотрю/планы/просмотрено…» — статусы просмотра ведутся НА САЙТЕ
+ * (thin client). Голос честно объясняет и открывает страницу тайтла на сайте.
+ */
 async function executeSetWatchStatus(cmd: VoiceCommand): Promise<CommandResult> {
-  const statusRaw = paramString(cmd, 'status')
-  if (!(WATCH_STATUSES as readonly string[]).includes(statusRaw)) {
-    return fail(`Неизвестный статус просмотра: ${statusRaw || '—'}`)
+  const st = useAvcStore.getState()
+  const title = st.playback.animeTitle
+  if (!st.playback.animeId) {
+    return fail('Сначала откройте аниме — статусы просмотра ведутся на сайте')
   }
-  const status = statusRaw as WatchStatus
-  const res = await updateLibraryForCurrentAnime({ status })
-  if (!res.ok) return fail(res.message)
-  const title = useAvcStore.getState().playback.animeTitle ?? res.entry.title
-  return ok(`${title}: ${WATCH_STATUS_LABELS[status]}`)
+  const opened = openOnSite(st.playback.animeSlug)
+  return ok(
+    opened
+      ? `Статусы ведутся на сайте${title ? ` — открыл «${title}»` : ''}. Меняйте статус там.`
+      : 'Статусы просмотра ведутся на сайте YummyAnime',
+  )
 }
 
-async function executeToggleFavorite(cmd: VoiceCommand): Promise<CommandResult> {
+/** «добавь/убери из избранного» — избранное ведётся на сайте (thin client) */
+async function executeToggleFavorite(_cmd: VoiceCommand): Promise<CommandResult> {
   const st = useAvcStore.getState()
-  const existing =
-    st.playback.animeId !== null
-      ? (st.library.find((e) => e.animeId === st.playback.animeId) ?? null)
-      : null
-  // favorite приходит от парсера; без параметра — честный toggle текущего состояния
-  const favorite =
-    cmd.params.favorite === true
-      ? true
-      : cmd.params.favorite === false
-        ? false
-        : !(existing?.favorite ?? false)
-  const res = await updateLibraryForCurrentAnime({ favorite })
-  if (!res.ok) return fail(res.message)
-  const title = useAvcStore.getState().playback.animeTitle ?? res.entry.title
-  return ok(favorite ? `Добавлено в избранное: ${title}` : `Убрано из избранного: ${title}`)
+  if (!st.playback.animeId) {
+    return fail('Сначала откройте аниме — избранное ведётся на сайте')
+  }
+  const opened = openOnSite(st.playback.animeSlug)
+  return ok(
+    opened
+      ? 'Избранное ведётся на сайте — открыл страницу тайтла'
+      : 'Избранное ведётся на сайте YummyAnime',
+  )
 }
 
 /**
- * Продолжить просмотр из записи библиотеки: открыть аниме, восстановить
- * озвучку и серию (и позицию, если сохранена). Экспортируется для UI
- * (кнопка «Продолжить» в LibraryPanel).
+ * Продолжить просмотр по локальной сессионной метке: открыть аниме,
+ * восстановить озвучку и серию. Экспортируется для UI.
  */
-export async function continueWatchingFromEntry(entry: LibraryEntryDto): Promise<void> {
+export async function continueWatchingFromLast(): Promise<CommandResult> {
+  const last = getLastWatched()
+  if (!last) return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
   const card: AnimeCard = {
-    animeId: entry.animeId,
-    slug: entry.slug ?? '',
-    title: entry.title,
-    poster: entry.poster,
+    animeId: last.animeId,
+    slug: last.slug,
+    title: last.title,
+    poster: last.poster,
     year: null,
     rating: null,
     status: null,
@@ -609,34 +664,17 @@ export async function continueWatchingFromEntry(entry: LibraryEntryDto): Promise
   }
   await navigateToAnime(card, false)
   const st = useAvcStore.getState()
-  if (entry.currentDub) st.patchPlayback({ currentDub: entry.currentDub })
-  if (entry.episode !== null && entry.episode > 0) {
-    const res = await playEpisode(entry.episode)
+  if (last.currentDub) st.patchPlayback({ currentDub: last.currentDub })
+  if (last.episode !== null && last.episode > 0) {
+    const res = await playEpisode(last.episode)
     if (!res.success) {
       toast({ variant: 'destructive', description: res.message })
-      return
-    }
-    if (entry.positionSec !== null && entry.positionSec > 0) {
-      useAvcStore.getState().patchPlayback({ currentTime: entry.positionSec })
+      return fail(res.message)
     }
   }
-}
-
-async function executeContinueWatching(): Promise<CommandResult> {
-  const st = useAvcStore.getState()
-  if (st.library.length === 0) {
-    return fail('Библиотека пуста — скажи «найди ...» чтобы начать')
-  }
-  // свежая запись среди «смотрю», иначе — любая свежая
-  const watching = st.library.filter((e) => e.status === 'watching')
-  const pool = watching.length > 0 ? watching : st.library
-  const latest = pool.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b))
-  try {
-    await continueWatchingFromEntry(latest)
-  } catch (e) {
-    return fail('Не удалось продолжить просмотр', e instanceof Error ? e.message : String(e))
-  }
-  return ok(`Продолжаю: ${latest.title}${latest.episode ? `, серия ${latest.episode}` : ''}`)
+  return ok(
+    `Продолжаю: ${last.title}${last.episode ? `, серия ${last.episode}` : ''}`,
+  )
 }
 
 async function executeAddVoiceAlias(cmd: VoiceCommand): Promise<CommandResult> {
@@ -674,10 +712,6 @@ async function executeAddVoiceAlias(cmd: VoiceCommand): Promise<CommandResult> {
 
   try {
     const row = await avcApi.addAlias(match.name, alias, 'voice')
-    if (!row) {
-      useAvcStore.getState().setAuthOpen(true)
-      return fail('Войдите, чтобы сохранять алиасы')
-    }
     const cur = useAvcStore.getState().voiceAliases
     useAvcStore
       .getState()
@@ -750,18 +784,6 @@ function executeSeek(cmd: VoiceCommand): CommandResult {
   // РЕАЛЬНАЯ перемотка: player_seek принимает АБСОЛЮТНУЮ секунду (плеер сам
   // клампит к длительности). currentTime в store — из событий плеера.
   const sent = sendPlayerCommand({ key: 'player_seek', value: next })
-  // позиция синхронизируется в библиотеку (fire-and-forget, только если запись есть)
-  if (st.user && pb.animeId !== null) {
-    const existing = st.library.find((e) => e.animeId === pb.animeId)
-    if (existing) {
-      void avcApi
-        .putLibrary({ animeId: pb.animeId, title: existing.title, positionSec: Math.round(next) })
-        .then((entry) => {
-          if (entry) upsertLibraryEntry(entry)
-        })
-        .catch(() => undefined)
-    }
-  }
   if (!sent && playerWindowAvailable()) {
     return ok(`${delta > 0 ? 'Вперёд' : 'Назад'} на ${Math.abs(seconds)} с (плеер ещё загружается)`)
   }
@@ -954,11 +976,17 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
     case VoiceCommandType.ToggleFavorite:
       return executeToggleFavorite(cmd)
     case VoiceCommandType.ContinueWatching:
-      return executeContinueWatching()
+      return continueWatchingFromLast()
     case VoiceCommandType.ShowLibrary: {
-      useAvcStore.getState().setLibraryOpen(true)
-      return ok('Библиотека открыта')
+      useAvcStore.getState().setFavoritesOpen(true)
+      return ok('Библиотека YummyAnime открыта')
     }
+    case VoiceCommandType.OpenProfile:
+      return openSiteProfile()
+    case VoiceCommandType.CheckAccount:
+      return checkAccount()
+    case VoiceCommandType.AccountLogout:
+      return accountLogout()
     case VoiceCommandType.AddVoiceAlias:
       return executeAddVoiceAlias(cmd)
     case VoiceCommandType.Unknown:

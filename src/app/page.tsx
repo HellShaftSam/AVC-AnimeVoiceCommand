@@ -57,23 +57,21 @@ export default function Page() {
     }
   }, [])
 
-  // Загрузка профиля: пользователь + библиотека + алиасы (один раз при монтировании)
+  // Загрузка: аккаунт YummyAnime (реальная сессия сайта) + алиасы (один раз)
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const me = await avcApi.me()
+        const [account, aliases] = await Promise.all([
+          avcApi.yummyAccount(false),
+          avcApi.aliases(),
+        ])
         if (cancelled) return
         const st = useAvcStore.getState()
-        st.setUser(me)
-        if (me) {
-          const [entries, aliases] = await Promise.all([avcApi.library(), avcApi.aliases()])
-          if (cancelled) return
-          st.setLibrary(entries)
-          st.setVoiceAliases(aliases)
-        }
+        st.setYummyAccount(account)
+        st.setVoiceAliases(aliases)
       } catch {
-        // сервер недоступен — работаем анонимно, без крэша
+        // сервер/сайт недоступны — работаем дальше (offline behavior)
       }
     })()
     return () => {

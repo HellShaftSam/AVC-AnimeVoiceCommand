@@ -12,15 +12,14 @@ import {
   BrowserTab,
   CommandResult,
   DEFAULT_SETTINGS,
-  LibraryEntryDto,
   NavigationContext,
   PlaybackContext,
   PipelineStep,
   SiteSectionId,
   TabKind,
-  UserInfoDto,
   VoiceAliasRow,
   VoiceProviderMatch,
+  YummyAccountSnapshot,
 } from './types'
 
 export type VoiceStatus = 'idle' | 'listening' | 'recognizing' | 'executing' | 'error'
@@ -69,11 +68,10 @@ export interface AvcState {
   /** Инкрементится после записи в историю — HistoryPanel перезагружается */
   historyVersion: number
 
-  // --- аккаунт / библиотека / алиасы (Task 9-a) ---
-  user: UserInfoDto | null
-  library: LibraryEntryDto[]
+  // --- аккаунт YummyAnime (реальная сессия сайта) / алиасы ---
+  yummyAccount: YummyAccountSnapshot
   voiceAliases: VoiceAliasRow[]
-  libraryOpen: boolean
+  favoritesOpen: boolean
   authOpen: boolean
   voiceConfirm: VoiceConfirmState | null
   /** Громкость до Mute — для восстановления при Unmute */
@@ -106,11 +104,10 @@ export interface AvcState {
   setSettingsOpen: (v: boolean) => void
   setDebugOpen: (v: boolean) => void
 
-  // --- действия: аккаунт/библиотека/алиасы ---
-  setUser: (u: UserInfoDto | null) => void
-  setLibrary: (entries: LibraryEntryDto[]) => void
+  // --- действия: аккаунт YummyAnime/алиасы ---
+  setYummyAccount: (snap: YummyAccountSnapshot) => void
   setVoiceAliases: (rows: VoiceAliasRow[]) => void
-  setLibraryOpen: (v: boolean) => void
+  setFavoritesOpen: (v: boolean) => void
   setAuthOpen: (v: boolean) => void
   setVoiceConfirm: (vc: VoiceConfirmState | null) => void
   setPrevVolume: (v: number) => void
@@ -192,11 +189,16 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   tabBackStack: {},
   historyVersion: 0,
 
-  // --- аккаунт / библиотека / алиасы ---
-  user: null,
-  library: [],
+  // --- аккаунт YummyAnime / алиасы ---
+  yummyAccount: {
+    state: 'unknown',
+    user: null,
+    lastSync: null,
+    source: 'no-session',
+    message: null,
+  },
   voiceAliases: [],
-  libraryOpen: false,
+  favoritesOpen: false,
   authOpen: false,
   voiceConfirm: null,
   prevVolume: 70,
@@ -305,12 +307,11 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   setDebugOpen: (v) => set({ debugOpen: v }),
 
-  // --- аккаунт / библиотека / алиасы ----------------------------------------------
+  // --- аккаунт YummyAnime / алиасы ----------------------------------------------
 
-  setUser: (u) => set({ user: u }),
-  setLibrary: (entries) => set({ library: entries }),
+  setYummyAccount: (snap) => set({ yummyAccount: snap }),
   setVoiceAliases: (rows) => set({ voiceAliases: rows }),
-  setLibraryOpen: (v) => set({ libraryOpen: v }),
+  setFavoritesOpen: (v) => set({ favoritesOpen: v }),
   setAuthOpen: (v) => set({ authOpen: v }),
   setVoiceConfirm: (vc) => set({ voiceConfirm: vc }),
   setPrevVolume: (v) => set({ prevVolume: v }),

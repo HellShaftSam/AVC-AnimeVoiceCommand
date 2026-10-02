@@ -20,8 +20,13 @@ import {
   SectionPage,
   SiteSectionId,
   VideoEntry,
+  YummyAccountSnapshot,
+  YummyFavoritesResult,
+  YummyFavoriteItem,
+  YummyUserSnapshot,
 } from '@/lib/avc/types'
 import { IAnimeSiteAdapter, SiteDiagnostics } from '../types'
+import { getYummySessionCookie } from './session-store'
 import {
   demoDetails,
   demoRandom,
@@ -197,6 +202,8 @@ interface ApiVideoItem {
 export class YummyAnimeAdapter implements IAnimeSiteAdapter {
   readonly siteName = 'YummyAnime'
   readonly baseUrl: string
+  /** Версия адаптера (спецификация аккаунта, секция 46) — меняем при изменении сайта */
+  readonly adapterVersion = '1.1.0-account'
 
   constructor(baseUrl = 'https://old.yummyani.me') {
     this.baseUrl = baseUrl.replace(/\/+$/, '')
@@ -408,6 +415,303 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
   }
 
   // --- приватное -------------------------------------------------------------
+
+  /** TTL-кэш аккаунта (спецификация секции 14, 40: профиль ~5 минут) */
+  private accountCache: CacheEntry<YummyAccountSnapshot> | null = null
+
+  /**
+   * fetch с cookie-сессией yummyani.me (если она сохранена в session-store).
+   * Cookie нигде не логируем (спецификация секции 37).
+   */
+  private async fetchWithSession(
+    url: string,
+    timeoutMs = 12000,
+  ): Promise<Response> {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const cookie = getYummySessionCookie()
+      return await fetch(url, {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'application/json,text/html,*/*',
+          ...(cookie ? { Cookie: cookie } : {}),
+          Referer: `${this.baseUrl}/`,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        signal: ctrl.signal,
+        redirect: 'follow',
+        cache: 'no-store',
+      })
+    } finally {
+      clearTimeout(t)
+    }
+  }
+
+  /**
+   * Защитная нормализация JSON профиля сайта. Формат ответа точно не
+   * документирован — парсим по образцу публичного /api/users:
+   * { response: { id, texts: { left, right }, avatars: { small, big }, ... } }.
+   * Ничего не выдумываем: не нашли поле — null (спецификация секции 45).
+   */
+  private normalizeProfile(body: unknown): YummyUserSnapshot | null {
+    if (typeof body !== 'object' || body === null) return null
+    const root = body as Record<string, unknown>
+    const u = (root.response ?? root.user ?? root) as Record<string, unknown>
+    if (typeof u !== 'object' || u === null) return null
+
+    const texts = (u.texts ?? null) as Record<string, unknown> | null
+    const avatars = (u.avatars ?? null) as Record<string, unknown> | null
+    const ids = (u.ids ?? null) as Record<string, unknown> | null
+
+    const rawId = u.id ?? u.user_id ?? u.userId ?? null
+    const id = rawId !== null && rawId !== undefined ? String(rawId) : null
+
+    const nameCandidates = [
+      u.name,
+      u.login,
+      u.username,
+      u.nickname,
+      ids && typeof ids === 'object' ? (ids as Record<string, unknown>).tg_nickname : null,
+      texts && typeof texts === 'object' ? (texts as Record<string, unknown>).left : null,
+      texts && typeof texts === 'object' ? (texts as Record<string, unknown>).right : null,
+    ]
+    const name = nameCandidates.find((v) => typeof v === 'string' && (v as string).trim() !== '')
+
+    const avatarCandidates = [
+      u.avatar,
+      u.avatar_url,
+      avatars && typeof avatars === 'object' ? (avatars as Record<string, unknown>).small : null,
+      avatars && typeof avatars === 'object' ? (avatars as Record<string, unknown>).big : null,
+    ]
+    const avatarRaw = avatarCandidates.find(
+      (v) => typeof v === 'string' && (v as string).trim() !== '',
+    ) as string | undefined
+    let avatarUrl: string | null = null
+    if (avatarRaw) {
+      avatarUrl = avatarRaw.startsWith('//') ? `https:${avatarRaw}` : avatarRaw
+    }
+
+    if (id === null && !name) return null
+    return {
+      userId: id,
+      username: typeof name === 'string' ? name.trim() : null,
+      displayName: typeof name === 'string' ? name.trim() : null,
+      avatarUrl,
+    }
+  }
+
+  /**
+   * Проверить состояние аккаунта на реальном сайте.
+   * GET /api/profile: 200 → залогинен; 401 → сессии нет/истекла (подтверждено
+   * живым сайтом). TTL-кэш 5 минут; refresh=true — принудительно (секция 41).
+   */
+  async getAccountState(opts?: { refresh?: boolean }): Promise<YummyAccountSnapshot> {
+    if (!opts?.refresh && this.accountCache && this.accountCache.expires > Date.now()) {
+      return { ...this.accountCache.data, source: 'cache' }
+    }
+
+    const cookie = getYummySessionCookie()
+    if (!cookie) {
+      const snap: YummyAccountSnapshot = {
+        state: 'loggedOut',
+        user: null,
+        lastSync: new Date().toISOString(),
+        source: 'no-session',
+        message: 'Сессия YummyAnime не обнаружена — войдите на сайте',
+      }
+      this.accountCache = { data: snap, expires: Date.now() + 60_000 }
+      return snap
+    }
+
+    try {
+      const res = await this.fetchWithSession(`${this.baseUrl}/api/profile`)
+      if (res.status === 401) {
+        const snap: YummyAccountSnapshot = {
+          state: 'sessionExpired',
+          user: null,
+          lastSync: new Date().toISOString(),
+          source: 'live',
+          message: 'Сессия YummyAnime истекла. Войдите снова.',
+        }
+        this.accountCache = { data: snap, expires: Date.now() + 60_000 }
+        return snap
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const body = (await res.json()) as unknown
+      const user = this.normalizeProfile(body)
+      const snap: YummyAccountSnapshot = {
+        state: user ? 'loggedIn' : 'loggedOut',
+        user,
+        lastSync: new Date().toISOString(),
+        source: 'live',
+        message: user
+          ? `Сайт подтвердил вход: ${user.username ?? 'без имени'}`
+          : 'Сайт ответил 200, но профиль не распознан (сайт изменился?)',
+      }
+      this.accountCache = { data: snap, expires: Date.now() + 5 * 60_000 }
+      return snap
+    } catch (e) {
+      // Сайт недоступен: НЕ стираем кеш (секция 25 — offline behavior)
+      const prev = this.accountCache?.data ?? null
+      const snap: YummyAccountSnapshot = {
+        state: prev?.state === 'loggedIn' ? prev.state : 'unavailable',
+        user: prev?.user ?? null,
+        lastSync: prev?.lastSync ?? null,
+        source: prev ? 'cache' : 'error',
+        message: `Сайт недоступен (${e instanceof Error ? e.message : 'ошибка сети'}). Показаны кешированные данные.`,
+      }
+      this.accountCache = { data: snap, expires: Date.now() + 60_000 }
+      return snap
+    }
+  }
+
+  /**
+   * Выход: POST /api/profile/logout (подтверждённый эндпоинт сайта) + локальная
+   * очистка cookie выполняется на уровне API-роута.
+   */
+  async siteLogout(): Promise<boolean> {
+    try {
+      const res = await this.fetchWithSession(`${this.baseUrl}/api/profile/logout`, 8000)
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  /** Сбросить кеш аккаунта (после входа/выхода — чтобы UI не показал устаревшее) */
+  resetAccountCache(): void {
+    this.accountCache = null
+    cache.delete(`favorites:${this.baseUrl}`)
+  }
+
+  /**
+   * Избранное с сайта. Сайт даёт список только через /actions/export-favorites.php
+   * (найдено в JS сайта; формат ответа не документирован) — парсим защитно,
+   * при любой неудаче честно сообщаем available:false (ничего не выдумываем).
+   */
+  async getFavorites(opts?: { refresh?: boolean }): Promise<YummyFavoritesResult> {
+    const key = `favorites:${this.baseUrl}`
+    if (!opts?.refresh) {
+      const cached = cacheGet<YummyFavoritesResult>(key)
+      if (cached) return { ...cached, lastSync: cached.lastSync }
+    }
+    const cookie = getYummySessionCookie()
+    if (!cookie) {
+      return {
+        available: false,
+        items: [],
+        reason: 'Нет сессии YummyAnime — войдите на сайте',
+        lastSync: null,
+      }
+    }
+    try {
+      const res = await this.fetchWithSession(
+        `${this.baseUrl}/actions/export-favorites.php?format=json&vote=0`,
+      )
+      if (!res.ok) {
+        return {
+          available: false,
+          items: [],
+          reason: `Сайт ответил HTTP ${res.status} на export-favorites`,
+          lastSync: null,
+        }
+      }
+      const body = (await res.json()) as unknown
+      const items = this.normalizeFavorites(body)
+      if (items === null) {
+        return {
+          available: false,
+          items: [],
+          reason: 'Формат export-favorites не распознан (сайт изменился?) — данные не выдумываем',
+          lastSync: null,
+        }
+      }
+      const result: YummyFavoritesResult = {
+        available: true,
+        items,
+        reason: null,
+        lastSync: new Date().toISOString(),
+      }
+      cacheSet(key, result)
+      return result
+    } catch (e) {
+      return {
+        available: false,
+        items: [],
+        reason: `Не удалось получить избранное: ${e instanceof Error ? e.message : 'ошибка сети'}`,
+        lastSync: null,
+      }
+    }
+  }
+
+  /**
+   * Защитный парсинг export-favorites.php. JS сайта делает .json() и берёт
+   * { filename, data } — пробуем data (JSON-строка/массив) и сам массив.
+   * Элементы: anime_id/id, title/name, slug/url, poster — все опциональны.
+   */
+  private normalizeFavorites(body: unknown): YummyFavoriteItem[] | null {
+    const tryParse = (v: unknown): unknown => {
+      if (typeof v === 'string') {
+        try {
+          return JSON.parse(v) as unknown
+        } catch {
+          return null
+        }
+      }
+      return v
+    }
+
+    let list: unknown = null
+    if (Array.isArray(body)) list = body
+    else if (typeof body === 'object' && body !== null) {
+      const root = body as Record<string, unknown>
+      const data = tryParse(root.data)
+      if (Array.isArray(data)) list = data
+      else if (Array.isArray(root.items)) list = root.items
+      else if (Array.isArray(root.response)) list = root.response
+      else if (data && typeof data === 'object') {
+        const inner = data as Record<string, unknown>
+        if (Array.isArray(inner.favorites)) list = inner.favorites
+        else if (Array.isArray(inner.items)) list = inner.items
+      }
+    }
+    if (!Array.isArray(list)) return null
+
+    const out: YummyFavoriteItem[] = []
+    for (const raw of list) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const it = raw as Record<string, unknown>
+      const title = [it.title, it.name, it.anime_title].find(
+        (v) => typeof v === 'string' && (v as string).trim() !== '',
+      ) as string | undefined
+      const rawId = it.anime_id ?? it.animeId ?? it.id
+      const rawSlug =
+        typeof it.slug === 'string'
+          ? it.slug
+          : typeof it.url === 'string'
+            ? it.url.match(/\/catalog\/item\/([a-z0-9-]+)/i)?.[1] ?? it.url
+            : null
+      if (!title && rawId === undefined && !rawSlug) continue
+      const posterRaw =
+        typeof it.poster === 'string'
+          ? it.poster
+          : typeof (it.poster as Record<string, unknown> | undefined)?.medium === 'string'
+            ? ((it.poster as Record<string, unknown>).medium as string)
+            : null
+      out.push({
+        animeId: typeof rawId === 'number' ? rawId : null,
+        slug: typeof rawSlug === 'string' && rawSlug.trim() !== '' ? rawSlug : null,
+        title: title ?? `Аниме #${String(rawId ?? '?')}`,
+        poster: posterRaw
+          ? posterRaw.startsWith('//')
+            ? `https:${posterRaw}`
+            : posterRaw
+          : null,
+      })
+    }
+    return out
+  }
 
   private buildDetails(d: ApiAnimeDetails, videos: VideoEntry[]): AnimeDetails {
     // Группировка озвучек из матрицы видео (фактически доступные)

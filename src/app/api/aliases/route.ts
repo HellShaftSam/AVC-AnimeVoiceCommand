@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -11,13 +10,14 @@ function isTargetType(v: unknown): v is TargetType {
   return typeof v === 'string' && (TARGET_TYPES as readonly string[]).includes(v)
 }
 
-/** GET /api/aliases → {aliases}; без сессии — пустой список */
-export async function GET(req: NextRequest) {
-  const user = await getCurrentUser(req)
-  if (!user) return NextResponse.json({ aliases: [] })
+/**
+ * Алиасы озвучек/аниме/секций/команд — глобальные (thin client: локального
+ * аккаунта больше нет, приложение одно-пользовательское настольное).
+ */
 
+/** GET /api/aliases → {aliases} */
+export async function GET() {
   const aliases = await db.voiceAlias.findMany({
-    where: { userId: user.id },
     orderBy: { createdAt: 'desc' },
     select: { id: true, targetType: true, targetName: true, alias: true },
   })
@@ -26,9 +26,6 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/aliases {targetType?, targetName, alias} → {alias}; дубликат → существующий (200) */
 export async function POST(req: NextRequest) {
-  const user = await getCurrentUser(req)
-  if (!user) return NextResponse.json({ error: 'Требуется вход' }, { status: 401 })
-
   let body: unknown
   try {
     body = await req.json()
@@ -67,8 +64,7 @@ export async function POST(req: NextRequest) {
   // Уже есть — просто возвращаем существующую (не ошибка)
   const existing = await db.voiceAlias.findUnique({
     where: {
-      userId_targetType_targetName_alias: {
-        userId: user.id,
+      targetType_targetName_alias: {
         targetType: type,
         targetName: targetNorm,
         alias: aliasNorm,
@@ -80,7 +76,6 @@ export async function POST(req: NextRequest) {
 
   const created = await db.voiceAlias.create({
     data: {
-      userId: user.id,
       targetType: type,
       targetName: targetNorm,
       alias: aliasNorm,
@@ -92,13 +87,9 @@ export async function POST(req: NextRequest) {
 
 /** DELETE /api/aliases?id=xxx → {ok:true} */
 export async function DELETE(req: NextRequest) {
-  const user = await getCurrentUser(req)
-  if (!user) return NextResponse.json({ error: 'Требуется вход' }, { status: 401 })
-
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id обязателен' }, { status: 400 })
 
-  // only own aliases
-  await db.voiceAlias.deleteMany({ where: { id, userId: user.id } })
+  await db.voiceAlias.deleteMany({ where: { id } })
   return NextResponse.json({ ok: true })
 }

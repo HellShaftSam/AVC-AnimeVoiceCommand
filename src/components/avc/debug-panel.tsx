@@ -56,8 +56,7 @@ export function DebugPanel() {
   const open = useAvcStore((s) => s.debugOpen)
   const setOpen = useAvcStore((s) => s.setDebugOpen)
   const pipeline = useAvcStore((s) => s.pipeline)
-  const user = useAvcStore((s) => s.user)
-  const libraryCount = useAvcStore((s) => s.library.length)
+  const yummyAccount = useAvcStore((s) => s.yummyAccount)
   const aliasCount = useAvcStore((s) => s.voiceAliases.length)
   const sttEngine = useAvcStore((s) => s.settings.sttEngine)
   const [diag, setDiag] = useState<DiagResult[] | null>(null)
@@ -89,8 +88,8 @@ export function DebugPanel() {
       tabs: st.tabs,
       lastExecuted: st.lastExecuted,
       settings: st.settings,
-      user: st.user,
-      library: st.library.length,
+      yummyAccount: { state: st.yummyAccount.state, source: st.yummyAccount.source },
+      aliases: st.voiceAliases.length,
       ts: new Date().toISOString(),
     }
     try {
@@ -240,12 +239,14 @@ export function DebugPanel() {
             Статус
           </h3>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5 text-xs">
-            <dt className="text-zinc-500">Пользователь</dt>
-            <dd className={user ? 'text-zinc-200' : 'text-zinc-500'}>
-              {user?.username ?? 'не залогинен'}
+            <dt className="text-zinc-500">Аккаунт YummyAnime</dt>
+            <dd className={yummyAccount.state === 'loggedIn' ? 'text-zinc-200' : 'text-zinc-500'}>
+              {yummyAccount.state === 'loggedIn'
+                ? (yummyAccount.user?.username ?? 'вход подтверждён')
+                : yummyAccount.state === 'sessionExpired'
+                  ? 'сессия истекла'
+                  : 'не залогинен'}
             </dd>
-            <dt className="text-zinc-500">Записей в библиотеке</dt>
-            <dd className="tabular-nums text-zinc-200">{libraryCount}</dd>
             <dt className="text-zinc-500">Алиасов озвучек</dt>
             <dd className="tabular-nums text-zinc-200">{aliasCount}</dd>
             <dt className="text-zinc-500">Движок STT</dt>

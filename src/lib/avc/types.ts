@@ -51,10 +51,16 @@ export enum VoiceCommandType {
   SelectOption = 'SelectOption', // выбор варианта из списка найденного (1..N)
   Mute = 'Mute',
   Unmute = 'Unmute',
-  SetWatchStatus = 'SetWatchStatus', // «добавь в смотрю / в планы / просмотрено / брошено / отложено»
-  ToggleFavorite = 'ToggleFavorite', // «добавь в избранное» / «убери из избранного»
-  ContinueWatching = 'ContinueWatching', // «продолжить просмотр»
-  ShowLibrary = 'ShowLibrary', // «открой библиотеку»
+  /** «добавь в смотрю / планы…» — статусы ведёт сайт; команда откроет страницу тайтла */
+  SetWatchStatus = 'SetWatchStatus',
+  /** «добавь в избранное» — избранное ведётся на сайте; команда подскажет/откроет сайт */
+  ToggleFavorite = 'ToggleFavorite',
+  ContinueWatching = 'ContinueWatching', // «продолжить просмотр» (по локальной сессионной метке)
+  ShowLibrary = 'ShowLibrary', // «открой библиотеку» — панель избранного YummyAnime
+  /** «открой мой профиль», «проверь аккаунт», «выйди из аккаунта» */
+  OpenProfile = 'OpenProfile',
+  CheckAccount = 'CheckAccount',
+  AccountLogout = 'AccountLogout',
   AddVoiceAlias = 'AddVoiceAlias', // «добавь "ани либрия" как команду для AniLibria»
   Unknown = 'Unknown',
 }
@@ -91,39 +97,56 @@ export type SiteSectionId =
   | 'random'
 
 // ---------------------------------------------------------------------------
-// Аккаунт и библиотека (статусы просмотра)
+// Аккаунт YummyAnime — РЕАЛЬНАЯ сессия сайта (сайт = источник истины).
+// Локального аккаунта больше нет: thin client (спецификация «YummyAnime
+// Real-Site Account Integration», секции 1, 4, 6, 10).
 // ---------------------------------------------------------------------------
 
-export type WatchStatus = 'watching' | 'planned' | 'completed' | 'dropped' | 'on_hold'
+/** Машина состояний авторизации (спецификация, секция 4) */
+export type YummyAuthState =
+  | 'unknown' // ещё не проверяли
+  | 'checking' // идёт проверка
+  | 'loggedOut' // гость: сессии нет или сайт подтвердил выход
+  | 'loggedIn' // сайт подтвердил сессию
+  | 'sessionExpired' // cookie была, но сайт отвечает 401
+  | 'unavailable' // сайт недоступен — используем кеш (спецификация, секция 25)
 
-export const WATCH_STATUS_LABELS: Record<WatchStatus, string> = {
-  watching: 'Смотрю',
-  planned: 'В планах',
-  completed: 'Просмотрено',
-  dropped: 'Брошено',
-  on_hold: 'Отложено',
+/**
+ * Снимок пользователя с сайта. Локальный кеш только для отрисовки UI,
+ * НЕ источник истины (спецификация, секция 6).
+ */
+export interface YummyUserSnapshot {
+  userId: string | null
+  username: string | null
+  displayName: string | null
+  avatarUrl: string | null
 }
 
-/** Запись библиотеки, как её отдаёт/принимает /api/library */
-export interface LibraryEntryDto {
-  animeId: number
-  title: string
+/** Результат синхронизации аккаунта */
+export interface YummyAccountSnapshot {
+  state: YummyAuthState
+  user: YummyUserSnapshot | null
+  /** ISO-время последней успешной синхронизации */
+  lastSync: string | null
+  source: 'live' | 'cache' | 'no-session' | 'error'
+  /** Человекочитаемое сообщение (без секретов — секция 37) */
+  message: string | null
+}
+
+/** Элемент избранного с сайта */
+export interface YummyFavoriteItem {
+  animeId: number | null
   slug: string | null
+  title: string
   poster: string | null
-  status: WatchStatus
-  favorite: boolean
-  /** Последняя открытая серия */
-  episode: number | null
-  /** Сохранённая позиция в секундах (виртуальный таймлайн) */
-  positionSec: number | null
-  totalEpisodes: number | null
-  currentDub: string | null
-  updatedAt: string
 }
 
-export interface UserInfoDto {
-  id: string
-  username: string
+/** Ответ адаптера по избранному. unavailable = честно сообщаем, а не выдумываем */
+export interface YummyFavoritesResult {
+  available: boolean
+  items: YummyFavoriteItem[]
+  reason: string | null
+  lastSync: string | null
 }
 
 export interface PlaybackContext {

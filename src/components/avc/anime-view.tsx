@@ -2,19 +2,15 @@
 /**
  * AnimeView — вкладка аниме: постер, инфо, бейджи, озвучки, сетка серий,
  * диалог «Серии» (ShowEpisodes) и плеер.
+ *
+ * Thin client: статусы просмотра/избранное ведутся НА САЙТЕ YummyAnime —
+ * здесь только кнопка «Управлять на сайте».
  */
 import { useEffect, useState } from 'react'
-import { Film, Heart, RotateCw, Star } from 'lucide-react'
+import { ExternalLink, Film, RotateCw, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Player } from './player'
 import {
@@ -24,14 +20,12 @@ import {
   syncPlaybackToDetails,
 } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
-import type { AnimeDetails, BrowserTab, WatchStatus } from '@/lib/avc/types'
-import { VoiceCommandType, WATCH_STATUS_LABELS } from '@/lib/avc/types'
+import type { AnimeDetails, BrowserTab } from '@/lib/avc/types'
+import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
 export function AnimeView({ tab }: { tab: BrowserTab }) {
   const playback = useAvcStore((s) => s.playback)
-  const user = useAvcStore((s) => s.user)
-  const library = useAvcStore((s) => s.library)
   const patchTab = useAvcStore((s) => s.patchTab)
   const bumpReload = useAvcStore((s) => s.bumpReload)
   const reloadCounter = useAvcStore((s) => s.tabReloadCounter[tab.id] ?? 0)
@@ -128,24 +122,10 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
     })
   }
 
-  // --- Моя библиотека: запись по id текущего аниме -------------------------
-  const entry = library.find((e) => e.animeId === details.animeId) ?? null
-  const isFav = entry?.favorite ?? false
-  const setStatus = (status: WatchStatus | '') => {
-    void executeCommand({
-      type: VoiceCommandType.SetWatchStatus,
-      params: { status },
-      confidence: 1,
-      label: status ? WATCH_STATUS_LABELS[status] : 'Статус сброшен',
-    })
-  }
-  const toggleFavorite = () => {
-    void executeCommand({
-      type: VoiceCommandType.ToggleFavorite,
-      params: { favorite: !isFav },
-      confidence: 1,
-      label: isFav ? 'Убрать из избранного' : 'В избранное',
-    })
+  // --- Статусы/избранное ведутся на сайте (thin client) -------------------
+  const openOnSite = () => {
+    const base = useAvcStore.getState().settings.baseUrl.replace(/\/+$/, '')
+    if (details.slug) window.open(`${base}/catalog/item/${details.slug}`, '_blank', 'noopener')
   }
 
   return (
@@ -167,17 +147,6 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
         <div className="min-w-0 flex-1">
           <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold md:text-2xl">
             {details.title}
-            {entry && (
-              <Badge className="border border-amber-400/40 bg-amber-400/10 text-xs text-amber-300">
-                {WATCH_STATUS_LABELS[entry.status]}
-              </Badge>
-            )}
-            {entry?.favorite && (
-              <Badge className="border border-rose-400/40 bg-rose-400/10 text-xs text-rose-300">
-                <Heart className="h-3 w-3 fill-rose-400" aria-hidden />
-                Избранное
-              </Badge>
-            )}
           </h2>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {details.year !== null && (
@@ -224,49 +193,21 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
             </div>
           )}
 
-          {/* Панель «Моя библиотека»: избранное + статус просмотра */}
-          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                Моя библиотека
-              </span>
-              {!user && <span className="text-xs text-zinc-600">Войдите для синхронизации</span>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={isFav ? 'Убрать из избранного' : 'Добавить в избранное'}
-                aria-pressed={isFav}
-                onClick={toggleFavorite}
-                className={cn(
-                  'min-h-11 gap-1.5 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300',
-                  isFav && 'border-amber-400/60 bg-amber-400/10 text-amber-300',
-                )}
-              >
-                <Heart className={cn('h-4 w-4', isFav && 'fill-amber-400 text-amber-400')} aria-hidden />
-                {isFav ? 'В избранном' : 'В избранное'}
-              </Button>
-              <Select
-                value={entry?.status ?? ''}
-                onValueChange={(v: string) => setStatus(v === '__none__' ? '' : (v as WatchStatus))}
-              >
-                <SelectTrigger
-                  aria-label="Статус просмотра"
-                  className="min-h-11 w-full border-zinc-700 bg-zinc-900/60 text-sm sm:w-44"
-                >
-                  <SelectValue placeholder="Статус…" />
-                </SelectTrigger>
-                <SelectContent className="border-zinc-800 bg-zinc-900">
-                  {(Object.keys(WATCH_STATUS_LABELS) as WatchStatus[]).map((st) => (
-                    <SelectItem key={st} value={st}>
-                      {WATCH_STATUS_LABELS[st]}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="__none__">Не выбрано</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Thin client: статусы/избранное ведутся на сайте YummyAnime */}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <span className="text-xs text-zinc-500">
+              Статусы просмотра и избранное ведутся в аккаунте YummyAnime на сайте
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openOnSite}
+              aria-label="Управлять статусом и избранным на сайте"
+              className="min-h-11 gap-1.5 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+            >
+              <ExternalLink className="h-4 w-4" aria-hidden />
+              Открыть на сайте
+            </Button>
           </div>
 
           <p className="mt-3 text-sm text-zinc-400">

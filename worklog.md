@@ -446,3 +446,28 @@ Stage Summary:
 - Теперь исходники можно тянуть/пушить напрямую: git pull / git push (credential store активен)
 - Кнопка скачивания zip в шапке приложения остаётся как резервный канал экспорта
 - В репозитории НЕТ electron-app/ (обёртка EXE потеряна в этой среде) — задача на восстановление отдельно
+
+---
+Task ID: yummy-account-1
+Agent: Z.ai Code (main)
+Task: Интеграция РЕАЛЬНОГО аккаунта YummyAnime + удаление локального аккаунта/библиотеки (thin client)
+
+Work Log:
+- Прочитана спецификация пользователя (upload/Pasted Content_1790797236791.txt, 56 секций): реальная сессия сайта, remote-first, TTL-кеш, без агрессивного поллинга, пароли только на сайте
+- ИНСПЕКЦИЯ РЕАЛЬНОГО САЙТА (секция 2 спеки, всё подтверждено живыми запросами):
+  * GET /api/profile → 401 JSON для гостя, 200 + профиль для залогиненных (детекция авторизации)
+  * POST /api/profile/login (hCaptcha!) → вход ТОЛЬКО на сайте; POST /api/profile/logout
+  * /actions/export-favorites.php?format=json — избранное (требует сессию)
+  * аватары //static.yani.tv/users/{small,big}/{id}.webp; профиль пользователя /users/id{N}
+- БЭКЕНД: src/lib/sites/yummy/session-store.ts (cookie jar: память+файл db/yummy-session.json 0600, без паролей); adapter.ts +1.1.0-account: getAccountState (TTL 5мин, 401→sessionExpired, offline→кеш), siteLogout, getFavorites (защитный парсинг, available:false при неудаче — ничего не выдумываем), resetAccountCache
+- API: /api/yummy/account (?refresh=1), /api/yummy/session (POST cookie-мост из Electron-webview / DELETE выход), /api/yummy/favorites
+- УДАЛЕНО: src/app/api/auth/*, src/app/api/library/*, src/lib/auth.ts; Prisma: User и UserLibraryEntry дропнуты (db:push), VoiceAlias стал глобальным (алиасы озвучек сохранены)
+- ФРОНТ: types (YummyAuthState/AccountSnapshot/Favorites), store (yummyAccount вместо user/library, favoritesOpen), api.ts (yummyAccount/syncYummySession/yummyLogout/yummyFavorites), HeaderBar (чип: аватар с сайта + точка статуса, dropdown: профиль/проверить/выйти; гость → Войти), AuthDialog → YummyLoginDialog (инструкции + «Открыть сайт» + «Я вошёл — проверить» + Electron-мост syncYummySession), LibraryPanel → панель избранного с сайта (+ «Продолжить» по локальной метке), AnimeView: панель «статусы на сайте» вместо локального select'а, DebugPanel/SettingsDialog обновлены
+- ГОЛОС: parser + OpenProfile («открой мой профиль»), CheckAccount («проверь аккаунт»), AccountLogout («выйди из аккаунта»); ShowLibrary теперь «мои закладки/избранное»; SetWatchStatus/ToggleFavorite честно ведут на сайт (открывают страницу тайтла); ContinueWatching по локальной метке avc:lastWatched (localStorage)
+- ВЕРИФИКАЦИЯ (agent-browser): 0 ошибок консоли после чистой загрузки; «проверь аккаунт» → авто-открытие диалога входа; «открой библиотеку» → панель; POST /api/yummy/session с фейковой cookie → сайт ответил 401 → state=sessionExpired (реальная проверка сайтом!); DELETE → loggedOut; мобильный 390px ок; lint 0 ошибок; tsc (src) чисто
+
+Stage Summary:
+- Локальный аккаунт и локальная библиотека ПОЛНОСТЬЮ удалены (thin client по спеке)
+- Аккаунт = реальная сессия YummyAnime; сайт — источник истины; кеш read-only с TTL
+- Контракт Electron-моста: main читает cookie yummyani.me из persistent webview-профиля → POST /api/yummy/session {cookie} (реализация в EXE-обёртке при её восстановлении)
+- Честные ограничения: избранное может быть недоступно (сайт не документировал формат) — показываем причину, не выдумываем данные; в веб-версии без Electron сессию подтвердить нельзя (browser не отдаёт чужие cookie) — это задокументировано в UI

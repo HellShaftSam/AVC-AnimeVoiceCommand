@@ -5,7 +5,7 @@
  * Пайплайн: RAW → normalize → stripFillers → сегментация ("и") →
  *           alias matching / извлечение параметров → VoiceCommand[]
  */
-import { BrowserContext, VoiceCommand, VoiceCommandType, WatchStatus } from '@/lib/avc/types'
+import { BrowserContext, VoiceCommand, VoiceCommandType } from '@/lib/avc/types'
 import { COMMAND_ALIASES, COMMAND_ALIAS_PARAMS, OPEN_TRIGGERS, SEARCH_TRIGGERS } from './aliases'
 import { normalizeCommandText, stripFillers } from './normalizer'
 import { consumeLeadingNumber, parseRussianNumber } from './russian-numbers'
@@ -112,10 +112,13 @@ export const LABELS: Record<VoiceCommandType, string> = {
   // --- Task 8-b: контракты v2 ---
   [VoiceCommandType.Mute]: 'Выключить звук',
   [VoiceCommandType.Unmute]: 'Включить звук',
-  [VoiceCommandType.SetWatchStatus]: 'Статус просмотра',
-  [VoiceCommandType.ToggleFavorite]: 'Избранное',
+  [VoiceCommandType.SetWatchStatus]: 'Статус просмотра (на сайте)',
+  [VoiceCommandType.ToggleFavorite]: 'Избранное (на сайте)',
   [VoiceCommandType.ContinueWatching]: 'Продолжить просмотр',
-  [VoiceCommandType.ShowLibrary]: 'Открыть библиотеку',
+  [VoiceCommandType.ShowLibrary]: 'Открыть библиотеку YummyAnime',
+  [VoiceCommandType.OpenProfile]: 'Открыть мой профиль',
+  [VoiceCommandType.CheckAccount]: 'Проверить аккаунт',
+  [VoiceCommandType.AccountLogout]: 'Выйти из аккаунта',
   [VoiceCommandType.AddVoiceAlias]: 'Добавить алиас озвучки',
   [VoiceCommandType.Unknown]: 'Не распознано',
 }
@@ -241,7 +244,7 @@ function extractSound(text: string): VoiceCommand | null {
 }
 
 /** Статусы просмотра: смотрю / планы / просмотрено / брошено / отложено */
-const WATCH_STATUS_PATTERNS: Array<{ re: RegExp; status: WatchStatus }> = [
+const WATCH_STATUS_PATTERNS: Array<{ re: RegExp; status: string }> = [
   { re: /(?:добавь|поставь|перемести|закинь|перенеси)\s+в\s+смотрю|^я\s+смотрю\s+это$/, status: 'watching' },
   { re: /(?:^|\s)(?:в|во)\s+планы|запланирован/, status: 'planned' },
   { re: /уже\s+посмотрел|^просмотрен[оое]$|отмет(?:ить|ь)?\s+как\s+просмотрен/, status: 'completed' },
@@ -282,10 +285,34 @@ function extractContinueWatching(text: string): VoiceCommand | null {
   return null
 }
 
-/** Библиотека: «открой библиотеку», «мои списки», «мои аниме», «моя коллекция» */
+/** Библиотека: «открой библиотеку», «мои закладки», «мои списки», «мои аниме», «моя коллекция» */
 function extractLibrary(text: string): VoiceCommand | null {
-  if (/(?:открой|покажи|перейди\s+в)\s+библиотеку|^библиотека$|мои\s+списки|мои\s+аниме|моя\s+коллекция/.test(text)) {
-    return { type: VoiceCommandType.ShowLibrary, params: {}, confidence: 0.9, label: 'Библиотека' }
+  if (/(?:открой|покажи|перейди\s+в)\s+библиотеку|^библиотека$|мои\s+списки|мои\s+аниме|моя\s+коллекция|мои\s+закладки|моё\s+избранное|мое\s+избранное/.test(text)) {
+    return { type: VoiceCommandType.ShowLibrary, params: {}, confidence: 0.9, label: 'Библиотека YummyAnime' }
+  }
+  return null
+}
+
+/** «открой мой профиль» / «мой профиль» */
+function extractOpenProfile(text: string): VoiceCommand | null {
+  if (/(?:открой|покажи)?\s*(?:мой|мою)\s+профил|^мой\s+профил|перейди\s+в\s+профил/.test(text)) {
+    return { type: VoiceCommandType.OpenProfile, params: {}, confidence: 0.9, label: 'Мой профиль на сайте' }
+  }
+  return null
+}
+
+/** «проверь аккаунт» / «я вошёл?» / «проверь вход» */
+function extractCheckAccount(text: string): VoiceCommand | null {
+  if (/проверь\s+(?:аккаунт|вход)|какой\s+аккаунт|я\s+вошёл|я\s+вошел|состояние\s+аккаунта/.test(text)) {
+    return { type: VoiceCommandType.CheckAccount, params: {}, confidence: 0.9, label: 'Проверить аккаунт' }
+  }
+  return null
+}
+
+/** «выйди из аккаунта» / «разлогинься» */
+function extractAccountLogout(text: string): VoiceCommand | null {
+  if (/выйди\s+из\s+аккаунта|выйти\s+из\s+аккаунта|разлогинься/.test(text)) {
+    return { type: VoiceCommandType.AccountLogout, params: {}, confidence: 0.85, label: 'Выйти из аккаунта' }
   }
   return null
 }
@@ -518,6 +545,15 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
 
   const lib = extractLibrary(text)
   if (lib) return lib
+
+  const prof = extractOpenProfile(text)
+  if (prof) return prof
+
+  const chk = extractCheckAccount(text)
+  if (chk) return chk
+
+  const logout = extractAccountLogout(text)
+  if (logout) return logout
 
   // 1. Озвучка: "озвучка anidub", "переключи на анилибрию", "следующая озвучка"
   const dub = extractSelectVoice(words)

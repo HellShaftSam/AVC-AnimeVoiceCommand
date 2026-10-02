@@ -1,30 +1,17 @@
 /**
- * Anime Voice Controller — клиент API аккаунтов/библиотеки/алиасов (Task 9-a).
+ * Anime Voice Controller — клиент API (thin client).
  *
- * Чистый транспорт: только fetch + JSON + cookie-сессия (same-origin).
- * Никакого знания о store: после login/register/logout вызывающая сторона сама
- * обновляет состояние (page.tsx / AuthDialog).
+ * Аккаунт: РЕАЛЬНАЯ сессия YummyAnime (сайт — источник истины). Локального
+ * аккаунта и локальной библиотеки больше нет — есть только:
+ *   /api/yummy/account    — состояние аккаунта (профиль с сайта)
+ *   /api/yummy/session    — мост cookie-сессии из Electron-webview / выход
+ *   /api/yummy/favorites  — избранное с сайта
+ *   /api/aliases          — глобальные алиасы озвучек
  *
- * Правила ошибок:
- *   - ошибки сервера → throw Error(сообщение от сервера из {error});
- *   - ИСКЛЮЧЕНИЯ: putLibrary/addAlias возвращают null при 401 (не залогинен) —
- *     это ожидаемый сценарий, а не ошибка.
+ * Правила ошибок: ошибки сервера → throw Error({error}); сетевые сбои аккаунта
+ * не бросаются — приходят как snapshot с state='unavailable' (offline behavior).
  */
-import type { LibraryEntryDto, UserInfoDto, VoiceAliasRow, WatchStatus } from './types'
-
-/** Тело PUT /api/library — все поля кроме animeId/title опциональны (partial update) */
-export interface PutLibraryPayload {
-  animeId: number
-  title: string
-  slug?: string | null
-  poster?: string | null
-  status?: WatchStatus
-  favorite?: boolean
-  episode?: number | null
-  positionSec?: number | null
-  totalEpisodes?: number | null
-  currentDub?: string | null
-}
+import type { VoiceAliasRow, YummyAccountSnapshot, YummyFavoritesResult } from './types'
 
 /** Достать сообщение об ошибке из ответа сервера ({error} или статус) */
 async function readError(res: Response): Promise<string> {
@@ -51,77 +38,45 @@ async function jsonFetch(url: string, init?: RequestInit): Promise<Response> {
 }
 
 export const avcApi = {
-  /** Текущий пользователь (null — не залогинен). Сетевые ошибки пробрасываются. */
-  async me(): Promise<UserInfoDto | null> {
-    const res = await jsonFetch('/api/auth/me')
+  /**
+   * Состояние аккаунта YummyAnime. refresh=true — принудительная проверка,
+   * минуя TTL-кэш (кнопки «Проверить», возврат с сайта после входа).
+   */
+  async yummyAccount(refresh = false): Promise<YummyAccountSnapshot> {
+    const res = await jsonFetch(`/api/yummy/account${refresh ? '?refresh=1' : ''}`)
     if (!res.ok) throw new Error(await readError(res))
-    const body = (await res.json()) as { user: UserInfoDto | null }
-    return body.user ?? null
-  },
-
-  /** Вход. 401 → «Неверный логин или пароль». */
-  async login(username: string, password: string): Promise<UserInfoDto> {
-    const res = await jsonFetch('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    })
-    if (!res.ok) {
-      throw new Error(res.status === 401 ? 'Неверный логин или пароль' : await readError(res))
-    }
-    const body = (await res.json()) as { user: UserInfoDto }
-    return body.user
-  },
-
-  /** Регистрация (409 «Имя уже занято» и прочие ошибки — throw). */
-  async register(username: string, password: string): Promise<UserInfoDto> {
-    const res = await jsonFetch('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    })
-    if (!res.ok) throw new Error(await readError(res))
-    const body = (await res.json()) as { user: UserInfoDto }
-    return body.user
-  },
-
-  /** Выход (cookie очищается на сервере). */
-  async logout(): Promise<void> {
-    const res = await jsonFetch('/api/auth/logout', { method: 'POST' })
-    if (!res.ok) throw new Error(await readError(res))
-  },
-
-  /** Библиотека пользователя (без сессии — пустой список). */
-  async library(): Promise<LibraryEntryDto[]> {
-    const res = await jsonFetch('/api/library')
-    if (!res.ok) throw new Error(await readError(res))
-    const body = (await res.json()) as { entries?: LibraryEntryDto[] }
-    return body.entries ?? []
+    return (await res.json()) as YummyAccountSnapshot
   },
 
   /**
-   * Создать/обновить запись библиотеки (upsert по (userId, animeId)).
-   * 401 → null (не залогинен) — НЕ throw. Остальные ошибки — throw.
+   * Мост сессии: передать cookie yummyani.me серверному адаптеру
+   * (в Electron это делает главный процесс из persistent-профиля webview).
+   * Возвращает снимок аккаунта сразу после сохранения — сайт проверяет сессию.
    */
-  async putLibrary(p: PutLibraryPayload): Promise<LibraryEntryDto | null> {
-    const res = await jsonFetch('/api/library', { method: 'PUT', body: JSON.stringify(p) })
-    if (res.status === 401) return null
+  async syncYummySession(cookie: string): Promise<YummyAccountSnapshot> {
+    const res = await jsonFetch('/api/yummy/session', {
+      method: 'POST',
+      body: JSON.stringify({ cookie }),
+    })
     if (!res.ok) throw new Error(await readError(res))
-    const body = (await res.json()) as { entry: LibraryEntryDto }
-    return body.entry
+    const body = (await res.json()) as { account: YummyAccountSnapshot }
+    return body.account
   },
 
-  /** Удалить запись библиотеки. true — удалено/отсутствовало, false — 401/ошибка. */
-  async deleteLibraryEntry(animeId: number): Promise<boolean> {
-    try {
-      const res = await jsonFetch(`/api/library?animeId=${encodeURIComponent(String(animeId))}`, {
-        method: 'DELETE',
-      })
-      return res.ok
-    } catch {
-      return false
-    }
+  /** Выход: сайт уведомляется (best-effort), локальная сессия стирается */
+  async yummyLogout(): Promise<void> {
+    const res = await jsonFetch('/api/yummy/session', { method: 'DELETE' })
+    if (!res.ok) throw new Error(await readError(res))
   },
 
-  /** Пользовательские алиасы озвучек (без сессии — []). */
+  /** Избранное с сайта (available=false — честная причина, а не выдуманные данные) */
+  async yummyFavorites(refresh = false): Promise<YummyFavoritesResult> {
+    const res = await jsonFetch(`/api/yummy/favorites${refresh ? '?refresh=1' : ''}`)
+    if (!res.ok) throw new Error(await readError(res))
+    return (await res.json()) as YummyFavoritesResult
+  },
+
+  /** Пользовательские алиасы озвучек (глобальные) */
   async aliases(): Promise<VoiceAliasRow[]> {
     const res = await jsonFetch('/api/aliases')
     if (!res.ok) throw new Error(await readError(res))
@@ -129,17 +84,16 @@ export const avcApi = {
     return body.aliases ?? []
   },
 
-  /** Добавить алиас озвучки. 401 → null (не залогинен) — НЕ throw. */
+  /** Добавить алиас озвучки. */
   async addAlias(
     targetName: string,
     alias: string,
     targetType: string = 'voice',
-  ): Promise<VoiceAliasRow | null> {
+  ): Promise<VoiceAliasRow> {
     const res = await jsonFetch('/api/aliases', {
       method: 'POST',
       body: JSON.stringify({ targetType, targetName, alias }),
     })
-    if (res.status === 401) return null
     if (!res.ok) throw new Error(await readError(res))
     const body = (await res.json()) as { alias: VoiceAliasRow }
     return body.alias
