@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Player } from './player'
+import { toast } from '@/hooks/use-toast'
 import {
   executeCommand,
   getCachedDetails,
@@ -170,12 +171,29 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   }
 
   // --- Статусы/избранное/оценка — РЕАЛЬНЫЕ действия через сессию сайта -----
+  // Действия профиля обязаны давать ВИДНЫЙ результат: раньше результат
+  // executeCommand выбрасывался — клик выглядел «мёртвым» (ни успеха,
+  // ни ошибки, ни просьбы войти). Теперь каждый результат виден.
+  const ACCOUNT_ACT_TYPES = new Set([
+    VoiceCommandType.SetWatchStatus,
+    VoiceCommandType.ToggleFavorite,
+    VoiceCommandType.RateAnime,
+    VoiceCommandType.RemoveRating,
+  ])
   const act = (
     type: VoiceCommandType,
     params: Record<string, string | number | boolean>,
     label: string,
   ) => {
-    void executeCommand({ type, params, confidence: 1, label })
+    void executeCommand({ type, params, confidence: 1, label }).then((result) => {
+      if (!ACCOUNT_ACT_TYPES.has(type)) return // остальные сами показывают toast
+      useAvcStore.getState().setVoiceMessage(result.message)
+      if (result.success) {
+        toast({ description: `✓ ${result.message}` })
+      } else {
+        toast({ variant: 'destructive', description: result.message })
+      }
+    })
   }
 
   const openOnSite = () => {

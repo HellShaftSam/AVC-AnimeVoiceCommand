@@ -737,7 +737,16 @@ async function runAccountAction(
       // HTTP принят; верификация unconfirmed/mismatch — честное сообщение сайта
       return ok(res.message)
     }
-    return fail(res.message)
+    // Отказ сайта. Если причина — сессия (401/403 или текст) — сразу открываем
+    // диалог входа: пользователь должен ПОНЯТЬ, что нужно перелогиниться
+    // (раньше это сообщение тонул в статусной строке / выбрасывалось кликами).
+    const msg = res.message ?? 'Действие не выполнено'
+    const sessionDead =
+      res.httpStatus === 401 ||
+      res.httpStatus === 403 ||
+      /Сессия|Войдите|авторизов/i.test(msg)
+    if (sessionDead) useAvcStore.getState().setAuthOpen(true)
+    return fail(msg)
   } catch (e) {
     return fail('Действие не выполнено', e instanceof Error ? e.message : String(e))
   }
