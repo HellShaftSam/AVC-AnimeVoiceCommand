@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-03T19:02:47.587Z",
+  "ranAt": "2026-10-03T22:00:59.191Z",
   "platform": "linux",
   "electron": "33.2.0",
   "workerStarted": true,
@@ -34,11 +34,11 @@
       "пау",
       "пауза"
     ],
-    "rawFirst": "{\"utteranceId\":1,\"text\":\"пау\",\"ms\":887,\"earlyCommand\":\"Pause\"}",
+    "rawFirst": "{\"utteranceId\":1,\"text\":\"пау\",\"ms\":891,\"earlyCommand\":\"Pause\"}",
     "finalText": "пауза",
     "earlyCommand": "Pause",
     "sttUtterances": 1,
-    "sttLastFinalMs": 1310,
+    "sttLastFinalMs": 1303,
     "sttError": null
   }
 }

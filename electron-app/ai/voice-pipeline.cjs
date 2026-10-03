@@ -148,6 +148,39 @@ class VoicePipeline extends EventEmitter {
   }
 
   /**
+   * Фаза 2 (аудит №3, «медленный запуск»): поэтапная инициализация.
+   * Сразу — только STT (голос готов ASAP); TTS/LLM — отложенно в фоне,
+   * чтобы старт воркера не тянул тяжёлые модели, а первая команда не ждала LLM.
+   */
+  async initializeCoreThenDeferred({ deferredDelayMs = 8000 } = {}) {
+    const out = {}
+    if (STTService.modelsPresent(this.modelsDir)) out.stt = await this.stt.initialize()
+    this.emit('services-status', this.getStatus().ready)
+    if (this._deferredTimer) clearTimeout(this._deferredTimer)
+    this._deferredTimer = setTimeout(() => {
+      void this.initializeDeferred().catch(() => undefined)
+    }, deferredDelayMs)
+    return out
+  }
+
+  /** Догрузка TTS и LLM (фон после старта или по требованию перед первым использованием) */
+  async initializeDeferred() {
+    const out = {}
+    if (this._deferredTimer) {
+      clearTimeout(this._deferredTimer)
+      this._deferredTimer = null
+    }
+    if (TTSService.modelPresent(this.modelsDir) && !this.tts.isReady()) {
+      out.tts = await this.tts.initialize().catch((e) => ({ error: e.message }))
+    }
+    if (LLMService.modelPresent(this.modelsDir) && !this.llm.isReady()) {
+      out.llm = await this.llm.initialize().catch((e) => ({ error: e.message }))
+    }
+    this.emit('services-status', this.getStatus().ready)
+    return out
+  }
+
+  /**
    * §12: EarlyCommandDetector — распознавание безопасных намерений по ЧАСТИЧНОЙ транскрипции.
    * Возвращает { type } или null. Дедупликация: одна ранне-исполненная команда на utterance.
    */
@@ -187,13 +220,23 @@ class VoicePipeline extends EventEmitter {
  * как у /api/voice/interpret: { commands, needsClarification, clarifyQuestion }.
    */
   async llmRoute(text, context, opts = {}) {
-    if (!this.enabled || !this.llm.isReady()) return null
+    if (!this.enabled) return null
+    // ленивая догрузка: первая команда не должна падать только потому,
+    // что фоновая инициализация ещё не дошла до LLM (фаза 2.2)
+    if (LLMService.modelPresent(this.modelsDir) && !this.llm.isReady()) {
+      await this.initializeDeferred().catch(() => undefined)
+    }
+    if (!this.llm.isReady()) return null
     return this.llm.route(text, { context, ...opts })
   }
 
   /** §22–§29: локальный TTS. Рендерер получает WAV-файл + длительность для ducking. */
   async ttsSpeak(text, opts = {}) {
-    if (!this.enabled || !this.tts.isReady()) return null
+    if (!this.enabled) return null
+    if (TTSService.modelPresent(this.modelsDir) && !this.tts.isReady()) {
+      await this.initializeDeferred().catch(() => undefined)
+    }
+    if (!this.tts.isReady()) return null
     if (opts.cancelPrevious !== false) this.tts.cancelCurrentSpeech()
     return this.tts.speak(text, opts)
   }

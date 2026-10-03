@@ -793,3 +793,14 @@ Work Log:
 - ГОЛОС (корень): дефолт sttEngine='auto' → в EXE Web Speech API молча мёртв, фолбэк /api/voice/asr требует облачных кредов ZAI; локальный IPC-движок (правильный) не выбирался. ФИКС: в EXE «auto» = сначала локальный движок (use-voice.ts exeLocalAvailable), фолбэки честные; детектор мёртвого микрофона (нулевой RMS 5с → останов + понятная ошибка); feedAudio-ошибка воркера → статус + teardown (было молча); пустые транскрипты → сообщение в PTT (было тишина); guard зависшего flush (10с → ошибка); engineName в VoiceApi (Браузер/Сервер/Локально бейдж); подсказка движка в настройках
 - КОМАНДЫ (корень Блич-бага): extractEpisodeSelect выбрасывал тайтл перед «N серия» → SelectEpisode играл серию ТЕКУЩЕГО аниме. ФИКС: extractTitleEpisode (композит SearchAnime{query,open,episode}) до SelectEpisode; многословные триггеры («хочу посмотреть»), 4-значные серии (Ван-Пис 1000); голый тайтл = валидный поиск (fallback, последний шаг, без триггеров/секций/чисел); executor: серия играет ВНУТРИ найденного тайтла, частичный провал честен («открыт, но серия не найдена»); pendingOptions.episode доигрывается после выбора варианта
 - ТЕСТЫ: парсер 28/28 (Наруто/Блич 20/Шиппуден 10/ван пис 1000/следующая/5 серия/алиасы/контекст); E2E в браузере на живом сайте: «блич 1 серия» → открыт Блич; «наруто 1 серия» → вкладка сменилась на Наруто, «Серия 1 из 220» в плеере — БАГ ПОДТВЕРЖДЁН ИСПРАВЛЕННЫМ; lint чист
+
+---
+Task ID: postrelease-fix-3
+Agent: Z.ai Code (main)
+Task: Приоритет 3 — медленный запуск EXE (фаза 2)
+
+Work Log:
+- Телеметрия старта в main.cjs: монотонные метки (main-module-loaded → app-ready → auth-service-ready → ai-worker-spawned → next-server-ready → window-created → ui-loaded → ui-usable → ai-worker-services-status) + JSON-отчёт userData/logs/startup-report.json
+- Поэтапная инициализация AI: voice-pipeline.initializeCoreThenDeferred() — STT сразу (голос готов ASAP), TTS/LLM — фон через 8с + on-demand догрузка в llmRoute/ttsSpeak; ai-worker.cjs переключён на новый вход
+- ВЕРИФИКАЦИЯ на реальных моделях (Linux, xvfb): ai-selftest EXIT=0 (workerStarted, stt/tts/llm ready, TTS→STT→early Pause, 4 partials); телеметрия показала: STT готов +2.2с, TTS+LLM догрузились +20с фоном; полный pipeline-selftest 7/7 PASS (вкл. LLM-фолбэк 5.3с и запрет опасных ранних команд)
+- Честное ограничение: числовые замеры холодного/тёплого старта portable EXE на Windows — blocked by environment; доминирующая стоимость — распаковка ~385МБ в %TEMP% при каждом запуске (поведение portable-таргета), методика замера приложена в финальном отчёте

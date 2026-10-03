@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-03T19:02:13.447Z",
+  "ranAt": "2026-10-03T22:01:44.190Z",
   "tests": [
     {
       "name": "services-init",
@@ -14,7 +14,7 @@
     {
       "name": "tts-stt-early-pause",
       "status": "PASS",
-      "detail": "TTS «Пауза.» → STT final: «пауза»; early-command Pause ×1; final после early помечен earlyCommandType=Pause (§14)"
+      "detail": "TTS «Пауза.» → STT final: «полза»; early-command Pause ×0; final после early помечен earlyCommandType=— (§14)"
     },
     {
       "name": "unsafe-early-blocked",
@@ -24,7 +24,7 @@
     {
       "name": "llm-fallback",
       "status": "PASS",
-      "detail": "«включи то, на чём я вчера остановился» → ContinueWatching (5536 мс)"
+      "detail": "«включи то, на чём я вчера остановился» → ContinueWatching (5301 мс)"
     },
     {
       "name": "tts-reply",

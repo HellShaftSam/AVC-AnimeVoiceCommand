@@ -93,15 +93,16 @@ const handlers = {
 
 if (process.parentPort) {
   process.parentPort.on('message', (e) => handleMessage(e.data))
-  // инициализация сервисов фоном после старта воркера (§49)
+  // поэтапная инициализация фоном после старта воркера (§49 + фаза 2 аудита):
+  // сразу STT (голос готов ASAP), TTS/LLM — догрузка в фоне/по требованию
   setTimeout(() => {
-    void pipeline.initializeServices()
+    void pipeline.initializeCoreThenDeferred()
   }, 100)
 } else if (typeof process.send === 'function') {
   process.on('message', (msg) => handleMessage(msg))
-  // инициализация сервисов фоном после старта воркера (§49)
+  // поэтапная инициализация фоном после старта воркера (§49 + фаза 2 аудита)
   setTimeout(() => {
-    void pipeline.initializeServices()
+    void pipeline.initializeCoreThenDeferred()
   }, 100)
 }
 

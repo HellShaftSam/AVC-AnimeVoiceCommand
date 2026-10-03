@@ -20,7 +20,36 @@ const childProcess = { fork: childFork }
 const http = require('http')
 const path = require('path')
 const fs = require('fs')
+const { performance } = require('perf_hooks')
 const { AuthenticationService, PARTITION } = require('./auth/authentication-service.cjs')
+
+// --- стартовая телеметрия (фаза 2 аудита: измеряем, а не «кажется быстрее») ---
+// Монотонные метки от загрузки модуля до готового UI и готового AI; JSON-отчёт
+// пишется в userData/logs/startup-report.json (для сравнения сборок до/после).
+const START_T0 = performance.now()
+const STARTUP_MARKS = [{ mark: 'main-module-loaded', ms: 0 }]
+function markStartup(name) {
+  STARTUP_MARKS.push({ mark: name, ms: Math.round(performance.now() - START_T0) })
+  log(`[Startup] ${name}: +${STARTUP_MARKS[STARTUP_MARKS.length - 1].ms} мс`)
+}
+function writeStartupReport(extra = {}) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const report = {
+      version: app.getVersion(),
+      platform: process.platform,
+      electron: process.versions.electron,
+      writtenAt: new Date().toISOString(),
+      totalMs: Math.round(performance.now() - START_T0),
+      marks: STARTUP_MARKS,
+      ...extra,
+    }
+    fs.writeFileSync(path.join(dir, 'startup-report.json'), JSON.stringify(report, null, 2))
+  } catch {
+    /* телеметрия не должна ломать запуск */
+  }
+}
 
 // Локальный AI-слой (спецификация §4–§134) — модульный: при отсутствии пакетов/моделей
 // приложение продолжает работать (§0, §129). Загружаем лениво и честно отражаем статус.
@@ -199,6 +228,11 @@ async function createMainWindow(url) {
   })
 
   await mainWindow.loadURL(url)
+  markStartup('ui-loaded')
+  mainWindow.webContents.once('did-finish-load', () => {
+    markStartup('ui-usable')
+    writeStartupReport()
+  })
   return mainWindow
 }
 
@@ -310,6 +344,7 @@ function startAiWorker() {
     aiWorker.stderr && aiWorker.stderr.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
     aiWorker.on('message', (msg) => {
       if (msg && msg.event) {
+        if (msg.event === 'services-status') markStartup('ai-worker-services-status')
         const channel = AI_EVENT_CHANNELS[msg.event]
         if (channel && mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(channel, msg.payload)
@@ -335,6 +370,7 @@ function startAiWorker() {
       }
     })
     log('[AI] Node-процесс воркера запущен (изолированный нативный AI, §130)')
+    markStartup('ai-worker-spawned')
   } catch (e) {
     aiWorkerFailed = e.message
     log(`[AI] Не удалось запустить AI-воркер (AI недоступен): ${e.message}`)
@@ -408,6 +444,7 @@ async function runSelftest() {
 }
 
 app.whenReady().then(async () => {
+  markStartup('app-ready')
   log('[Auth] Initializing YummyAnime session (persistent partition)')
 
   if (SELFTEST) {
@@ -512,6 +549,8 @@ app.whenReady().then(async () => {
     }
   })
 
+  markStartup('auth-service-ready')
+
   setupIpc(authService)
 
   // Локальный AI-слой: utilityProcess запускается сразу, IPC ставится до окна (§49):
@@ -520,7 +559,9 @@ app.whenReady().then(async () => {
   startAiWorker()
 
   const url = await startNextServer()
+  markStartup('next-server-ready')
   await createMainWindow(url)
+  markStartup('window-created')
   log(`[Main] UI ready at ${url}`)
 
   // Фоновая сверка состояния аккаунта при старте (одна проверка, без поллинга)
