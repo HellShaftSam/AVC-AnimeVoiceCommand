@@ -29,7 +29,7 @@
 SHA-256 каждой сборки записан в `VERSION.txt`. Проверка на Windows:
 
 ```powershell
-Get-FileHash AVC-Anime-Portable-1.0.0.exe -Algorithm SHA256
+Get-FileHash AVC-Anime-Portable-1.1.0.exe -Algorithm SHA256
 ```
 
 Совпадение хэша = файл не повреждён и подлинно собран из этого репозитория.
@@ -58,7 +58,7 @@ node ../scripts/validate-ai-assets.mjs   # проверка URL моделей
 #   → electron-app/runtime-node/node.exe
 node ../scripts/assemble-ai-pack.mjs     # → ai-pack/ (на Windows сам возьмёт win-бинарники)
 npx electron-builder --win portable --config electron-builder.json --publish never
-# → dist/AVC-Anime-Portable-1.0.0.exe
+# → dist/AVC-Anime-Portable-1.1.0.exe
 ```
 
 На Linux wine не нужен: `electron-app/build/afterpack.cjs` прописывает иконку и
