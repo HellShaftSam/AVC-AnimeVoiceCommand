@@ -27,6 +27,8 @@ export type VoiceStatus = 'idle' | 'listening' | 'recognizing' | 'executing' | '
 export interface PendingOptions {
   query: string
   items: AnimeCard[]
+  /** Запрошенная серия — доигрывается после выбора варианта («наруто 1 серия» → 2 варианта) */
+  episode?: number
 }
 
 export interface AddTabData {

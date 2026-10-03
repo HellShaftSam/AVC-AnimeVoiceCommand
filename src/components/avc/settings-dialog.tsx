@@ -478,7 +478,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         <SectionTitle>Движок распознавания</SectionTitle>
         <SettingRow
           label="Движок STT"
-          hint="Браузерный быстрее, серверный (Whisper) точнее распознаёт русский"
+          hint="В EXE «Авто» = локальный офлайн-движок (T-One). Браузерный доступен только в web-версии (Chrome/Edge)"
         >
           <Select
             value={settings.sttEngine}

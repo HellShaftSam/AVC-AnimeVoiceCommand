@@ -30,7 +30,8 @@ function statusLine(status: string, message: string): string {
     case 'error':
       return message || 'Ошибка'
     default:
-      return '🎤 Готов'
+      // idle тоже может нести полезное сообщение (напр. «Речь не распознана…»)
+      return message || '🎤 Готов'
   }
 }
 
@@ -49,7 +50,8 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   const levelColor =
     micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-amber-400' : 'bg-rose-500'
   const interim = listening && voice.interimText.trim() ? voice.interimText.trim() : null
-  const engineLabel = voice.browserEngine ? 'Браузер' : 'Сервер'
+  const engineLabel =
+    voice.engineName === 'local' ? 'Локально (офлайн)' : voice.engineName === 'browser' ? 'Браузер' : 'Сервер'
 
   const micHandlers = pushToTalk
     ? {

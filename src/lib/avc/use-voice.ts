@@ -120,6 +120,8 @@ export interface VoiceApi {
   isMicSupported: boolean
   /** Фактический движок текущей/последней сессии: true = Web Speech API, false = серверный ASR */
   browserEngine: boolean
+  /** Фактический движок последней сессии (расширенный, для UI-бейджа) */
+  engineName: 'browser' | 'server' | 'local'
   alwaysListening: boolean
   startPushToTalk: () => Promise<void>
   stopPushToTalkAndProcess: () => void
@@ -143,6 +145,7 @@ export function useVoice(): VoiceApi {
   // фактическую поддержку уточняем после монтирования.
   const [isMicSupported, setIsMicSupported] = useState<boolean>(true)
   const [browserEngine, setBrowserEngine] = useState<boolean>(false)
+  const [engineName, setEngineName] = useState<'browser' | 'server' | 'local'>('server')
   const [micLevel, setMicLevel] = useState<number>(0)
   const [interimText, setInterimText] = useState<string>('')
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([])
@@ -191,6 +194,12 @@ export function useVoice(): VoiceApi {
   const alwaysRef = useRef(false)
   const startRef = useRef<(() => Promise<void>) | null>(null)
   const stopRef = useRef<(() => void) | null>(null)
+  /** С каких пор уровень сигнала строго нулевой (детектор «мёртвого» микрофона) */
+  const noAudioSinceRef = useRef<number | null>(null)
+  /** Ошибка передачи аудио AI-воркеру уже показана (не спамим) */
+  const feedFailedRef = useRef(false)
+  /** Страховка: локальный flush не вернул финал (воркер умер/завис) */
+  const localFlushGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Web Speech API
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const finalTranscriptRef = useRef('')
@@ -238,6 +247,8 @@ export function useVoice(): VoiceApi {
   const startRafLoop = useCallback((withVad: boolean) => {
     silenceStartRef.current = null
     lastLevelTsRef.current = 0
+    noAudioSinceRef.current = null
+    feedFailedRef.current = false
     const tick = () => {
       if (!mountedRef.current) return
       const analyser = analyserRef.current
@@ -247,6 +258,23 @@ export function useVoice(): VoiceApi {
       if (now - lastLevelTsRef.current >= MIC_LEVEL_INTERVAL_MS) {
         lastLevelTsRef.current = now
         setMicLevel(rms)
+      }
+      // Детектор «мёртвого» микрофона: строго нулевой уровень 5 с подряд —
+      // устройство не отдаёт сэмплы (отключено/занято другим приложением/нет разрешения).
+      // Честно останавливаем сессию и сообщаем — вместо вечного «Слушаю…» (фаза 6.2/6.5).
+      if (rms < 1e-4) {
+        if (noAudioSinceRef.current === null) {
+          noAudioSinceRef.current = now
+        } else if (now - noAudioSinceRef.current >= 5000) {
+          stopRef.current?.()
+          useAvcStore
+            .getState()
+            .setVoiceStatus('error', 'Микрофон молчит: уровень сигнала нулевой. Проверьте устройство и разрешение доступа.')
+          scheduleErrorClear()
+          return
+        }
+      } else {
+        noAudioSinceRef.current = null
       }
       if (withVad) {
         if (rms < vadRmsRef.current) {
@@ -514,8 +542,15 @@ export function useVoice(): VoiceApi {
           useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
           void handleRecognizedText(transcript)
         } else {
+          // 6.4: пустой результат — не молчим (в PTT; в always-listening это нормальный шум)
           const cur = useAvcStore.getState().voiceStatus
-          if (cur === 'listening') useAvcStore.getState().setVoiceStatus('idle')
+          if (cur === 'listening') {
+            if (!alwaysRef.current && performance.now() - startedAtRef.current > 1000) {
+              useAvcStore.getState().setVoiceStatus('idle', 'Речь не распознана — попробуйте ещё раз')
+            } else {
+              useAvcStore.getState().setVoiceStatus('idle')
+            }
+          }
           rearmIfNeeded()
         }
       }
@@ -523,6 +558,7 @@ export function useVoice(): VoiceApi {
       recognition.start()
       startedAtRef.current = performance.now()
       setBrowserEngine(true) // движок фактически запустился
+      setEngineName('browser')
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю...')
       // индикатор уровня (параллельный лёгкий захват)
       void startLevelIndicator()
@@ -565,6 +601,7 @@ export function useVoice(): VoiceApi {
       startedAtRef.current = performance.now()
       silenceStartRef.current = null
       setBrowserEngine(false) // движок фактически запустился
+      setEngineName('server')
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю...')
       startRafLoop(true)
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
@@ -616,7 +653,23 @@ export function useVoice(): VoiceApi {
           const v = Math.max(-1, Math.min(1, input[i] * (settings.micGain || 1)))
           int16[i] = Math.round(v * 32767)
         }
-        void ai.feedAudio(int16).catch(() => undefined)
+        void ai.feedAudio(int16).catch((err) => {
+          // воркер умер/завис — не молчим: честная ошибка и останов сессии (фаза 6.6)
+          if (feedFailedRef.current) return
+          feedFailedRef.current = true
+          try {
+            processor.disconnect()
+            source.disconnect()
+          } catch {
+            /* уже разобрано */
+          }
+          localSessionRef.current = null
+          teardownAudio()
+          useAvcStore
+            .getState()
+            .setVoiceStatus('error', `AI-воркер недоступен: ${String(err?.message || err).slice(0, 120)}. Перезапустите голосовой сервис в Настройках.`)
+          scheduleErrorClear()
+        })
       }
       // ScriptProcessor требует подключение к destination
       const mute = ctx.createGain()
@@ -625,6 +678,7 @@ export function useVoice(): VoiceApi {
       mute.connect(ctx.destination)
       localSessionRef.current = { ctx, processor, source }
       setBrowserEngine(true) // «браузероподобный» движок с interim-результатами
+      setEngineName('local')
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю (локально)...')
       startRafLoop(false)
       startedAtRef.current = performance.now()
@@ -678,6 +732,10 @@ export function useVoice(): VoiceApi {
       }
       if (localFinalHandledRef.current.has(p.utteranceId)) return
       localFinalHandledRef.current.add(p.utteranceId)
+      if (localFlushGuardRef.current) {
+        clearTimeout(localFlushGuardRef.current)
+        localFlushGuardRef.current = null
+      }
       if (localFinalHandledRef.current.size > 100) {
         const first = localFinalHandledRef.current.values().next().value
         if (first !== undefined) localFinalHandledRef.current.delete(first)
@@ -686,6 +744,11 @@ export function useVoice(): VoiceApi {
         useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
         teardownAudio()
         void handleRecognizedText(p.text)
+      } else if (!alwaysRef.current) {
+        // 6.4: речь была (VAD сработала), но текста нет — честно сообщаем
+        useAvcStore
+          .getState()
+          .setVoiceStatus('idle', 'Речь была, но распознать её не удалось — попробуйте говорить чётче')
       }
     })
     return () => {
@@ -719,17 +782,30 @@ export function useVoice(): VoiceApi {
       return
     }
 
-    // --- Движок «local» (EXE + локальные модели): Silero VAD + T-One стриминговый STT ---
-    if (settings.sttEngine === 'local') {
+    // Движок «local»: в EXE он и есть правильный путь для «Авто» — Web Speech API
+    // в Chromium-Electron без ключей Google молча не распознаёт, а серверный ASR
+    // требует облачных кредов, которых на машине пользователя нет. Поэтому в
+    // packaged-сборке «Авто» = сначала локальный офлайн-движок (аудит, корень №1).
+    const exeLocalAvailable =
+      (settings.sttEngine === 'local' || settings.sttEngine === 'auto') &&
+      !!getElectronBridge()?.ai?.available
+    if (exeLocalAvailable) {
       const okLocal = await startLocalSession()
       if (okLocal) return
       if (seq !== sessionSeqRef.current) return
-      useAvcStore.getState().setVoiceStatus(
-        'error',
-        'Локальный STT недоступен (модели не установлены или AI-воркер не запущен). Откройте Настройки → AI.',
-      )
+      if (settings.sttEngine === 'local') {
+        useAvcStore.getState().setVoiceStatus(
+          'error',
+          'Локальный STT недоступен (модели не установлены или AI-воркер не запущен). Откройте Настройки → AI.',
+        )
+        scheduleErrorClear()
+        return
+      }
+      // «auto» в EXE: локальный не готов — честно падаем дальше (браузер/сервер)
+      useAvcStore
+        .getState()
+        .setVoiceStatus('error', 'Локальный STT не готов (модели не установлены?) — пробую запасной движок…')
       scheduleErrorClear()
-      return
     }
 
     // --- Движок 1: Web Speech API (ru-RU) ---
@@ -769,6 +845,17 @@ export function useVoice(): VoiceApi {
       const ai = getElectronBridge()?.ai
       void ai?.flushStt().catch(() => undefined)
       useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
+      // 6.6: если финал так и не пришёл (воркер завис) — снимаем зависший статус
+      if (localFlushGuardRef.current) clearTimeout(localFlushGuardRef.current)
+      localFlushGuardRef.current = setTimeout(() => {
+        const cur = useAvcStore.getState().voiceStatus
+        if (cur === 'recognizing') {
+          useAvcStore
+            .getState()
+            .setVoiceStatus('error', 'STT не вернул результат (воркер не отвечает). Перезапустите голосовой сервис в Настройках.')
+          scheduleErrorClear()
+        }
+      }, 10000)
       return
     }
     // Web Speech: остановка — результат придёт в onend; индикатор глушим сразу
@@ -889,6 +976,7 @@ export function useVoice(): VoiceApi {
     voiceMessage,
     isMicSupported,
     browserEngine,
+    engineName,
     alwaysListening,
     startPushToTalk,
     stopPushToTalkAndProcess,

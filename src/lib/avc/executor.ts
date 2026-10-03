@@ -555,12 +555,26 @@ async function executeSearchAnime(cmd: VoiceCommand): Promise<CommandResult> {
 
   const ranked = rankMatches(query, items, (i) => i.title)
   const bestScore = ranked.length > 0 ? ranked[0].score : 0
+  const episode = paramNumber(cmd, 'episode')
   if ((open || items.length === 1) && bestScore >= 0.55) {
     const best = ranked[0].item
-    return navigateToAnime(best, newTab)
+    const navResult = await navigateToAnime(best, newTab)
+    // Композит «тайтл + серия»: серия выбирается ВНУТРИ найденного аниме,
+    // НЕ в текущем контексте (фаза 4.3 — запрет подмены Блич→Наруто и наоборот)
+    if (episode !== null && navResult.success) {
+      const epResult = await playEpisode(episode)
+      if (epResult.success) {
+        return ok(`Открыто «${best.title}», серия ${episode}`, navResult.data)
+      }
+      // честный частичный провал: тайтл открылся, серия — нет (фаза 4.7)
+      return fail(`«${best.title}» открыт, но ${epResult.message.toLowerCase()}`)
+    }
+    return navResult
   }
   const candidates = (ranked.length > 0 ? ranked.map((r) => r.item) : items).slice(0, 6)
-  useAvcStore.getState().setPendingOptions({ query, items: candidates })
+  useAvcStore
+    .getState()
+    .setPendingOptions({ query, items: candidates, episode: episode ?? undefined })
   return ok('Найдено несколько вариантов. Скажите номер.', candidates)
 }
 
@@ -575,7 +589,16 @@ async function executeSelectOption(cmd: VoiceCommand): Promise<CommandResult> {
     return fail(`Вариант ${index} не найден. Доступно вариантов: ${opts.items.length}`)
   }
   st.setPendingOptions(null)
-  return navigateToAnime(item, false)
+  const navResult = await navigateToAnime(item, false)
+  // доигрываем запрошенную серию, если она была в исходной команде
+  if (opts.episode && navResult.success) {
+    const epResult = await playEpisode(opts.episode)
+    if (epResult.success) {
+      return ok(`Открыто «${item.title}», серия ${opts.episode}`, navResult.data)
+    }
+    return fail(`«${item.title}» открыт, но ${epResult.message.toLowerCase()}`)
+  }
+  return navResult
 }
 
 /** Применить выбранную озвучку: запомнить и, если серия открыта, перезапустить плеер */

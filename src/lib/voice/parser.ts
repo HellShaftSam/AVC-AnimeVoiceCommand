@@ -8,7 +8,7 @@
 import { BrowserContext, VoiceCommand, VoiceCommandType } from '@/lib/avc/types'
 import { COMMAND_ALIASES, COMMAND_ALIAS_PARAMS, OPEN_TRIGGERS, SEARCH_TRIGGERS } from './aliases'
 import { normalizeCommandText, stripFillers } from './normalizer'
-import { consumeLeadingNumber, parseRussianNumber } from './russian-numbers'
+import { consumeLeadingNumber, knownNumberWords, parseRussianNumber } from './russian-numbers'
 
 interface ParseCtx {
   navigation: BrowserContext['navigation']
@@ -18,6 +18,8 @@ interface ParseCtx {
 // --- вспомогательные -------------------------------------------------------
 
 const EPISODE_NOUNS = ['серию', 'серия', 'серии', 'серую', 'эпизод', 'эпизода', 'эпизоде']
+/** Множество слов-числительных (для разбора «наруто двадцать первую серию») */
+const NUMBER_WORD_SET: ReadonlySet<string> = new Set(knownNumberWords())
 const SECTION_WORDS: Record<string, VoiceCommandType> = {
   'главн': VoiceCommandType.OpenHome,
   'каталог': VoiceCommandType.OpenCatalog,
@@ -509,6 +511,109 @@ function extractOpen(words: string[]): VoiceCommand | null {
   }
 }
 
+/**
+ * Число в КОНЦЕ цепочки слов + тайтл перед ним («наруто 1», «блич двадцать»).
+ * Возвращает значение и слова тайтла; null — числа на конце нет (или тайтл пуст).
+ */
+function numberFromSuffix(
+  words: string[],
+): { value: number; titleWords: string[] } | null {
+  if (words.length === 0) return null
+  // чистая цифра на конце («наруто 1 …»; до 4 цифр — у длинных саг 1000+ серий)
+  const last = words[words.length - 1]
+  const digit = last.match(/^(\d{1,4})(-?[а-яе]+)?$/)
+  if (digit) {
+    const title = words.slice(0, -1)
+    if (title.length === 0) return null
+    return { value: parseInt(digit[1], 10), titleWords: title }
+  }
+  // цепочка слов-числительных на конце (до 4 слов: «двадцать первую»)
+  for (let k = Math.min(4, words.length); k >= 1; k--) {
+    const tail = words.slice(-k)
+    if (tail.some((w) => !NUMBER_WORD_SET.has(w))) continue
+    const v = parseRussianNumber(tail.join(' '))
+    if (v !== null) {
+      const title = words.slice(0, -k)
+      if (title.length === 0) return null
+      return { value: v, titleWords: title }
+    }
+  }
+  return null
+}
+
+/**
+ * Композит «<тайтл> <N> серия» — явный тайтл ПЕРЕД номером серии
+ * («наруто 1 серия», «блич двадцать серию», «включи наруто шиппуден десятую»,
+ * «наруто серия 1»).
+ *
+ * КРИТИЧНО (аудит, баг №2): слова перед числом — это тайтл, его НЕЛЬЗЯ
+ * выбрасывать: SelectEpisode без тайтла играет серию ТЕКУЩЕГО аниме
+ * (баг «Наруто 1 серия → продолжает Блич»). Исполнитель обязан сначала
+ * резолвить тайтл и только затем выбирать серию внутри него (фаза 4.3).
+ */
+function extractTitleEpisode(words: string[]): VoiceCommand | null {
+  // срезаем ведущий триггер, в т.ч. многословный («хочу посмотреть ван пис 1 серию»)
+  // и хвостовые глаголы после filler-стрипа («посмотреть …»)
+  let rest = [...words]
+  for (let i = 0; i < 2 && rest.length > 0; i++) {
+    if (OPEN_TRIGGERS.includes(rest.slice(0, 2).join(' '))) rest = rest.slice(2)
+    else if (
+      OPEN_TRIGGERS.includes(rest[0]) ||
+      rest[0] === 'посмотреть' ||
+      rest[0] === 'смотреть'
+    ) {
+      rest = rest.slice(1)
+    } else {
+      break
+    }
+  }
+  if (rest.length < 2) return null
+
+  const nounIdx = rest.findIndex((w) =>
+    EPISODE_NOUNS.some((n) => w.startsWith(n.slice(0, 5))),
+  )
+  if (nounIdx < 0) return null
+
+  let titleWords: string[] = []
+  let episode: number | null = null
+
+  if (nounIdx >= 1) {
+    // Вариант A: число ПЕРЕД существительным («наруто 1 серия»)
+    const fromSuffix = numberFromSuffix(rest.slice(0, nounIdx))
+    if (fromSuffix) {
+      episode = fromSuffix.value
+      titleWords = fromSuffix.titleWords
+    }
+  }
+  if (episode === null && nounIdx >= 1) {
+    // Вариант B: число ПОСЛЕ существительного («наруто серия 1»)
+    const after = rest.slice(nounIdx + 1)
+    const leading = consumeLeadingNumber(after)
+    if (leading && leading.rest.length === 0) {
+      episode = leading.value
+      titleWords = rest.slice(0, nounIdx)
+    }
+  }
+  if (episode === null || titleWords.length === 0) return null
+
+  // чистим тайтл от служебных слов
+  const title = titleWords
+    .filter((w) => !EPISODE_NOUNS.some((n) => w.startsWith(n.slice(0, 5))))
+    .filter((w) => w !== 'аниме')
+    .join(' ')
+    .trim()
+  if (!title) return null
+  // секции («топ 5 серию»?) — не тайтлы; озвучки обрабатываются раньше парсера тайтла
+  if (isSectionWord(titleWords[0])) return null
+
+  return {
+    type: VoiceCommandType.SearchAnime,
+    params: { query: title, open: true, episode },
+    confidence: 0.9,
+    label: `«${title}» — серия ${episode}`,
+  }
+}
+
 function extractEpisodeSelect(words: string[], ctx: ParseCtx): VoiceCommand | null {
   // паттерн 1: "серию 5", "серия 12", "открой серию 15"
   const joined = words.join(' ')
@@ -643,6 +748,11 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
   const seek = extractSeek(words)
   if (seek) return seek
 
+  // 5.5. КОМПОЗИТ «тайтл + серия» — ДО выбора серии в текущем контексте:
+  //      явное название всегда сильнее текущего аниме (фаза 4.3)
+  const titleEpisode = extractTitleEpisode(words)
+  if (titleEpisode) return titleEpisode
+
   // 6. Выбор серии
   const episode = extractEpisodeSelect(words, ctx)
   if (episode) return episode
@@ -659,6 +769,31 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
   // 9. Открытие по названию: "открой берсерк"
   const open = extractOpen(words)
   if (open) return open
+
+  // 10. ГОЛЫЙ ТАЙТЛ: «наруто» — валидный поисковый/навигационный интент,
+  //     а не «неизвестная команда» (фаза 4.2). Последний шаг: без триггеров,
+  //     без секций/серий/чистых чисел; иначе честный поиск → «не найдено».
+  const hasTriggers = words.some(
+    (w) => OPEN_TRIGGERS.includes(w) || SEARCH_TRIGGERS.includes(w),
+  )
+  if (
+    !hasTriggers &&
+    words.length >= 1 &&
+    words.length <= 6 &&
+    !isSectionWord(words[0]) &&
+    !words.some((w) => EPISODE_NOUNS.some((n) => w.startsWith(n.slice(0, 5)))) &&
+    words.every((w) => !/^\d+$/.test(w))
+  ) {
+    const query = words.join(' ').trim()
+    if (query.length >= 2) {
+      return {
+        type: VoiceCommandType.SearchAnime,
+        params: { query, open: true },
+        confidence: 0.7,
+        label: `Открыть «${query}»`,
+      }
+    }
+  }
 
   return null
 }
