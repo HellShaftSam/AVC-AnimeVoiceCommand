@@ -112,8 +112,10 @@ export const LABELS: Record<VoiceCommandType, string> = {
   // --- Task 8-b: контракты v2 ---
   [VoiceCommandType.Mute]: 'Выключить звук',
   [VoiceCommandType.Unmute]: 'Включить звук',
-  [VoiceCommandType.SetWatchStatus]: 'Статус просмотра (на сайте)',
-  [VoiceCommandType.ToggleFavorite]: 'Избранное (на сайте)',
+  [VoiceCommandType.SetWatchStatus]: 'Статус просмотра',
+  [VoiceCommandType.ToggleFavorite]: 'Избранное',
+  [VoiceCommandType.RateAnime]: 'Поставить оценку',
+  [VoiceCommandType.RemoveRating]: 'Убрать оценку',
   [VoiceCommandType.ContinueWatching]: 'Продолжить просмотр',
   [VoiceCommandType.ShowLibrary]: 'Открыть библиотеку YummyAnime',
   [VoiceCommandType.OpenProfile]: 'Открыть мой профиль',
@@ -251,6 +253,57 @@ const WATCH_STATUS_PATTERNS: Array<{ re: RegExp; status: string }> = [
   { re: /брошено|забросил|забрось|бросил\s+смотреть/, status: 'dropped' },
   { re: /отложен[оы]|отложить|на\s+потом/, status: 'on_hold' },
 ]
+
+/**
+ * Оценка 1..10 (шкала сайта — schema.org bestRating=10 + модалка rating-list):
+ *   «оцени на 8» / «поставь оценку 8» / «моя оценка восемь» / «оценка 10»
+ *   «поставь восемь» — БЕЗ слова-единицы (при открытом аниме) не ловим, чтобы
+ *   не конфликтовать с сериями/громкостью — только с явным словом «оценк/оцени/рейтинг».
+ */
+function extractRating(text: string): VoiceCommand | null {
+  if (!/(оценк|оцени|оценивание|рейтинг|шедевр|ничтожно)/.test(text)) return null
+  if (/(?:убери|сними|удали|снять|убрать)\s+(?:мою\s+)?(?:оценку|рейтинг)/.test(text)) {
+    return { type: VoiceCommandType.RemoveRating, params: {}, confidence: 0.92, label: 'Убрать оценку' }
+  }
+  // «оцени на 8» / «поставь оценку 8» / «оцениваю на десять» / «оценка восемь» / «рейтинг 7»
+  const m =
+    text.match(/(?:оцени|оценить|поставь)(?:\s+оценку)?\s+(?:на\s+)?(\d{1,2})\b/) ??
+    text.match(/(?:моя|мою)\s+оценка\s*(?:—|за|на)?\s*(\d{1,2})\b/) ??
+    text.match(/(?:оценка|рейтинг)\s*[:—-]?\s*(\d{1,2})\b/)
+  if (m) {
+    const n = parseInt(m[1], 10)
+    if (n >= 1 && n <= 10) {
+      return {
+        type: VoiceCommandType.RateAnime,
+        params: { rating: n },
+        confidence: 0.92,
+        label: `Оценка ${n} из 10`,
+      }
+    }
+    return {
+      type: VoiceCommandType.RateAnime,
+      params: { rating: Math.min(10, Math.max(1, n)) },
+      confidence: 0.6,
+      label: `Оценка ${Math.min(10, Math.max(1, n))} из 10`,
+    }
+  }
+  // числительные словами: «оцени на восемь», «оценка десять»
+  const m2 = text.match(/(?:оцени|оценить|поставь)(?:\s+оценку)?\s+(?:на\s+)?([а-яё]+)\s*$/)
+  if (m2) {
+    const n = parseRussianNumber(m2[1])
+    if (n !== null && n >= 1 && n <= 10) {
+      return { type: VoiceCommandType.RateAnime, params: { rating: n }, confidence: 0.85, label: `Оценка ${n} из 10` }
+    }
+  }
+  const m3 = text.match(/(?:оценка|рейтинг)\s+([а-яё]+)\s*$/)
+  if (m3) {
+    const n = parseRussianNumber(m3[1])
+    if (n !== null && n >= 1 && n <= 10) {
+      return { type: VoiceCommandType.RateAnime, params: { rating: n }, confidence: 0.85, label: `Оценка ${n} из 10` }
+    }
+  }
+  return null
+}
 
 function extractWatchStatus(text: string): VoiceCommand | null {
   for (const { re, status } of WATCH_STATUS_PATTERNS) {
@@ -540,6 +593,9 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
   const status = extractWatchStatus(text)
   if (status) return status
 
+  const rate = extractRating(text)
+  if (rate) return rate
+
   const fav = extractFavorite(text)
   if (fav) return fav
 
@@ -679,6 +735,10 @@ export function parserSelfTest(): Array<{ input: string; expect: string }> {
     { input: 'отложено', expect: 'SetWatchStatus(on_hold)' },
     { input: 'добавь в избранное', expect: 'ToggleFavorite(true)' },
     { input: 'убери из избранного', expect: 'ToggleFavorite(false)' },
+    { input: 'оцени на 8', expect: 'RateAnime(8)' },
+    { input: 'поставь оценку десять', expect: 'RateAnime(10)' },
+    { input: 'оценка 3', expect: 'RateAnime(3)' },
+    { input: 'убери оценку', expect: 'RemoveRating' },
     { input: 'продолжить просмотр', expect: 'ContinueWatching' },
     { input: 'открой библиотеку', expect: 'ShowLibrary' },
     { input: 'добавь ани либрия как команду для anilibria', expect: 'AddVoiceAlias(ани либрия->anilibria)' },

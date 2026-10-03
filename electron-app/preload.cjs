@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('avcElectron', {
   /** Диагностический selftest (безопасный отчёт) */
   runAuthSelfTest: () => ipcRenderer.invoke('avc:auth:selftest'),
 
+  /**
+   * РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное).
+   * Выполняется same-origin в main-процессе; наружу — только не-секретный
+   * результат { ok, httpStatus, verification, state, message }.
+   */
+  animeAction: (req) => ipcRenderer.invoke('avc:anime:action', req),
+
   /** Подписка на изменения состояния аккаунта (вход/выход/истечение) */
   onAccountChanged: (cb) => {
     const handler = (_event, snap) => cb(snap)

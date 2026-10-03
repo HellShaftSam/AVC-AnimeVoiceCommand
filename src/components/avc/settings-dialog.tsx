@@ -284,6 +284,16 @@ export function SettingsDialog() {
                     aria-label="Автопереход к следующей серии"
                   />
                 </SettingRow>
+                <SettingRow
+                  label="Автопропуск опенинга/эндинга"
+                  hint="Перематывает интро по таймингам сайта, если они есть"
+                >
+                  <Switch
+                    checked={settings.autoSkipIntros}
+                    onCheckedChange={(v: boolean) => change({ autoSkipIntros: v })}
+                    aria-label="Автопропуск опенинга и эндинга"
+                  />
+                </SettingRow>
               </section>
 
               <Separator className="bg-zinc-800" />
@@ -564,6 +574,30 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             }}
           />
           <p className="mt-1.5 text-xs text-zinc-500">Выше = лучше ловит тихую речь</p>
+        </div>
+
+        <div className="py-2">
+          <div className="flex items-center justify-between text-sm text-zinc-200">
+            <span>Максимальная длительность фразы</span>
+            <span className="tabular-nums text-amber-300">
+              {Math.round(settings.maxUtteranceMs / 1000)} с
+            </span>
+          </div>
+          <Slider
+            value={[settings.maxUtteranceMs]}
+            min={4000}
+            max={30000}
+            step={1000}
+            aria-label="Максимальная длительность фразы"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+            onValueChange={(v: number[]) => {
+              const val = Array.isArray(v) ? v[0] : undefined
+              if (typeof val === 'number') change({ maxUtteranceMs: val })
+            }}
+          />
+          <p className="mt-1.5 text-xs text-zinc-500">
+            Если микрофон обрезает длинные фразы — увеличьте до 20–30 с
+          </p>
         </div>
 
         <SettingRow label="Шумоподавление">

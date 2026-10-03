@@ -494,6 +494,147 @@ class AuthenticationService {
     }
   }
 
+  // --- РЕАЛЬНЫЕ ДЕЙСТВИЯ АККАУНТА (спецификация I §9, ACCOUNT_MODEL §5) ---------
+
+  /**
+   * Выполнить действие аккаунта (список/оценка/избранное) ВНУТРИ сессии сайта:
+   *
+   *   ДЕЙСТВИЕ: same-origin fetch (PUT/DELETE) с заголовками API сайта
+   *      ↓ HTTP 2xx?
+   *   ВЕРИФИКАЦИЯ: reload страницы тайтла + чтение собственного состояния
+   *      ↓ совпало → 'pass'; не совпало → 'mismatch'; не прочиталось → 'unconfirmed'
+   *
+   * Cookie не читаются и не покидают main; наружу идут только не-секретные
+   * результаты (то же доверие к HTTP-успеху, что и у самого сайта + наша
+   * reload-проверка сверху).
+   */
+  async animeAction(req) {
+    const KINDS = new Set([
+      'setList',
+      'removeList',
+      'setFavorite',
+      'removeFavorite',
+      'setRate',
+      'removeRate',
+    ])
+    const invalid = (message) => ({
+      ok: false,
+      httpStatus: 0,
+      verification: 'skipped',
+      state: null,
+      message,
+    })
+
+    // 0. Защита на границе IPC
+    if (
+      typeof req !== 'object' ||
+      req === null ||
+      !KINDS.has(req.kind) ||
+      !Number.isInteger(req.animeId) ||
+      req.animeId <= 0
+    ) {
+      return invalid('Некорректный запрос действия аккаунта')
+    }
+    if (req.kind === 'setList' && !(Number.isInteger(req.value) && req.value >= 0 && req.value <= 5)) {
+      return invalid('Недопустимый статус списка (0..5)')
+    }
+    if (req.kind === 'setRate' && !(Number.isInteger(req.value) && req.value >= 1 && req.value <= 10)) {
+      return invalid('Оценка должна быть целым числом 1..10')
+    }
+    if (typeof req.slug !== 'string') req.slug = ''
+
+    // 1. Убедиться в состоянии входа (TTL-кеш, без лишних живых проверок)
+    const acc = await this.verify()
+    if (acc.state !== 'loggedIn') {
+      return invalid(acc.message || 'Нет подтверждённой сессии YummyAnime')
+    }
+
+    // 2. ДЕЙСТВИЕ внутри сессии
+    let res = null
+    try {
+      res = await this.runInSession(adapter.buildActionScript(req), 20000)
+    } catch (e) {
+      this.log(`[Anime] Action ${req.kind}#${req.animeId} script failed: ${e.message}`)
+      return invalid(`Не удалось выполнить действие на сайте: ${e.message}`)
+    }
+    if (!res || typeof res.status !== 'number') {
+      return invalid('Сайт не ответил на действие')
+    }
+    if (res.status === 0) {
+      return invalid('Сеть недоступна — сайт не ответил')
+    }
+    if (res.status === 401 || res.status === 403) {
+      // Сессия отвалилась между проверками — форсируем verify, чтобы UI обновился
+      void this.verify({ force: true }).catch(() => undefined)
+      return invalid('Сессия YummyAnime истекла — войдите снова')
+    }
+    if (res.status >= 400) {
+      return invalid(`Сайт ответил HTTP ${res.status} на действие`)
+    }
+
+    // 3. RELOAD-верификация по серверному HTML страницы тайтла
+    const base = {
+      ok: true,
+      httpStatus: res.status,
+      verification: 'unconfirmed',
+      state: null,
+      message: 'Сайт принял действие (HTTP 200)',
+    }
+    if (!req.slug) {
+      base.message =
+        'Сайт принял действие (HTTP 200). Подтвердить состояние не удалось: нет адреса страницы тайтла'
+      return base
+    }
+
+    const state = await this._readOwnState(req.slug)
+    if (!state) {
+      base.message =
+        'Сайт принял действие (HTTP 200), но подтвердить состояние не удалось — проверьте на сайте'
+      return base
+    }
+    base.state = state
+
+    // Страница отрисовалась для гостя — сессия на странице не видна, честно 'unconfirmed'
+    if (state.authenticatedPage === false) {
+      base.message =
+        'Сайт принял действие (HTTP 200), но страница отрисовалась как для гостя — проверьте состояние'
+      return base
+    }
+
+    const expected = adapter.expectedOwnState(req)
+    const actual = {
+      listId: state.listId ?? null,
+      isFavorite: state.isFavorite,
+      rating: state.rating ?? null,
+    }
+    const mismatches = Object.keys(expected).filter((k) => actual[k] !== expected[k])
+    if (mismatches.length === 0) {
+      base.verification = 'pass'
+      base.message = 'Действие выполнено и подтверждено чтением состояния'
+      return base
+    }
+    base.verification = 'mismatch'
+    base.message = `Сайт принял действие (HTTP ${res.status}), но состояние не совпало (${mismatches.join(', ')})`
+    return base
+  }
+
+  /** Загрузить страницу тайтла в скрытом окне сессии и прочитать своё состояние */
+  async _readOwnState(slug) {
+    try {
+      const win = await this.ensureSessionWindow()
+      const url = `${adapter.SITE.origin}/catalog/item/${encodeURIComponent(String(slug))}`
+      await win.loadURL(url)
+      await sleep(1200) // сайту нужно дорисовать React-блоки (секция 25: не выдумываем)
+      const signals = await runScript(win, adapter.STATE_SCRIPT, DETECT_TIMEOUT_MS)
+      const state = adapter.parseOwnState(signals)
+      if (state) delete state.__hasMarkers
+      return state
+    } catch (e) {
+      this.log(`[Anime] Own-state read failed: ${e.message}`)
+      return null
+    }
+  }
+
   // --- ДИАГНОСТИКА (секции 9/20/24) ---------------------------------------------
 
   async selftest() {

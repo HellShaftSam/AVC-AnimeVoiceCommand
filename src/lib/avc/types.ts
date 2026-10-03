@@ -51,10 +51,14 @@ export enum VoiceCommandType {
   SelectOption = 'SelectOption', // выбор варианта из списка найденного (1..N)
   Mute = 'Mute',
   Unmute = 'Unmute',
-  /** «добавь в смотрю / планы…» — статусы ведёт сайт; команда откроет страницу тайтла */
+  /** «добавь в смотрю / планы…» — РЕАЛЬНОЕ действие через сессию сайта (EXE) */
   SetWatchStatus = 'SetWatchStatus',
-  /** «добавь в избранное» — избранное ведётся на сайте; команда подскажет/откроет сайт */
+  /** «добавь в избранное» — РЕАЛЬНОЕ действие через сессию сайта (EXE) */
   ToggleFavorite = 'ToggleFavorite',
+  /** «оцени на 8» — РЕАЛЬНАЯ оценка 1..10 через сессию сайта (EXE) */
+  RateAnime = 'RateAnime',
+  /** «убери оценку» — DELETE /anime/{id}/rate через сессию сайта (EXE) */
+  RemoveRating = 'RemoveRating',
   ContinueWatching = 'ContinueWatching', // «продолжить просмотр» (по локальной сессионной метке)
   ShowLibrary = 'ShowLibrary', // «открой библиотеку» — панель избранного YummyAnime
   /** «открой мой профиль», «проверь аккаунт», «выйди из аккаунта» */
@@ -192,6 +196,8 @@ export interface PlaybackContext {
   volume: number // 0..100
   currentTime: number // сек
   duration: number // сек
+  /** skips текущей открытой серии (для auto-skip в player.tsx) */
+  currentSkips: VideoSkips | null
 }
 
 export interface NavigationContext {
@@ -231,6 +237,19 @@ export interface DubOption {
   episodes: number[]
 }
 
+/** Сегмент пропуска из /api/anime/{id}/videos (проверено живым API: {time,length} в секундах) */
+export interface VideoSkipSegment {
+  /** Начало сегмента, сек */
+  time: number
+  /** Длина сегмента, сек */
+  length: number
+}
+
+export interface VideoSkips {
+  opening: VideoSkipSegment | null
+  ending: VideoSkipSegment | null
+}
+
 export interface VideoEntry {
   videoId: number
   episode: number
@@ -238,6 +257,8 @@ export interface VideoEntry {
   playerName: string
   iframeUrl: string
   duration: number | null
+  /** Тайминги опенинга/эндинга (сайт отдаёт в /videos; у части записей null) */
+  skips: VideoSkips | null
 }
 
 export interface AnimeDetails extends AnimeCard {
@@ -248,6 +269,8 @@ export interface AnimeDetails extends AnimeCard {
   episodesTotal: number | null
   dubs: DubOption[]
   videos: VideoEntry[]
+  /** Откуда данные: live — реальный сайт; demo — сетевой fallback (честный бейдж в UI) */
+  source?: 'live' | 'demo'
 }
 
 export interface SectionPage {
@@ -298,6 +321,10 @@ export interface AppSettings {
   echoCancellation: boolean
   /** deviceId выбранного микрофона ('' = по умолчанию) */
   micDeviceId: string
+  /** Жёсткий кап длительности фразы, мс (4000..30000; жалоба «обрезает на 15 с») */
+  maxUtteranceMs: number
+  /** Автопропуск опенинга/эндинга по skips из /videos */
+  autoSkipIntros: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -321,6 +348,62 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoGainControl: true,
   echoCancellation: true,
   micDeviceId: '',
+  maxUtteranceMs: 12000,
+  autoSkipIntros: false,
+}
+
+// ---------------------------------------------------------------------------
+// РЕАЛЬНЫЕ действия аккаунта YummyAnime через постоянную сессию (EXE).
+// Эндпоинты и тела проверены по собственному бандлу сайта (build.min.js v3.0.308):
+//   PUT /anime/{id}/list {list} · DELETE /anime/{id}/list
+//   PUT /anime/{id}/list/fav {date?} · DELETE /anime/{id}/list/fav
+//   PUT /anime/{id}/rate {rate} · DELETE /anime/{id}/rate
+// ---------------------------------------------------------------------------
+
+/** Реестр статусов библиотеки сайта (массив Rt бандла — ТОЧНЫЕ имена) */
+export const LIBRARY_STATUSES: Array<{ id: number; title: string; alias: string }> = [
+  { id: 0, title: 'Смотрю', alias: 'watching' },
+  { id: 1, title: 'В Планах', alias: 'planned' },
+  { id: 2, title: 'Просмотрено', alias: 'completed' },
+  { id: 3, title: 'Брошено', alias: 'dropped' },
+  { id: 5, title: 'Отложено', alias: 'on_hold' },
+]
+
+export type YummyAnimeActionKind =
+  | 'setList'
+  | 'removeList'
+  | 'setFavorite'
+  | 'removeFavorite'
+  | 'setRate'
+  | 'removeRate'
+
+export interface YummyAnimeActionRequest {
+  kind: YummyAnimeActionKind
+  animeId: number
+  /** list_id (0..5) для setList; 1..10 для setRate */
+  value?: number
+  /** slug страницы тайтла — нужен для reload-верификации по серверному HTML */
+  slug?: string
+}
+
+/** Собственное состояние тайтла, прочитанное с серверного HTML страницы аниме */
+export interface YummyAnimeOwnState {
+  listId: number | null
+  isFavorite: boolean
+  rating: number | null
+  /** страница отрисовалась для залогиненного (нет маркера гостя) */
+  authenticatedPage: boolean | null
+}
+
+export interface YummyAnimeActionResponse {
+  ok: boolean
+  /** HTTP-статус действия на сайте (0 — сеть недоступна) */
+  httpStatus: number
+  /** 'pass' — состояние подтверждено чтением; 'mismatch' — не совпало; 'unconfirmed' — прочитать не удалось */
+  verification: 'pass' | 'mismatch' | 'unconfirmed' | 'skipped'
+  /** Состояние после действия (если удалось прочитать) */
+  state: YummyAnimeOwnState | null
+  message: string
 }
 
 // ---------------------------------------------------------------------------

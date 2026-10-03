@@ -636,3 +636,32 @@ Stage Summary:
 - Архитектура соответствует спеке: тонкий клиент + персистентная сессия сайта; действия аккаунта будут выполняться same-origin ВНУТРИ сессии (как сам сайт) с верификацией чтением+reload — новых аккаунт-систем и обходов нет
 - Готов пофазный план реализации: (1) быстрые фиксы — сделан краш-toast; (2) эпизоды/счётчики/кэш; (3) реальные действия аккаунта через site-API в сессии; (4) auto-next/auto-skip; (5) голос-спека II (интенты статусов/оценок, контекст, верификация); (6) тесты YUMMYANIME_REAL_SERVER_TESTS.md + EXE
 - Для снятия BLOCKED в матрице нужен реальный вход пользователя в окне сайта (пароль вводит только пользователь)
+
+---
+Task ID: impl-full-1
+Agent: Z.ai Code (main)
+Task: «Реализуй все, что есть в моем приложении» — реализация всех фаз аудита (2)–(6): эпизоды/счётчики/кэш, реальные действия аккаунта через сессию сайта, auto-next/auto-skip, голос-спека II, настройки микрофона
+
+Work Log:
+- Исследование: перечитаны PROJECT_AUDIT/ACCOUNT_MODEL/LIBRARY_STATUS_MATRIX/EPISODE_PARSER_AUDIT + полный аудит кода; скачан build.min.js v3.0.308 с живого сайта и найдены ТОЧНЫе вызовы сайта: PUT /anime/{id}/list {list}, DELETE, PUT/DELETE /anime/{id}/list/fav (сайт шлёт {}), PUT /anime/{id}/rate {rate}, DELETE rate; UI-маркеры для верификации: .fav-type[data-id].selected, .fav-type-fav.selected, .user-rating (не hidden)
+- Живой API-проверкой подтверждён формат skips: {opening:{time,length}, ending:{time,length}} (Наруто: 1033 записи с skips из 1793)
+- types.ts: VideoSkipSegment/VideoSkips, VideoEntry.skips, AnimeDetails.source('live'|'demo'), AppSettings.maxUtteranceMs(4..30с)+autoSkipIntros, VoiceCommandType.RateAnime/RemoveRating, LIBRARY_STATUSES (реестр Rt), YummyAnimeActionRequest/Response/OwnState, PlaybackContext.currentSkips
+- adapter.ts: fetchJsonRetry (25с + 1 ретрай для /videos), LRU-лимит кэша 120 записей, EPISODE_PARSER_VERSION='2' в ключах кэша, парсинг skips, source='live'/'demo' на деталях
+- api.ts: AvcElectronBridge.animeAction + avcApi.animeAction (web — честная недоступность)
+- electron (add-only): yummy-auth-adapter.cjs +SITE_API_HEADERS(X-Application+Lang+X-Requested-With)/ACTION_METHODS(6 видов)/buildActionScript/STATE_SCRIPT/parseOwnState/expectedOwnState; authentication-service.cjs +animeAction (действие → HTTP-проверка → reload страницы тайтла → чтение своего состояния → pass/mismatch/unconfirmed; 401/403 → форс-verify); main.cjs +IPC avc:anime:action; preload.cjs +animeAction (только не-секретные результаты)
+- executor.ts: detailsCache с TTL 5 мин + invalidateDetailsCache() по «Обновляю страницу»; executeScroll скроллит видимые внутренние .avc-scroll (сетка серий доступна голосу); runAccountAction (единая точка: сессия → IPC-действие → честный результат); executeSetWatchStatus/executeToggleFavorite теперь РЕАЛЬНЫЕ; +executeRateAnime/executeRemoveRating; skips в playback при выборе серии/озвучки
+- parser.ts: extractRating («оцени на 8», «поставь оценку десять», «оценка 3», «убери/сними оценку»), LABELS, selftest-таблица расширена
+- interpret/route.ts: промпт синхронизирован со всеми интентами + реальные статусы сайта (watching/planned/completed/dropped/on_hold) и правила оценки/избранного
+- anime-view.tsx: EpisodeGrid с пагинацией 60/страницу + авто-переход на страницу текущей серии (adjust-during-render), честный счётчик «Серий: 220 (доступно N) · страница X из Y», чипы озвучек «N эп.», DEMO-бейдж, AccountActionBar (статусы/Любимое/оценка 1..10/убрать оценку) — реальные действия, без сессии открывает диалог входа
+- player.tsx: auto-next по kodik_player_video_ended + settings.autoplayNext (1.5с таймер, отмена при смене серии); auto-skip opening/ending по playback.currentSkips (один раз на серию на сегмент); toast «Опенинг/Эндинг пропущен»
+- use-voice.ts: кап фразы = settings.maxUtteranceMs (кламп 4..60с, дефолт 12с) в обоих движках
+- settings-dialog.tsx: слайдер «Максимальная длительность фразы» (4–30с, вкладка Микрофон) + свитч «Автопропуск опенинга/эндинга» (Воспроизведение)
+- help-dialog.tsx: раздел «Библиотека аккаунта (реальные действия на сайте)» + команды оценки
+- Удалён мёртвый openOnSite из executor; lint 0 ошибок
+- BROWSER-ВЕРИФИКАЦИЯ (agent-browser, живой сайт через app): Наруто открыт поиском «открой наруто»; счётчик «Серий: 220 · страница 1 из 4» + 60 кнопок/стр; «Вперёд» → стр.2; «серия 105» → грид сам на стр.2, кнопка 105 aria-current, реальный iframe alloha.yani.tv; «добавь в смотрю»/«оцени на 8»/«поставь оценку десять»/«убери оценку» в web-режиме → честное «Войдите в аккаунт YummyAnime…» + диалог входа; «следующая серия» → 106; «вниз» скроллит внутренний контейнер (600/696px); настройки round-trip PUT/GET с новыми полями OK; Ван-Пис 8716 видео/1180 эп за 3.9с; скриншоты desktop+mobile корректны; dev.log без ошибок
+
+Stage Summary:
+- РЕАЛИЗОВАНЫ ВСЕ фазы аудита (2)–(6): серии/счётчики/кэш, реальные действия аккаунта внутри сессии сайта с reload-верификацией, auto-next/auto-skip, голос-команды оценки/статусов, настраиваемый кап микрофона
+- Ключевое Architecture-решение: действия выполняются same-origin ВНУТРИ persist-сессии (как сам сайт), верификация = перезагрузка серверного HTML страницы тайтла + чтение .fav-type[data-id].selected / .fav-type-fav.selected / .user-rating; доверие к HTTP-успеху не выше, чем у самого сайта
+- ЧЕСТНЫЕ ОГРАНИЧЕНИЯ: (а) live-прогон действий требует реального входа пользователя в EXE (пароль вводит только пользователь) — маркеры залогиненной страницы [LIVE-VERIFY], при их изменении верификация честно деградирует до 'unconfirmed'; (б) в web-режиме действия недоступны by design (сессия живёт в EXE main-процессе) — честное сообщение + диалог входа
+- НЕ пушится в GitHub (требование пользователя сохраняется); docs/ci/build-exe.yml по-прежнему в docs до команды «можно»

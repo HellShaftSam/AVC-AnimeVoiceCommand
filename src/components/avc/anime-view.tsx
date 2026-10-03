@@ -1,16 +1,22 @@
 'use client'
 /**
- * AnimeView — вкладка аниме: постер, инфо, бейджи, озвучки, сетка серий,
- * диалог «Серии» (ShowEpisodes) и плеер.
+ * AnimeView — вкладка аниме: постер, инфо, бейджи, действия аккаунта,
+ * озвучки, пагинированная сетка серий, диалог «Серии» (ShowEpisodes) и плеер.
  *
- * Thin client: статусы просмотра/избранное ведутся НА САЙТЕ YummyAnime —
- * здесь только кнопка «Управлять на сайте».
+ * РЕАЛЬНЫЕ действия аккаунта (спецификация I §9): статусы списка, избранное и
+ * оценка выполняются ВНУТРИ постоянной сессии сайта через IPC-мост (EXE).
+ * Без сессии — честная просьба войти (диалог входа открывается сам).
+ *
+ * Сетка серий: пагинация по 60 кнопок вместо «спрятанного» max-h-64 скролла
+ * (EPISODE_PARSER_AUDIT §3 п.1) — голосовой пользователь добирается до любой
+ * серии командами «вниз» (голос-скролл) и «серия N».
  */
-import { useEffect, useState } from 'react'
-import { ExternalLink, Film, RotateCw, Star } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ExternalLink, Film, Heart, RotateCw, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Player } from './player'
 import {
@@ -20,9 +26,27 @@ import {
   syncPlaybackToDetails,
 } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
+import { LIBRARY_STATUSES } from '@/lib/avc/types'
 import type { AnimeDetails, BrowserTab } from '@/lib/avc/types'
 import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
+
+/** Кнопок серий на страницу (аудит: ~48–60 видимых кнопок = «57–58 серий») */
+const EPISODES_PER_PAGE = 60
+
+/** Подписи шкалы сайта (модалка rating-list: 10 «шедевр» … 1 «ничтожно») */
+const RATE_TITLES: Record<number, string> = {
+  10: 'шедевр',
+  9: 'великолепно',
+  8: 'очень хорошо',
+  7: 'хорошо',
+  6: 'неплохо',
+  5: 'посредственно',
+  4: 'никак',
+  3: 'плохо',
+  2: 'ужасно',
+  1: 'ничтожно',
+}
 
 export function AnimeView({ tab }: { tab: BrowserTab }) {
   const playback = useAvcStore((s) => s.playback)
@@ -112,6 +136,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   const maxEp = maxEpisodeOf(details)
   const desc = details.description ?? ''
   const currentEp = playback.currentEpisode
+  const isDemo = details.source === 'demo'
 
   const pickEpisode = (n: number) => {
     void executeCommand({
@@ -122,7 +147,15 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
     })
   }
 
-  // --- Статусы/избранное ведутся на сайте (thin client) -------------------
+  // --- Статусы/избранное/оценка — РЕАЛЬНЫЕ действия через сессию сайта -----
+  const act = (
+    type: VoiceCommandType,
+    params: Record<string, string | number | boolean>,
+    label: string,
+  ) => {
+    void executeCommand({ type, params, confidence: 1, label })
+  }
+
   const openOnSite = () => {
     const base = useAvcStore.getState().settings.baseUrl.replace(/\/+$/, '')
     if (details.slug) window.open(`${base}/catalog/item/${details.slug}`, '_blank', 'noopener')
@@ -147,6 +180,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
         <div className="min-w-0 flex-1">
           <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold md:text-2xl">
             {details.title}
+            {isDemo && (
+              <Badge className="border border-rose-400/40 bg-rose-400/10 text-rose-300">
+                ДЕМО-ДАННЫЕ — сайт недоступен
+              </Badge>
+            )}
           </h2>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {details.year !== null && (
@@ -193,22 +231,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
             </div>
           )}
 
-          {/* Thin client: статусы/избранное ведутся на сайте YummyAnime */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-            <span className="text-xs text-zinc-500">
-              Статусы просмотра и избранное ведутся в аккаунте YummyAnime на сайте
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openOnSite}
-              aria-label="Управлять статусом и избранным на сайте"
-              className="min-h-11 gap-1.5 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
-            >
-              <ExternalLink className="h-4 w-4" aria-hidden />
-              Открыть на сайте
-            </Button>
-          </div>
+          <AccountActionBar
+            details={details}
+            onAct={act}
+            onOpenSite={openOnSite}
+          />
 
           <p className="mt-3 text-sm text-zinc-400">
             Серия <span className="font-semibold text-amber-300">{currentEp ?? '—'}</span> из{' '}
@@ -219,7 +246,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
           {details.dubs.length > 0 && (
             <div className="mt-3">
               <div className="mb-1.5 text-xs uppercase tracking-wide text-zinc-500">
-                Озвучки
+                Озвучки (в скобках — серий в этой озвучке)
               </div>
               <div className="flex flex-wrap gap-2">
                 {details.dubs.map((d) => {
@@ -228,12 +255,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
                     <button
                       key={d.name}
                       onClick={() =>
-                        void executeCommand({
-                          type: VoiceCommandType.SelectVoice,
-                          params: { dub: d.shortName },
-                          confidence: 1,
-                          label: `Озвучка ${d.shortName}`,
-                        })
+                        act(
+                          VoiceCommandType.SelectVoice,
+                          { dub: d.shortName },
+                          `Озвучка ${d.shortName}`,
+                        )
                       }
                       aria-pressed={active}
                       className={cn(
@@ -245,7 +271,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
                     >
                       {d.shortName}
                       {d.episodes.length > 0 && (
-                        <span className="ml-1 text-zinc-500">({d.episodes.length})</span>
+                        <span className="ml-1 text-zinc-500">· {d.episodes.length} эп.</span>
                       )}
                     </button>
                   )
@@ -258,27 +284,13 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 
       {maxEp > 0 && (
         <div className="mt-6">
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">
-            Серии
-          </h3>
-          <div className="avc-scroll grid max-h-64 grid-cols-6 gap-2 overflow-y-auto pr-1 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12">
-            {Array.from({ length: maxEp }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                onClick={() => pickEpisode(n)}
-                aria-label={`Включить серию ${n}`}
-                aria-current={currentEp === n ? 'true' : undefined}
-                className={cn(
-                  'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
-                  currentEp === n
-                    ? 'border-amber-400 bg-amber-400/15 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.2)]'
-                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-amber-400/40 hover:text-amber-200',
-                )}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
+          <EpisodeGrid
+            title="Серии"
+            maxEp={maxEp}
+            totalCount={details.episodesTotal && details.episodesTotal > 0 ? details.episodesTotal : null}
+            currentEp={currentEp}
+            onPick={pickEpisode}
+          />
         </div>
       )}
 
@@ -291,10 +303,220 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   )
 }
 
+// --- панель действий аккаунта ------------------------------------------------
+
+function AccountActionBar({
+  details,
+  onAct,
+  onOpenSite,
+}: {
+  details: AnimeDetails
+  onAct: (type: VoiceCommandType, params: Record<string, string | number | boolean>, label: string) => void
+  onOpenSite: () => void
+}) {
+  const account = useAvcStore((s) => s.yummyAccount)
+  const loggedIn = account.state === 'loggedIn'
+  const username = account.user?.username ?? null
+
+  return (
+    <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-zinc-500">
+          {loggedIn && username
+            ? `Аккаунт YummyAnime: ${username}`
+            : 'Списки, избранное и оценки — в вашем аккаунте YummyAnime'}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenSite}
+          aria-label="Открыть страницу тайтла на сайте"
+          className="min-h-9 gap-1.5 px-2 text-xs text-zinc-500 hover:text-amber-300"
+        >
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+          На сайте
+        </Button>
+      </div>
+
+      {/* Статусы списка (реестр сайта: Смотрю/В Планах/Просмотрено/Брошено/Отложено) */}
+      <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Статус просмотра">
+        {LIBRARY_STATUSES.map((s) => (
+          <Button
+            key={s.id}
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onAct(VoiceCommandType.SetWatchStatus, { status: s.alias }, `Статус: ${s.title}`)
+            }
+            aria-label={`Добавить «${details.title}» в список «${s.title}»`}
+            className="min-h-9 border-zinc-700 bg-zinc-900/60 px-2.5 text-xs text-zinc-300 hover:border-amber-400/50 hover:text-amber-300"
+          >
+            {s.title}
+          </Button>
+        ))}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            onAct(VoiceCommandType.ToggleFavorite, { favorite: true }, 'В Любимые')
+          }
+          aria-label={`Добавить «${details.title}» в Любимые (избранное)`}
+          className="min-h-9 gap-1 border-zinc-700 bg-zinc-900/60 px-2.5 text-xs text-zinc-300 hover:border-rose-400/60 hover:text-rose-300"
+        >
+          <Heart className="h-3.5 w-3.5" aria-hidden />
+          Любимое
+        </Button>
+      </div>
+
+      {/* Оценка 1..10 (шкала сайта) */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Star className="h-4 w-4 text-amber-300" aria-hidden />
+        <Select
+          value=""
+          onValueChange={(v: string) => {
+            const n = parseInt(v, 10)
+            if (Number.isInteger(n) && n >= 1 && n <= 10) {
+              onAct(VoiceCommandType.RateAnime, { rating: n }, `Оценка ${n} из 10`)
+            }
+          }}
+        >
+          <SelectTrigger
+            aria-label="Поставить оценку от 1 до 10"
+            className="h-9 w-44 border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300"
+          >
+            <SelectValue placeholder="Оценить (1–10)" />
+          </SelectTrigger>
+          <SelectContent className="border-zinc-800 bg-zinc-900">
+            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => (
+              <SelectItem key={n} value={String(n)} className="text-xs text-zinc-300">
+                {n} — {RATE_TITLES[n]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onAct(VoiceCommandType.RemoveRating, {}, 'Убрать оценку')}
+          aria-label="Убрать мою оценку"
+          className="min-h-9 px-2 text-xs text-zinc-500 hover:text-rose-300"
+        >
+          Убрать оценку
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// --- пагинированная сетка серий ----------------------------------------------
+
+function EpisodeGrid({
+  title,
+  maxEp,
+  totalCount,
+  currentEp,
+  onPick,
+}: {
+  title: string
+  maxEp: number
+  /** Заявленное число серий из /api/anime/{id} (count, а для онгоингов aired) */
+  totalCount: number | null
+  currentEp: number | null
+  onPick: (n: number) => void
+}) {
+  const totalPages = Math.max(1, Math.ceil(maxEp / EPISODES_PER_PAGE))
+  const [page, setPage] = useState(1)
+  const [lastEp, setLastEp] = useState<number | null>(currentEp)
+  // Номер серии вне текущей страницы → переход на её страницу (adjust-during-render,
+  // https://react.dev/learn/you-might-not-need-an-effect)
+  if (currentEp !== lastEp) {
+    setLastEp(currentEp)
+    if (currentEp !== null && currentEp >= 1 && currentEp <= maxEp) {
+      const epPage = Math.ceil(currentEp / EPISODES_PER_PAGE)
+      const cur = Math.min(Math.max(page, 1), totalPages)
+      if (epPage !== cur) setPage(epPage)
+    }
+  }
+  const safePage = Math.min(Math.max(page, 1), totalPages)
+  const from = (safePage - 1) * EPISODES_PER_PAGE + 1
+  const to = Math.min(maxEp, safePage * EPISODES_PER_PAGE)
+  const eps = useMemo(
+    () => Array.from({ length: to - from + 1 }, (_, i) => from + i),
+    [from, to],
+  )
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">{title}</h3>
+        {/* Честный счётчик: заявленное число серий ≠ позиций в озвучке (аудит §3 п.2б) */}
+        <p className="text-xs text-zinc-500">
+          Серий: <span className="font-semibold text-zinc-300">{totalCount && totalCount > 0 ? totalCount : maxEp}</span>
+          {totalCount && totalCount > 0 && totalCount !== maxEp && (
+            <span> (доступно {maxEp})</span>
+          )}
+          {totalPages > 1 && (
+            <span className="ml-2">
+              · страница {safePage} из {totalPages}
+            </span>
+          )}
+        </p>
+      </div>
+      <div className="grid grid-cols-6 gap-2 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12">
+        {eps.map((n) => (
+          <button
+            key={n}
+            onClick={() => onPick(n)}
+            aria-label={`Включить серию ${n}`}
+            aria-current={currentEp === n ? 'true' : undefined}
+            className={cn(
+              'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+              currentEp === n
+                ? 'border-amber-400 bg-amber-400/15 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.2)]'
+                : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-amber-400/40 hover:text-amber-200',
+            )}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={safePage <= 1}
+            onClick={() => setPage(safePage - 1)}
+            aria-label="Предыдущая страница серий"
+            className="min-h-9 border-zinc-700 text-xs text-zinc-300"
+          >
+            ‹ Назад
+          </Button>
+          <span className="min-w-20 text-center text-xs tabular-nums text-zinc-500">
+            {from}–{to} из {maxEp}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={safePage >= totalPages}
+            onClick={() => setPage(safePage + 1)}
+            aria-label="Следующая страница серий"
+            className="min-h-9 border-zinc-700 text-xs text-zinc-300"
+          >
+            Вперёд ›
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EpisodesDialog({ details, maxEp }: { details: AnimeDetails; maxEp: number }) {
   const open = useAvcStore((s) => s.episodesPanelOpen)
   const setOpen = useAvcStore((s) => s.setEpisodesPanelOpen)
   const currentEp = useAvcStore((s) => s.playback.currentEpisode)
+  const totalCount =
+    details.episodesTotal && details.episodesTotal > 0 ? details.episodesTotal : null
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -303,31 +525,21 @@ function EpisodesDialog({ details, maxEp }: { details: AnimeDetails; maxEp: numb
           <DialogTitle>Серии — {details.title}</DialogTitle>
         </DialogHeader>
         {maxEp > 0 ? (
-          <div className="grid grid-cols-6 gap-2 sm:grid-cols-8">
-            {Array.from({ length: maxEp }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                onClick={() => {
-                  void executeCommand({
-                    type: VoiceCommandType.SelectEpisode,
-                    params: { episode: n },
-                    confidence: 1,
-                    label: `Серия ${n}`,
-                  })
-                  setOpen(false)
-                }}
-                aria-label={`Включить серию ${n}`}
-                className={cn(
-                  'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
-                  currentEp === n
-                    ? 'border-amber-400 bg-amber-400/15 text-amber-300'
-                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-amber-400/40',
-                )}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
+          <EpisodeGrid
+            title=""
+            maxEp={maxEp}
+            totalCount={totalCount}
+            currentEp={currentEp}
+            onPick={(n) => {
+              void executeCommand({
+                type: VoiceCommandType.SelectEpisode,
+                params: { episode: n },
+                confidence: 1,
+                label: `Серия ${n}`,
+              })
+              setOpen(false)
+            }}
+          />
         ) : (
           <p className="text-sm text-zinc-500">Серии не найдены</p>
         )}

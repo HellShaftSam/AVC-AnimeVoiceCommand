@@ -39,6 +39,141 @@ const SITE = {
   favoritesPath: '/actions/export-favorites.php?format=json&vote=0',
 }
 
+/**
+ * РЕАЛЬНЫЕ действия аккаунта — эндпоинты и тела скопированы С БАНДЛА САЙТА
+ * (build.min.js v3.0.308, классы Ks/Ws):
+ *   setIt(id,n)        → PUT /anime/{id}/list      {list:n}
+ *   removeIt(id)       → DELETE /anime/{id}/list
+ *   setFavorite(id)    → PUT /anime/{id}/list/fav  {} (сайт шлёт {} без date)
+ *   removeFavorite(id) → DELETE /anime/{id}/list/fav
+ *   setRate(id,n)      → PUT /anime/{id}/rate      {rate:n}
+ *   removeRate(id)     → DELETE /anime/{id}/rate
+ * Заголовки API сайта: X-Application + Lang (та же строка из бандла, что и у
+ * DETECTION-слоя) + X-Requested-With (как в логаут-скрипте).
+ */
+const SITE_API_HEADERS = {
+  'X-Application': 'wawegr8j13it4rdw',
+  Lang: 'ru',
+  'X-Requested-With': 'XMLHttpRequest',
+  Accept: 'application/json',
+}
+
+/** kind → { method, path(animeId), body } — ТОЧНО как вызывает сам сайт */
+const ACTION_METHODS = {
+  setList: (id, value) => ({ method: 'PUT', path: `/api/anime/${id}/list`, body: { list: value } }),
+  removeList: (id) => ({ method: 'DELETE', path: `/api/anime/${id}/list`, body: null }),
+  setFavorite: (id) => ({ method: 'PUT', path: `/api/anime/${id}/list/fav`, body: {} }),
+  removeFavorite: (id) => ({ method: 'DELETE', path: `/api/anime/${id}/list/fav`, body: null }),
+  setRate: (id, value) => ({ method: 'PUT', path: `/api/anime/${id}/rate`, body: { rate: value } }),
+  removeRate: (id) => ({ method: 'DELETE', path: `/api/anime/${id}/rate`, body: null }),
+}
+
+/** Скрипт действия: same-origin fetch В КОНТЕКСТЕ сессии (cookie не читаются) */
+function buildActionScript(req) {
+  const spec = ACTION_METHODS[req.kind](req.animeId, req.value)
+  return `(async () => {
+  try {
+    const r = await fetch(${JSON.stringify(spec.path)}, {
+      method: ${JSON.stringify(spec.method)},
+      credentials: 'include',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, ${JSON.stringify(SITE_API_HEADERS)}),
+      ${spec.body !== null ? `body: JSON.stringify(${JSON.stringify(spec.body)}),` : ''}
+    })
+    let bodyText = ''
+    try { bodyText = (await r.text()).slice(0, 500) } catch (_) {}
+    return { status: r.status, bodyText }
+  } catch (e) {
+    return { status: 0, error: String((e && e.message) || e) }
+  }
+})()`
+}
+
+/**
+ * Чтение СОБСТВЕННОГО состояния тайтла с серверного HTML страницы аниме.
+ * Маркеры взяты из бандла сайта (обязаны существовать у залогиненных):
+ *   .fav-type[data-id] с классом .selected — текущий список (list_id);
+ *   .fav-type-fav.selected — избранное;
+ *   .user-rating (без .hidden) — «Мой рейтинг» (число внутри).
+ * Если ни одного маркера нет — parseOwnState вернёт authenticatedPage=null
+ * и верификация честно станет 'unconfirmed' (ничего не выдумываем).
+ */
+const STATE_SCRIPT = `(async () => {
+  const q = (s) => document.querySelector(s)
+  const guestMarker = !!q('.poster-wrapper .marker') &&
+    (q('.poster-wrapper .marker').innerText || '').indexOf('Зарегистрируйтесь') !== -1
+  const favTypes = Array.from(document.querySelectorAll('.fav-type[data-id]')).map((el) => ({
+    id: parseInt(el.getAttribute('data-id'), 10),
+    selected: el.classList.contains('selected'),
+  }))
+  const favFav = q('.fav-type-fav')
+  let userRating = null
+  const ur = q('.user-rating')
+  if (ur && !ur.classList.contains('hidden')) {
+    const m = (ur.innerText || '').match(/(\\d{1,2})/)
+    if (m) userRating = parseInt(m[1], 10)
+  }
+  const modalRate = document.querySelector('.rating-list li.selected[data-rate]')
+  return {
+    url: location.href,
+    guestMarker,
+    favTypes,
+    favFavoriteSelected: !!(favFav && favFav.classList.contains('selected')),
+    userRating,
+    modalRate: modalRate ? parseInt(modalRate.getAttribute('data-rate'), 10) : null,
+  }
+})()`
+
+/** Собственное состояние из сигналов страницы (защитно, без выдумок) */
+function parseOwnState(signals) {
+  if (typeof signals !== 'object' || signals === null) return null
+  const favTypes = Array.isArray(signals.favTypes) ? signals.favTypes : []
+  const selected = favTypes.find((t) => t && t.selected && Number.isFinite(t.id))
+  const hasMarkers = favTypes.length > 0 || favFavExists(signals) || signals.modalRate !== null
+  let rating = null
+  if (Number.isFinite(signals.userRating) && signals.userRating > 0) rating = signals.userRating
+  else if (Number.isFinite(signals.modalRate) && signals.modalRate > 0) rating = signals.modalRate
+  return {
+    listId: selected ? selected.id : null,
+    isFavorite: !!signals.favFavoriteSelected,
+    rating,
+    // Гостевой маркер «Зарегистрируйтесь...» = страница отрисована для гостя
+    // (сессия на странице не видна); кнопки списков есть и маркера нет = вход
+    // выполнен; маркеров нет вовсе = структура неизвестна (null — не выдумываем)
+    authenticatedPage:
+      signals.guestMarker === true
+        ? false
+        : favTypes.length > 0 || signals.guestMarker === false
+          ? true
+          : null,
+    // hasMarkers наружу не отдаём, но используем для честной верификации
+    __hasMarkers: hasMarkers,
+  }
+}
+
+function favFavExists(signals) {
+  return typeof signals.favFavoriteSelected === 'boolean'
+}
+
+/** Ожидаемое состояние после действия (для сверки с прочитанным) */
+function expectedOwnState(req) {
+  switch (req.kind) {
+    case 'setList':
+      return { listId: req.value ?? null }
+    case 'removeList':
+      return { listId: null }
+    case 'setFavorite':
+      return { isFavorite: true }
+    case 'removeFavorite':
+      return { isFavorite: false }
+    case 'setRate':
+      return { rating: req.value ?? null }
+    case 'removeRate':
+      return { rating: null }
+    default:
+      return {}
+  }
+}
+
 /** Все селекторы в одном месте (мастер-правило проекта) */
 const SELECTORS = {
   currentUserId: '#current_user_id',
@@ -276,11 +411,17 @@ function parseFavorites(bodyRaw) {
 
 module.exports = {
   SITE,
+  SITE_API_HEADERS,
+  ACTION_METHODS,
   SELECTORS,
   DETECTION_SCRIPT,
   LOGOUT_SCRIPT,
   FAVORITES_SCRIPT,
+  buildActionScript,
+  STATE_SCRIPT,
   parseProfile,
   parseFavorites,
+  parseOwnState,
+  expectedOwnState,
   decide,
 }

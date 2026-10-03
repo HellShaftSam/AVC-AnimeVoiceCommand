@@ -38,6 +38,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
+import { toast } from '@/hooks/use-toast'
 import { executeCommand } from '@/lib/avc/executor'
 import {
   hasStickyActivation,
@@ -99,6 +100,11 @@ export function Player() {
    *  и play стоит повторить (ограничено счётчиком попыток). */
   const autoRetryCountRef = useRef(0)
   const autoRetryTimerRef = useRef<number | null>(null)
+  /** URL серий, для которых auto-skip уже сработал (opening/ending отдельно) */
+  const skippedOpeningRef = useRef<string | null>(null)
+  const skippedEndingRef = useRef<string | null>(null)
+  /** Таймер автоперехода к следующей серии (autoplayNext) */
+  const autoNextTimerRef = useRef<number | null>(null)
 
   /** Гарантированное снятие собственного мьюта плеера: по первому событию
    *  (в этот момент его видео-элемент u уже создан и команда не будет потеряна) */
@@ -122,6 +128,53 @@ export function Player() {
       pushPlayerVolume(useAvcStore.getState().playback.volume)
       sendPlayerCommand({ key: 'player_play' })
     }, 400)
+  }
+
+  /**
+   * АВТОПРОПУСК опенинга/эндинга по skips из /api/anime/{id}/videos
+   * (формат сегмента проверен живым API: {time,length} в секундах).
+   * Срабатывает ОДИН раз на серию по каждому сегменту.
+   */
+  const handleAutoSkip = (t: number): void => {
+    const st = useAvcStore.getState()
+    if (!st.settings.autoSkipIntros) return
+    const skips = st.playback.currentSkips
+    const url = st.playerIframeUrl
+    if (!skips || !url) return
+    if (skips.opening && skippedOpeningRef.current !== url) {
+      const end = skips.opening.time + skips.opening.length
+      if (t >= skips.opening.time && t < end - 1) {
+        skippedOpeningRef.current = url
+        sendPlayerCommand({ key: 'player_seek', value: end })
+        st.patchPlayback({ currentTime: end })
+        toast({ description: 'Опенинг пропущен' })
+        return
+      }
+    }
+    if (skips.ending && skippedEndingRef.current !== url) {
+      const end = skips.ending.time + skips.ending.length
+      if (t >= skips.ending.time && t < end - 1) {
+        skippedEndingRef.current = url
+        sendPlayerCommand({ key: 'player_seek', value: end })
+        st.patchPlayback({ currentTime: end })
+        toast({ description: 'Эндинг пропущен' })
+      }
+    }
+  }
+
+  /** АВТОПЕРЕХОД к следующей серии (kodik_player_video_ended + settings.autoplayNext) */
+  const scheduleAutoNext = (): void => {
+    if (!useAvcStore.getState().settings.autoplayNext) return
+    if (autoNextTimerRef.current !== null) window.clearTimeout(autoNextTimerRef.current)
+    autoNextTimerRef.current = window.setTimeout(() => {
+      autoNextTimerRef.current = null
+      void executeCommand({
+        type: VoiceCommandType.NextEpisode,
+        params: {},
+        confidence: 1,
+        label: 'Автопереход: следующая серия',
+      })
+    }, 1500)
   }
 
   /** Снять оверлей для текущей серии */
@@ -167,6 +220,9 @@ export function Player() {
           startedRef.current = true
           st.patchPlayback({ isPlaying: false })
           setDismissedUrl(st.playerIframeUrl)
+          // settings.autoplayNext — ранее нигде не читался (аудит §3 п.3):
+          // теперь реально включает автопереход к следующей серии
+          scheduleAutoNext()
           break
         case 'kodik_player_time_update':
           st.patchPlayback({ currentTime: ev.value })
@@ -174,6 +230,7 @@ export function Player() {
           // медленная инициализация) — первый timeupdate тоже гарантирует,
           // что видео-элемент существует и громкость можно применить
           ensureVolumePushed()
+          handleAutoSkip(ev.value)
           break
         case 'kodik_player_duration_update':
           st.patchPlayback({ duration: ev.value })
@@ -200,9 +257,15 @@ export function Player() {
     volumePushedRef.current = null
     volumeSyncOpenRef.current = true
     autoRetryCountRef.current = 0
+    skippedOpeningRef.current = null
+    skippedEndingRef.current = null
     if (autoRetryTimerRef.current !== null) {
       window.clearTimeout(autoRetryTimerRef.current)
       autoRetryTimerRef.current = null
+    }
+    if (autoNextTimerRef.current !== null) {
+      window.clearTimeout(autoNextTimerRef.current)
+      autoNextTimerRef.current = null
     }
     if (!url) return
     // Голосовая сессия всегда даёт «липкую» активацию (клик по микрофону /

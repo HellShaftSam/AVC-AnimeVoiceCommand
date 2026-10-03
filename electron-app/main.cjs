@@ -195,6 +195,8 @@ function setupIpc(service) {
     service.resetSession({ confirmed: !!args?.confirmed }),
   )
   ipcMain.handle('avc:auth:selftest', () => service.selftest())
+  // РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное)
+  ipcMain.handle('avc:anime:action', (_e, req) => service.animeAction(req))
 }
 
 /** Минимальная блокировка рекламных доменов в сессии сайта (не мешает входу) */

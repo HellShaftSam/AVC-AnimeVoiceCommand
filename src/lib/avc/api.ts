@@ -14,6 +14,8 @@
 import type {
   VoiceAliasRow,
   YummyAccountSnapshot,
+  YummyAnimeActionRequest,
+  YummyAnimeActionResponse,
   YummyAuthSelfTestReport,
   YummyFavoritesResult,
 } from './types'
@@ -54,6 +56,8 @@ export interface AvcElectronBridge {
   getFavorites(refresh?: boolean): Promise<YummyFavoritesResult>
   resetYummySession(): Promise<{ ok: boolean; backupPath: string | null; message: string }>
   runAuthSelfTest(): Promise<YummyAuthSelfTestReport>
+  /** РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное) */
+  animeAction(req: YummyAnimeActionRequest): Promise<YummyAnimeActionResponse>
   onAccountChanged(cb: (snap: YummyAccountSnapshot) => void): () => void
   /** Статусы входа из main-процесса (капча/ошибка/успех) для toast */
   onAuthStatus?(cb: (msg: string) => void): () => void
@@ -128,6 +132,24 @@ export const avcApi = {
       items: [],
       reason: 'Избранное живёт в постоянной сессии сайта — доступно в EXE-сборке',
       lastSync: null,
+    }
+  },
+
+  /**
+   * РЕАЛЬНОЕ действие аккаунта YummyAnime (список/оценка/избранное).
+   * Выполняется same-origin ВНУТРИ постоянной сессии сайта в main-процессе
+   * (cookie не покидают main) — только EXE. Web — честная недоступность.
+   */
+  async animeAction(req: YummyAnimeActionRequest): Promise<YummyAnimeActionResponse> {
+    const bridge = getElectronBridge()
+    if (bridge?.animeAction) return bridge.animeAction(req)
+    return {
+      ok: false,
+      httpStatus: 0,
+      verification: 'skipped',
+      state: null,
+      message:
+        'Действия аккаунта выполняются внутри постоянной сессии сайта — доступны в EXE-сборке',
     }
   },
 

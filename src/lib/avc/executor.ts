@@ -42,12 +42,35 @@ import {
   VOICE_CONFIDENCE_ASK,
   VOICE_CONFIDENCE_AUTO,
   VoiceProviderMatch,
+  YummyAnimeActionRequest,
 } from './types'
 import { makeTabSnapshot, useAvcStore } from './store'
 
 // --- кэш деталей (модульный, переживает переключения вкладок) ------------------
 
-const detailsCache = new Map<number, AnimeDetails>()
+/** TTL клиентского кэша деталей (аудит §3 п.2г: кэш без TTL не инвалидируется) */
+const DETAILS_TTL_MS = 5 * 60 * 1000
+const detailsCache = new Map<number, { data: AnimeDetails; ts: number }>()
+
+function detailsCachePut(data: AnimeDetails): void {
+  detailsCache.set(data.animeId, { data, ts: Date.now() })
+}
+
+function detailsCacheGet(animeId: number): AnimeDetails | null {
+  const e = detailsCache.get(animeId)
+  if (!e) return null
+  if (Date.now() - e.ts > DETAILS_TTL_MS) {
+    detailsCache.delete(animeId)
+    return null
+  }
+  return e.data
+}
+
+/** Инвалидация кэша деталей («Обновляю страницу» и т.п.) */
+export function invalidateDetailsCache(animeId?: number): void {
+  if (typeof animeId === 'number') detailsCache.delete(animeId)
+  else detailsCache.clear()
+}
 
 // --- анти-дубль команд (баг #12) ------------------------------------------------
 
@@ -142,13 +165,13 @@ function paramString(cmd: VoiceCommand, key: string): string {
 
 export async function fetchDetails(idOrSlug: number | string): Promise<AnimeDetails | null> {
   if (typeof idOrSlug === 'number') {
-    const cached = detailsCache.get(idOrSlug)
+    const cached = detailsCacheGet(idOrSlug)
     if (cached) return cached
   }
   const data = await apiGetJson<AnimeDetails>(
     `/api/site/anime/${encodeURIComponent(String(idOrSlug))}`,
   )
-  if (data) detailsCache.set(data.animeId, data)
+  if (data) detailsCachePut(data)
   return data
 }
 
@@ -182,12 +205,12 @@ export function getCachedDetails(
   slug: string | null,
 ): AnimeDetails | null {
   if (animeId !== null) {
-    const c = detailsCache.get(animeId)
+    const c = detailsCacheGet(animeId)
     if (c) return c
   }
   if (slug) {
-    for (const d of detailsCache.values()) {
-      if (d.slug === slug) return d
+    for (const e of detailsCache.values()) {
+      if (e.data.slug === slug) return e.data
     }
   }
   return null
@@ -227,6 +250,7 @@ function applyDetailsToPlayback(details: AnimeDetails | null, card?: AnimeCard):
     episodesTotal: details?.episodesTotal ?? null,
     currentEpisode: null,
     currentDub: null,
+    currentSkips: null,
     isPlaying: false,
     currentTime: 0,
     duration: 0,
@@ -306,18 +330,6 @@ function rememberLastWatched(): void {
     localStorage.setItem(lastWatchedKey(), JSON.stringify(entry))
   } catch {
     /* localStorage может быть недоступен — метка просто не сохранится */
-  }
-}
-
-/** Открыть страницу тайтла на РЕАЛЬНОМ сайте (управление статусами/избранным там) */
-function openOnSite(slug: string | null, path = ''): boolean {
-  const base = useAvcStore.getState().settings.baseUrl.replace(/\/+$/, '')
-  const url = slug ? `${base}/catalog/item/${slug}${path}` : `${base}${path}`
-  try {
-    window.open(url, '_blank', 'noopener')
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -480,6 +492,7 @@ async function playEpisode(episode: number): Promise<CommandResult> {
     currentTime: 0,
     duration: video.duration ?? 0,
     currentDub: pb.currentDub ?? video.dubName,
+    currentSkips: video.skips,
   })
   st.setPlayer(video.iframeUrl, video.playerName)
   rememberLastWatched()
@@ -538,7 +551,10 @@ function applyDubChoice(details: AnimeDetails, dubName: string): void {
   const ep = st.playback.currentEpisode
   if (ep !== null) {
     const video = pickVideo(details, ep, dubName)
-    if (video) st.setPlayer(video.iframeUrl, video.playerName)
+    if (video) {
+      st.patchPlayback({ currentSkips: video.skips })
+      st.setPlayer(video.iframeUrl, video.playerName)
+    }
   }
 }
 
@@ -633,38 +649,113 @@ export function cancelVoiceMatch(): void {
   st.setVoiceMessage('Отменено')
 }
 
-// --- аккаунт: статус просмотра / избранное / продолжить / библиотека / алиасы ------
+// --- аккаунт: РЕАЛЬНЫЕ действия (список/оценка/избранное) / продолжить / алиасы ----
 
 /**
- * «добавь в смотрю/планы/просмотрено…» — статусы просмотра ведутся НА САЙТЕ
- * (thin client). Голос честно объясняет и открывает страницу тайтла на сайте.
+ * Единая точка РЕАЛЬНЫХ действий аккаунта YummyAnime (спецификация I §9):
+ *   - сессия должна быть подтверждена (иначе — честная просьба войти + диалог);
+ *   - действие выполняется ВНУТРИ постоянной сессии сайта (EXE, main-процесс);
+ *   - результат содержит верификацию ('pass' | 'unconfirmed' | 'mismatch').
+ * В веб-режиме моста нет — честное сообщение без выдумок (fallback — сайт).
+ */
+async function runAccountAction(
+  req: Omit<YummyAnimeActionRequest, 'slug'>,
+  successPrefix: string,
+): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  const acc = st.yummyAccount.state === 'unknown' ? await refreshAccount() : st.yummyAccount
+  if (acc.state !== 'loggedIn') {
+    st.setAuthOpen(true)
+    return fail(
+      acc.state === 'sessionExpired'
+        ? 'Сессия YummyAnime истекла — войдите снова'
+        : 'Войдите в аккаунт YummyAnime — списки/оценки/избранное хранятся в вашем аккаунте на сайте',
+    )
+  }
+  try {
+    const res = await avcApi.animeAction({ ...req, slug: pb.animeSlug ?? '' })
+    if (res.ok) {
+      if (res.verification === 'pass') return ok(`${successPrefix} — подтверждено сайтом`)
+      // HTTP принят; верификация unconfirmed/mismatch — честное сообщение сайта
+      return ok(res.message)
+    }
+    return fail(res.message)
+  } catch (e) {
+    return fail('Действие не выполнено', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** alias из парсера → list_id сайта (реестр Rt бандла сайта — ТОЧНЫЕ id) */
+const STATUS_TO_LIST_ID: Record<string, number> = {
+  watching: 0,
+  planned: 1,
+  completed: 2,
+  dropped: 3,
+  on_hold: 5,
+}
+
+const LIST_TITLES: Record<number, string> = {
+  0: 'Смотрю',
+  1: 'В Планах',
+  2: 'Просмотрено',
+  3: 'Брошено',
+  5: 'Отложено',
+}
+
+/**
+ * «добавь в смотрю/планы/просмотрено…» — РЕАЛЬНОЕ действие: PUT /anime/{id}/list
+ * внутри сессии сайта + reload-верификация по серверному HTML (EXE).
  */
 async function executeSetWatchStatus(cmd: VoiceCommand): Promise<CommandResult> {
   const st = useAvcStore.getState()
-  const title = st.playback.animeTitle
-  if (!st.playback.animeId) {
-    return fail('Сначала откройте аниме — статусы просмотра ведутся на сайте')
-  }
-  const opened = openOnSite(st.playback.animeSlug)
-  return ok(
-    opened
-      ? `Статусы ведутся на сайте${title ? ` — открыл «${title}»` : ''}. Меняйте статус там.`
-      : 'Статусы просмотра ведутся на сайте YummyAnime',
+  const pb = st.playback
+  if (!pb.animeId) return fail('Сначала откройте аниме')
+  const alias = paramString(cmd, 'status')
+  const listId = STATUS_TO_LIST_ID[alias]
+  if (listId === undefined) return fail('Неизвестный статус списка')
+  return runAccountAction(
+    { kind: 'setList', animeId: pb.animeId, value: listId },
+    `Добавлено в «${LIST_TITLES[listId]}»`,
   )
 }
 
-/** «добавь/убери из избранного» — избранное ведётся на сайте (thin client) */
-async function executeToggleFavorite(_cmd: VoiceCommand): Promise<CommandResult> {
+/**
+ * «добавь/убери из избранного» — РЕАЛЬНОЕ действие: PUT/DELETE /anime/{id}/list/fav
+ * внутри сессии сайта + reload-верификация (EXE).
+ */
+async function executeToggleFavorite(cmd: VoiceCommand): Promise<CommandResult> {
   const st = useAvcStore.getState()
-  if (!st.playback.animeId) {
-    return fail('Сначала откройте аниме — избранное ведётся на сайте')
-  }
-  const opened = openOnSite(st.playback.animeSlug)
-  return ok(
-    opened
-      ? 'Избранное ведётся на сайте — открыл страницу тайтла'
-      : 'Избранное ведётся на сайте YummyAnime',
+  const pb = st.playback
+  if (!pb.animeId) return fail('Сначала откройте аниме')
+  const add = cmd.params.favorite !== false
+  return runAccountAction(
+    { kind: add ? 'setFavorite' : 'removeFavorite', animeId: pb.animeId },
+    add ? 'Добавлено в Любимые' : 'Убрано из Любимых',
   )
+}
+
+/** «оцени на 8» — РЕАЛЬНОЕ действие: PUT /anime/{id}/rate {rate: 1..10} (EXE) */
+async function executeRateAnime(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!pb.animeId) return fail('Сначала откройте аниме')
+  const rating = paramNumber(cmd, 'rating')
+  if (rating === null || rating < 1 || rating > 10 || !Number.isInteger(rating)) {
+    return fail('Оценка должна быть целым числом от 1 до 10')
+  }
+  return runAccountAction(
+    { kind: 'setRate', animeId: pb.animeId, value: rating },
+    `Оценка ${rating} из 10 поставлена`,
+  )
+}
+
+/** «убери оценку» — РЕАЛЬНОЕ действие: DELETE /anime/{id}/rate (EXE) */
+async function executeRemoveRating(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!pb.animeId) return fail('Сначала откройте аниме')
+  return runAccountAction({ kind: 'removeRate', animeId: pb.animeId }, 'Оценка снята')
 }
 
 /**
@@ -902,10 +993,38 @@ function executeBack(): CommandResult {
 }
 
 function executeScroll(cmd: VoiceCommand): CommandResult {
+  const dir = cmd.type === VoiceCommandType.ScrollDown ? 1 : -1
+  const delta = dir * 600
+
+  // ГОЛОС-СКРОЛЛ ВНУТРЕННИХ КОНТЕЙНЕРОВ (аудит §3 п.2а): сетка серий с
+  // внутренним скроллом была недостижима для голоса — теперь, если видимый
+  // .avc-scroll может скроллиться в нужную сторону, скроллим ЕГО.
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>('.avc-scroll'),
+  ).filter((el) => {
+    if (el.id === 'avc-content') return false
+    if (el.scrollHeight <= el.clientHeight + 8) return false
+    const r = el.getBoundingClientRect()
+    const vh = window.innerHeight || 1
+    // пересекается с вьюпортом хотя бы на 40px
+    return Math.min(r.bottom, vh) - Math.max(r.top, 0) > 40
+  })
+  if (candidates.length > 0) {
+    const canScroll = (el: HTMLElement) =>
+      dir > 0
+        ? el.scrollTop + el.clientHeight < el.scrollHeight - 4
+        : el.scrollTop > 4
+    const target = candidates.find(canScroll)
+    if (target) {
+      target.scrollBy({ top: delta, behavior: 'smooth' })
+      return ok(dir > 0 ? 'Прокрутка вниз' : 'Прокрутка вверх')
+    }
+    // все видимые внутренние контейнеры уже в краю — падаем на основной скролл
+  }
+
   const el = document.getElementById('avc-content')
   if (!el) return fail('Контейнер контента недоступен')
-  const dir = cmd.type === VoiceCommandType.ScrollDown ? 1 : -1
-  el.scrollBy({ top: dir * 600, behavior: 'smooth' })
+  el.scrollBy({ top: delta, behavior: 'smooth' })
   return ok(dir > 0 ? 'Прокрутка вниз' : 'Прокрутка вверх')
 }
 
@@ -972,6 +1091,8 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
     case VoiceCommandType.Reload: {
       const st = useAvcStore.getState()
       if (!st.activeTabId) return fail('Нет активной вкладки')
+      // Инвалидация клиентского кэша деталей — «Обновляю» должно дать живые данные
+      invalidateDetailsCache()
       st.bumpReload(st.activeTabId)
       return ok('Обновляю страницу')
     }
@@ -997,6 +1118,10 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
       return executeSetWatchStatus(cmd)
     case VoiceCommandType.ToggleFavorite:
       return executeToggleFavorite(cmd)
+    case VoiceCommandType.RateAnime:
+      return executeRateAnime(cmd)
+    case VoiceCommandType.RemoveRating:
+      return executeRemoveRating()
     case VoiceCommandType.ContinueWatching:
       return continueWatchingFromLast()
     case VoiceCommandType.ShowLibrary: {

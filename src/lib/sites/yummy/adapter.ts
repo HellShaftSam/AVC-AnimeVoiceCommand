@@ -20,6 +20,7 @@ import {
   SectionPage,
   SiteSectionId,
   VideoEntry,
+  VideoSkips,
 } from '@/lib/avc/types'
 import { IAnimeSiteAdapter, SiteDiagnostics } from '../types'
 import {
@@ -47,11 +48,19 @@ const SELECTORS = {
 
 // --- кэш (мастер-промпт #88: без постоянного поллинга, TTL-кэш) --------------
 
+/**
+ * Версия парсера (спецификация аккаунта, секция 25/EPISODE_PARSER_AUDIT §6):
+ * входит в ключ кэша — при изменении парсинга старые записи инвалидируются сами.
+ */
+export const EPISODE_PARSER_VERSION = '2'
+
 interface CacheEntry<T> {
   data: T
   expires: number
 }
 
+/** Жёсткий лимит записей — защита от роста памяти на длинных сессиях (аудит §3 п.8) */
+const CACHE_MAX_ENTRIES = 120
 const cache = new Map<string, CacheEntry<unknown>>()
 const CACHE_TTL = 5 * 60 * 1000
 
@@ -63,6 +72,12 @@ function cacheGet<T>(key: string): T | null {
 }
 
 function cacheSet<T>(key: string, data: T): T {
+  // LRU-вытеснение: Map хранит порядок вставки — удаляем самые старые
+  while (cache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined) break
+    cache.delete(oldest)
+  }
   cache.set(key, { data, expires: Date.now() + CACHE_TTL })
   return data
 }
@@ -104,6 +119,24 @@ async function fetchJson<T>(url: string, timeoutMs = 12000): Promise<T> {
   } finally {
     clearTimeout(t)
   }
+}
+
+/**
+ * GET /api/anime/{id}/videos у онгоингов ≈ 5 МБ одним ответом (Ван-Пис: 8714
+ * записей) — 12 с на медленной сети обрывался и «терял» серии (аудит §3 п.2в).
+ * Требование аудита: таймаут ≥ 25 с + 1 ретрай.
+ */
+async function fetchJsonRetry<T>(url: string, timeoutMs = 25000, retries = 1): Promise<T> {
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchJson<T>(url, timeoutMs)
+    } catch (e) {
+      lastErr = e
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 800))
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('запрос не удался')
 }
 
 // --- парсинг HTML карточек ---------------------------------------------------
@@ -190,6 +223,31 @@ interface ApiVideoItem {
   iframe_url: string
   duration: number
   data: { player: string; dubbing: string }
+  /** Проверено живым API: skips:{opening:{time,length},ending:{time,length}} | null */
+  skips?: {
+    opening?: { time?: number; length?: number } | null
+    ending?: { time?: number; length?: number } | null
+  } | null
+  /** Для залогиненных сайт присылает отметку просмотренности [LIVE-VERIFY в сессии] */
+  watched?: boolean | { end_time?: unknown } | null
+}
+
+/** Защитный разбор сегмента skip (формат сайтом не документирован — не выдумываем) */
+function parseSkipSeg(raw: unknown): VideoSkips['opening'] {
+  if (typeof raw !== 'object' || raw === null) return null
+  const r = raw as { time?: unknown; length?: unknown }
+  const time = typeof r.time === 'number' && Number.isFinite(r.time) ? r.time : null
+  const length = typeof r.length === 'number' && Number.isFinite(r.length) ? r.length : null
+  if (time === null || length === null || length <= 0) return null
+  return { time, length }
+}
+
+function parseSkips(v: ApiVideoItem): VideoSkips | null {
+  if (typeof v.skips !== 'object' || v.skips === null) return null
+  const opening = parseSkipSeg(v.skips.opening)
+  const ending = parseSkipSeg(v.skips.ending)
+  if (!opening && !ending) return null
+  return { opening, ending }
 }
 
 // --- адаптер -----------------------------------------------------------------
@@ -229,11 +287,11 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
   }
 
   async getVideos(animeId: number): Promise<VideoEntry[]> {
-    const key = `videos:${this.baseUrl}:${animeId}`
+    const key = `videos:v${EPISODE_PARSER_VERSION}:${this.baseUrl}:${animeId}`
     const cached = cacheGet<VideoEntry[]>(key)
     if (cached) return cached
     try {
-      const data = await fetchJson<{ response: ApiVideoItem[] }>(
+      const data = await fetchJsonRetry<{ response: ApiVideoItem[] }>(
         `${this.baseUrl}/api/anime/${animeId}/videos`,
       )
       const items: VideoEntry[] = (data.response ?? []).map((v) => ({
@@ -243,6 +301,7 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
         playerName: v.data?.player ?? '',
         iframeUrl: v.iframe_url ?? '',
         duration: v.duration ?? null,
+        skips: parseSkips(v),
       }))
       return cacheSet(key, items)
     } catch {
@@ -251,7 +310,7 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
   }
 
   async getAnimeById(id: number): Promise<AnimeDetails | null> {
-    const key = `anime:${this.baseUrl}:${id}`
+    const key = `anime:v${EPISODE_PARSER_VERSION}:${this.baseUrl}:${id}`
     const cached = cacheGet<AnimeDetails>(key)
     if (cached) return cached
     try {
@@ -260,29 +319,29 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
         this.getVideos(id),
       ])
       const d = detailsResp.response
-      const result = this.buildDetails(d, videos)
+      const result = { ...this.buildDetails(d, videos), source: 'live' as const }
       return cacheSet(key, result)
     } catch {
-      return demoDetails(id)
+      // Честный fallback: помечаем данные как demo — UI показывает бейдж DEMO
+      return { ...demoDetails(id), source: 'demo' as const }
     }
   }
 
   async getAnimeBySlug(slug: string): Promise<AnimeDetails | null> {
-    const key = `animeslug:${this.baseUrl}:${slug}`
+    const key = `animeslug:v${EPISODE_PARSER_VERSION}:${this.baseUrl}:${slug}`
     const cached = cacheGet<AnimeDetails>(key)
     if (cached) return cached
     try {
       // /api/anime/{alias} принимает человекочитаемый alias и возвращает anime_id
-      const [detailsResp, first] = await Promise.all([
-        fetchJson<{ response: ApiAnimeDetails }>(`${this.baseUrl}/api/anime/${encodeURIComponent(slug)}`),
-        Promise.resolve(null as ApiVideoItem[] | null),
-      ])
+      const detailsResp = await fetchJson<{ response: ApiAnimeDetails }>(
+        `${this.baseUrl}/api/anime/${encodeURIComponent(slug)}`,
+      )
       const d = detailsResp.response
       const videos = await this.getVideos(d.anime_id)
-      const result = this.buildDetails(d, videos)
+      const result = { ...this.buildDetails(d, videos), source: 'live' as const }
       return cacheSet(key, result)
     } catch {
-      return demoDetails(slug)
+      return { ...demoDetails(slug), source: 'demo' as const }
     }
   }
 

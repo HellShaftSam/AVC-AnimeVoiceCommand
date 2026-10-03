@@ -38,7 +38,8 @@ import { useAvcStore, VoiceStatus } from './store'
 
 const SILENCE_MS = 1300
 const MIN_UTTERANCE_MS = 500
-const MAX_UTTERANCE_MS = 12000
+/** Кап длительности фразы по умолчанию (переопределяется settings.maxUtteranceMs — жалоба «обрезает на 15 с», аудит §3 п.6) */
+const DEFAULT_MAX_UTTERANCE_MS = 12000
 const REARM_DELAY_MS = 400
 const ERROR_CLEAR_MS = 4000
 /** Троттлинг обновления micLevel (~10 раз/с) */
@@ -505,10 +506,15 @@ export function useVoice(): VoiceApi {
       // индикатор уровня (параллельный лёгкий захват)
       void startLevelIndicator()
       // страховка: если движок «завис» без onend — прекращаем сами
+      // кап берём из настроек (Настройки → Микрофон → Максимальная длительность фразы)
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
+      const maxMs = Math.min(
+        60000,
+        Math.max(4000, useAvcStore.getState().settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS),
+      )
       maxTimerRef.current = setTimeout(() => {
         stopRef.current?.()
-      }, MAX_UTTERANCE_MS)
+      }, maxMs)
     },
     [scheduleErrorClear, handleRecognizedText, rearmIfNeeded, startLevelIndicator, teardownAudio],
   )
@@ -541,9 +547,13 @@ export function useVoice(): VoiceApi {
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю...')
       startRafLoop(true)
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
+      const maxMs = Math.min(
+        60000,
+        Math.max(4000, settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS),
+      )
       maxTimerRef.current = setTimeout(() => {
         stopRef.current?.()
-      }, MAX_UTTERANCE_MS)
+      }, maxMs)
     } catch (e) {
       // сессию уже отменили/начали новую — не трогаем её аудио и статус
       if (seq !== sessionSeqRef.current) return

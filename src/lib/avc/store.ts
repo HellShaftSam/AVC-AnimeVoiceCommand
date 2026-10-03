@@ -146,6 +146,7 @@ const INITIAL_PLAYBACK: PlaybackContext = {
   volume: 70,
   currentTime: 0,
   duration: 0,
+  currentSkips: null,
 }
 
 function deriveNavigation(

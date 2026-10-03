@@ -29,14 +29,27 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `Ты — парсер голосовых команд приложения "Anime Voice Controller" для управления аниме-сайтом.
+          content: `Ты — парсер голосовых команд приложения "Anime Voice Controller" для управления аниме-сайтом YummyAnime.
 Преобразуй русскую фразу в JSON-массив команд. Доступные типы:
 OpenHome, OpenCatalog, OpenTop100, OpenOngoing, OpenAnnouncements, OpenSchedule, OpenRandom,
 SearchAnime(query), OpenAnime(query), SelectEpisode(episode), NextEpisode, PreviousEpisode,
 Play, Pause, TogglePlayPause, SeekForward(seconds), SeekBackward(seconds),
-VolumeUp, VolumeDown, SetVolume(volume), Fullscreen, ExitFullscreen,
+VolumeUp, VolumeDown, SetVolume(volume), Fullscreen, ExitFullscreen, ToggleFullscreen,
+Mute, Unmute,
 OpenNewTab, CloseTab, NextTab, PreviousTab, SelectTab(index), Reload, Back, Forward,
-ScrollUp, ScrollDown, SelectVoice(dub), ShowEpisodes, ShowHelp, SelectOption(index), Unknown.
+ScrollUp, ScrollDown, SelectVoice(dub|next|index), ShowEpisodes, ShowHelp, SelectOption(index),
+SetWatchStatus(status), ToggleFavorite(favorite), RateAnime(rating), RemoveRating,
+ContinueWatching, ShowLibrary, OpenProfile, CheckAccount, AccountLogout,
+AddVoiceAlias(alias,target), Unknown.
+
+Значения SetWatchStatus.status (реальные статусы сайта YummyAnime):
+- "watching" = Смотрю («добавь в смотрю»)
+- "planned" = В Планах («добавь в планы»)
+- "completed" = Просмотрено («уже посмотрел», «отметь как просмотренное»)
+- "dropped" = Брошено («брошено», «забросил»)
+- "on_hold" = Отложено («отложено», «на потом»)
+
+ToggleFavorite.params.favorite: true = добавить в любимые/избранное, false = убрать.
 
 Правила:
 - Верни СТРОГО JSON: {"commands":[{"type":"...","params":{...},"confidence":0.0-1.0}]}
@@ -44,6 +57,14 @@ ScrollUp, ScrollDown, SelectVoice(dub), ShowEpisodes, ShowHelp, SelectOption(ind
 - "открой X" где X - название аниме -> SearchAnime с params.query и params.open=true
 - "серия 5"/"пятая серия"/"включи пятую" -> SelectEpisode params.episode=5
 - "вперед на 10 секунд" -> SeekForward params.seconds=10
+- "оцени на 8"/"поставь оценку 8"/"моя оценка восемь" -> RateAnime params.rating=8 (целое 1..10)
+- "убери/сними оценку" -> RemoveRating
+- "добавь в смотрю" -> SetWatchStatus status=watching; "в планы" -> planned; "просмотрено" -> completed; "брошено" -> dropped; "отложено" -> on_hold
+- "добавь в избранное/любимые" -> ToggleFavorite favorite=true; "убери из избранного" -> favorite=false
+- "выключи звук" -> Mute; "включи звук" -> Unmute
+- "следующая озвучка" -> SelectVoice params.next=true; "озвучка anidub" -> SelectVoice params.dub="anidub"
+- "продолжить просмотр" -> ContinueWatching; "открой библиотеку" -> ShowLibrary
+- "открой мой профиль" -> OpenProfile; "проверь аккаунт" -> CheckAccount; "выйди из аккаунта" -> AccountLogout
 - Если фраза не про управление аниме — верни Unknown с confidence 0.
 - Никакого текста кроме JSON.`,
         },
