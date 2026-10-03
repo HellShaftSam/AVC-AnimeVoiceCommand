@@ -12,7 +12,7 @@
  * серии командами «вниз» (голос-скролл) и «серия N».
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, Film, Heart, RotateCw, Star } from 'lucide-react'
+import { ExternalLink, Film, Heart, Play, RotateCw, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -25,9 +25,10 @@ import {
   maxEpisodeOf,
   syncPlaybackToDetails,
 } from '@/lib/avc/executor'
+import { avcApi } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import { LIBRARY_STATUSES } from '@/lib/avc/types'
-import type { AnimeDetails, BrowserTab } from '@/lib/avc/types'
+import type { AnimeDetails, BrowserTab, WatchProgressItem } from '@/lib/avc/types'
 import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
@@ -57,6 +58,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   const [error, setError] = useState<string | null>(null)
   const [loadedKey, setLoadedKey] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [localProgress, setLocalProgress] = useState<WatchProgressItem | null>(null)
 
   const slug = typeof tab.payload.slug === 'string' ? tab.payload.slug : null
   const animeId = typeof tab.payload.animeId === 'number' ? tab.payload.animeId : null
@@ -99,6 +101,26 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
       patchTab(tab.id, { title: details.title })
     }
   }, [details, tab.id, tab.title, patchTab])
+
+  // Локальный трекинг: если этот тайтл уже смотрели — подсказать где остановились
+  // (подсказка видна пока серия не включена; после включения playback.currentEpisode !== null)
+  useEffect(() => {
+    if (animeId === null) return
+    let cancelled = false
+    const acc = useAvcStore.getState().yummyAccount
+    const id = acc.state === 'loggedIn' ? acc.user?.userId : null
+    const accountKey = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon'
+    void avcApi
+      .watchProgressList(accountKey)
+      .then((res) => {
+        if (cancelled) return
+        setLocalProgress(res.items.find((i) => i.animeId === animeId) ?? null)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [animeId])
 
   if (loading) {
     return (
@@ -236,6 +258,33 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
             onAct={act}
             onOpenSite={openOnSite}
           />
+
+          {/* Локальный трекинг: «вы останавливались на серии N» — до включения серии */}
+          {localProgress && localProgress.episode !== null && playback.currentEpisode === null && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/5 p-2.5 text-sm">
+              <Play className="h-4 w-4 shrink-0 text-amber-300" aria-hidden />
+              <span className="text-zinc-300">
+                Вы смотрели здесь: серия{' '}
+                <span className="font-semibold text-amber-300">{localProgress.episode}</span>
+                {localProgress.episodesTotal !== null && (
+                  <span className="text-zinc-500"> из {localProgress.episodesTotal}</span>
+                )}
+              </span>
+              <Button
+                size="sm"
+                onClick={() =>
+                  act(
+                    VoiceCommandType.SelectEpisode,
+                    { episode: localProgress.episode as number },
+                    `Продолжить с серии ${localProgress.episode}`,
+                  )
+                }
+                className="min-h-9 gap-1.5 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+              >
+                Продолжить с {localProgress.episode}
+              </Button>
+            </div>
+          )}
 
           <p className="mt-3 text-sm text-zinc-400">
             Серия <span className="font-semibold text-amber-300">{currentEp ?? '—'}</span> из{' '}

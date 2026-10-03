@@ -18,6 +18,7 @@
 import type {
   YummyAnimeActionRequest,
   YummyAnimeOwnState,
+  YummyLibraryItem,
 } from '@/lib/avc/types'
 import type { WebSessionData } from './web-session'
 
@@ -372,6 +373,127 @@ export async function fetchFavoritesText(cookie: string): Promise<{
   } catch {
     return { status: 0, text: '' }
   }
+}
+
+// --- Библиотека (списки статусов) ---------------------------------------------
+// Эндпоинт найден в бандле сайта: getLists(t,e) →
+// GET /api/users/{t}/lists/{e}, где t — ЧИСЛОВОЙ id пользователя (без префикса
+// "id", проверено на живой сессии: id470161 → 400 Arguments error, 470161 → 200).
+// listId: 0 Смотрю, 1 В Планах, 2 Просмотрено, 3 Брошено, 4 Любимые, 5 Отложено.
+
+/** GET /api/users/{numericId}/lists/{listId} в контексте сессии */
+export async function fetchUserList(
+  cookie: string,
+  numericUserId: string,
+  listId: number,
+): Promise<{ status: number; body: unknown }> {
+  try {
+    const res = await siteFetch(
+      `${SITE_ORIGIN}/api/users/${encodeURIComponent(numericUserId)}/lists/${listId}`,
+      { method: 'GET', cookie, extra: { ...SITE_API_HEADERS }, timeoutMs: 25000 },
+    )
+    let body: unknown = null
+    try {
+      body = await res.json()
+    } catch {
+      body = null
+    }
+    return { status: res.status, body }
+  } catch {
+    return { status: 0, body: null }
+  }
+}
+
+/** Защитная нормализация одного элемента списка библиотеки сайта */
+function parseLibraryItem(raw: unknown): YummyLibraryItem | null {
+  const it = asRec(raw)
+  if (!it) return null
+
+  const title = [it.title, it.name, it.anime_title].find(
+    (v): v is string => typeof v === 'string' && v.trim() !== '',
+  )
+  const rawId = it.anime_id ?? it.animeId ?? it.id
+  let slug: string | null = null
+  if (typeof it.anime_url === 'string' && it.anime_url.trim() !== '') slug = it.anime_url.trim()
+  else if (typeof it.slug === 'string' && it.slug.trim() !== '') slug = it.slug.trim()
+  else if (typeof it.url === 'string') {
+    slug = it.url.match(/\/catalog\/item\/([a-z0-9-]+)/i)?.[1] ?? null
+  }
+  if (title === undefined && rawId === undefined && slug === null) return null
+
+  const posterRec = asRec(it.poster)
+  let poster: string | null = null
+  if (typeof it.poster === 'string') poster = it.poster
+  else if (posterRec) {
+    const p =
+      posterRec.medium ?? posterRec.big ?? posterRec.small ?? posterRec.fullsize ?? posterRec.huge
+    if (typeof p === 'string' && p.trim() !== '') poster = p
+  }
+
+  const userRec = asRec(it.user)
+  const userListRec = userRec ? asRec(userRec.list) : null
+  const innerListRec = userListRec ? asRec(userListRec.list) : null
+  const ownRatingRaw = userRec ? userRec.rating : null
+  const ownRating = typeof ownRatingRaw === 'number' && ownRatingRaw > 0 ? ownRatingRaw : null
+
+  const statusRec = asRec(it.anime_status)
+  const typeRec = asRec(it.type)
+
+  const nextRaw = it.next_episode
+  const nextEpisodeAt = typeof nextRaw === 'number' && nextRaw > 0 ? nextRaw : null
+  const addedRaw = it.date
+  const addedAt = typeof addedRaw === 'number' && addedRaw > 0 ? addedRaw : null
+
+  const yearRaw = it.year
+  const siteRatingRaw = it.rating
+
+  const listIdRaw = innerListRec?.id
+  return {
+    animeId: typeof rawId === 'number' ? rawId : null,
+    slug,
+    title: title ?? `Аниме #${String(rawId ?? '?')}`,
+    poster: poster ? (poster.startsWith('//') ? `https:${poster}` : poster) : null,
+    year: typeof yearRaw === 'number' ? yearRaw : null,
+    siteRating: typeof siteRatingRaw === 'number' ? siteRatingRaw : null,
+    ownRating,
+    isFavorite: userListRec?.is_fav === true,
+    listId: typeof listIdRaw === 'number' ? listIdRaw : null,
+    listTitle: typeof innerListRec?.title === 'string' ? (innerListRec.title as string) : null,
+    animeStatus: statusRec && typeof statusRec.title === 'string' ? statusRec.title : null,
+    animeStatusAlias: statusRec && typeof statusRec.alias === 'string' ? statusRec.alias : null,
+    type: typeRec && typeof typeRec.name === 'string' ? typeRec.name : null,
+    nextEpisodeAt,
+    addedAt,
+  }
+}
+
+/**
+ * Разобрать ответ GET /api/users/{id}/lists/{listId} → массив элементов.
+ * Сайт отдаёт { response: [...] }; защита от форматов {response:{response:[...]}}.
+ */
+export function parseLibraryItems(bodyRaw: unknown): YummyLibraryItem[] {
+  let body = bodyRaw
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      return []
+    }
+  }
+  const root = asRec(body)
+  let list: unknown = null
+  if (root && Array.isArray(root.response)) list = root.response
+  else if (root && asRec(root.response) && Array.isArray((root.response as UnknownRec).response)) {
+    list = (root.response as UnknownRec).response
+  } else if (Array.isArray(body)) list = body
+  if (!Array.isArray(list)) return []
+
+  const out: YummyLibraryItem[] = []
+  for (const raw of list) {
+    const item = parseLibraryItem(raw)
+    if (item) out.push(item)
+  }
+  return out
 }
 
 // --- Верификация состояния по серверному HTML страницы аниме ------------------

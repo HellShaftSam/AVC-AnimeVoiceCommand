@@ -313,15 +313,45 @@ export function getLastWatched(): LastWatched | null {
   }
 }
 
+/**
+ * Локальный трекинг просмотра — серверная БД приложения (SQLite).
+ * Сайт прогресс серий наружу не отдаёт (только пишет внутри своей сессии),
+ * поэтому приложение ведёт собственную запись: какое аниме, какая серия,
+ * когда — с изоляцией по аккаунту (userId сайта или 'anon').
+ */
+function saveWatchProgressToServer(extra?: {
+  poster?: string | null
+  episodesTotal?: number | null
+}): void {
+  const pb = useAvcStore.getState().playback
+  if (pb.animeId === null) return
+  const acc = useAvcStore.getState().yummyAccount
+  const id = acc.state === 'loggedIn' ? acc.user?.userId : null
+  const accountKey = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon'
+  void avcApi.watchProgressSave({
+    accountKey,
+    animeId: pb.animeId,
+    slug: pb.animeSlug ?? '',
+    title: pb.animeTitle ?? 'Без названия',
+    poster: extra?.poster ?? null,
+    episode: pb.currentEpisode,
+    episodesTotal: extra?.episodesTotal ?? null,
+    dubbing: pb.currentDub,
+  })
+}
+
 /** Запомнить текущее playback-состояние как «последнее открытое» (fire-and-forget) */
-function rememberLastWatched(): void {
+function rememberLastWatched(extra?: {
+  poster?: string | null
+  episodesTotal?: number | null
+}): void {
   const pb = useAvcStore.getState().playback
   if (pb.animeId === null) return
   const entry: LastWatched = {
     animeId: pb.animeId,
     slug: pb.animeSlug ?? '',
     title: pb.animeTitle ?? 'Без названия',
-    poster: null,
+    poster: extra?.poster ?? null,
     episode: pb.currentEpisode,
     currentDub: pb.currentDub,
     at: Date.now(),
@@ -331,6 +361,7 @@ function rememberLastWatched(): void {
   } catch {
     /* localStorage может быть недоступен — метка просто не сохранится */
   }
+  saveWatchProgressToServer(extra)
 }
 
 /** Проверить аккаунт и положить снимок в store (для голосовых команд и UI) */
@@ -495,7 +526,10 @@ async function playEpisode(episode: number): Promise<CommandResult> {
     currentSkips: video.skips,
   })
   st.setPlayer(video.iframeUrl, video.playerName)
-  rememberLastWatched()
+  rememberLastWatched({
+    poster: details.poster ?? null,
+    episodesTotal: details.episodesTotal ?? (max > 0 ? max : null),
+  })
   toast({ description: `▶ Серия ${episode}` })
   return ok(`Серия ${episode}`)
 }
@@ -759,17 +793,23 @@ async function executeRemoveRating(): Promise<CommandResult> {
 }
 
 /**
- * Продолжить просмотр по локальной сессионной метке: открыть аниме,
- * восстановить озвучку и серию. Экспортируется для UI.
+ * Общий движок «продолжить»: открыть тайтл, восстановить озвучку и серию.
+ * Используется и командой «продолжить просмотр» (последняя метка),
+ * и кнопкой продолжения в библиотеке (любая запись прогресса).
  */
-export async function continueWatchingFromLast(): Promise<CommandResult> {
-  const last = getLastWatched()
-  if (!last) return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
+async function continueFromEntry(entry: {
+  animeId: number
+  slug: string
+  title: string
+  poster: string | null
+  episode: number | null
+  dubbing: string | null
+}): Promise<CommandResult> {
   const card: AnimeCard = {
-    animeId: last.animeId,
-    slug: last.slug,
-    title: last.title,
-    poster: last.poster,
+    animeId: entry.animeId,
+    slug: entry.slug,
+    title: entry.title,
+    poster: entry.poster,
     year: null,
     rating: null,
     status: null,
@@ -777,16 +817,72 @@ export async function continueWatchingFromLast(): Promise<CommandResult> {
   }
   await navigateToAnime(card, false)
   const st = useAvcStore.getState()
-  if (last.currentDub) st.patchPlayback({ currentDub: last.currentDub })
-  if (last.episode !== null && last.episode > 0) {
-    const res = await playEpisode(last.episode)
+  if (entry.dubbing) st.patchPlayback({ currentDub: entry.dubbing })
+  if (entry.episode !== null && entry.episode > 0) {
+    const res = await playEpisode(entry.episode)
     if (!res.success) {
       toast({ variant: 'destructive', description: res.message })
       return fail(res.message)
     }
   }
+  return ok(`Продолжаю: ${entry.title}${entry.episode ? `, серия ${entry.episode}` : ''}`)
+}
+
+/**
+ * Продолжить просмотр по локальной сессионной метке: открыть аниме,
+ * восстановить озвучку и серию. Экспортируется для UI.
+ */
+export async function continueWatchingFromLast(): Promise<CommandResult> {
+  const last = getLastWatched()
+  if (!last) return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
+  return continueFromEntry({
+    animeId: last.animeId,
+    slug: last.slug,
+    title: last.title,
+    poster: last.poster,
+    episode: last.episode,
+    dubbing: last.currentDub,
+  })
+}
+
+/** Продолжить конкретный тайтл из локального трекинга (кнопка в библиотеке) */
+export async function continueWatchProgressItem(item: {
+  animeId: number
+  slug: string
+  title: string
+  poster: string | null
+  episode: number | null
+  dubbing: string | null
+}): Promise<CommandResult> {
+  return continueFromEntry(item)
+}
+
+/**
+ * «Что я смотрю?» — голосовой ответ по локальному трекингу просмотра
+ * (БД приложения): последнее аниме, серия, озвучка. Работает без входа на
+ * сайт (anon-слот); с входом — прогресс изолирован по аккаунту сайта.
+ */
+export async function whatAmIWatching(): Promise<CommandResult> {
+  const acc = useAvcStore.getState().yummyAccount
+  const id = acc.state === 'loggedIn' ? acc.user?.userId : null
+  const accountKey = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon'
+  let data
+  try {
+    data = await avcApi.watchProgressList(accountKey)
+  } catch {
+    return fail('Не удалось прочитать историю просмотра')
+  }
+  if (!data.available || data.items.length === 0) {
+    return fail('Я ещё не записал просмотры — включите серию, и я запомню где вы остановились')
+  }
+  const last = data.items[0]
+  const epPart = last.episode !== null ? `серия ${last.episode}` : 'серия не включалась'
+  const totalPart =
+    last.episodesTotal !== null && last.episode !== null ? ` из ${last.episodesTotal}` : ''
+  const dubPart = last.dubbing ? ` (${last.dubbing})` : ''
+  const more = data.items.length > 1 ? `\nЕщё недавно: ${data.items.slice(1, 4).map((i) => i.title).join(', ')}` : ''
   return ok(
-    `Продолжаю: ${last.title}${last.episode ? `, серия ${last.episode}` : ''}`,
+    `Вы смотрите «${last.title}» — ${epPart}${totalPart}${dubPart}. Скажите «продолжить просмотр»${more}`,
   )
 }
 
@@ -1124,6 +1220,8 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
       return executeRemoveRating()
     case VoiceCommandType.ContinueWatching:
       return continueWatchingFromLast()
+    case VoiceCommandType.WhatAmIWatching:
+      return whatAmIWatching()
     case VoiceCommandType.ShowLibrary: {
       useAvcStore.getState().setFavoritesOpen(true)
       return ok('Библиотека YummyAnime открыта')

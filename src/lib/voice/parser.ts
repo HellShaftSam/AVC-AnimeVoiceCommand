@@ -117,6 +117,7 @@ export const LABELS: Record<VoiceCommandType, string> = {
   [VoiceCommandType.RateAnime]: 'Поставить оценку',
   [VoiceCommandType.RemoveRating]: 'Убрать оценку',
   [VoiceCommandType.ContinueWatching]: 'Продолжить просмотр',
+  [VoiceCommandType.WhatAmIWatching]: 'Что я смотрю',
   [VoiceCommandType.ShowLibrary]: 'Открыть библиотеку YummyAnime',
   [VoiceCommandType.OpenProfile]: 'Открыть мой профиль',
   [VoiceCommandType.CheckAccount]: 'Проверить аккаунт',
@@ -334,6 +335,14 @@ function extractFavorite(text: string): VoiceCommand | null {
 function extractContinueWatching(text: string): VoiceCommand | null {
   if (/продолжи(?:ть)?\s+просмотр|продолж\s+с\s+того\s+места|с\s+того\s+(?:самого\s+)?места|вернись\s+к\s+просмотру|где\s+я\s+остановился/.test(text)) {
     return { type: VoiceCommandType.ContinueWatching, params: {}, confidence: 0.9, label: 'Продолжить просмотр' }
+  }
+  return null
+}
+
+/** «что я смотрю», «на какой серии я», «мой прогресс» — инфо по трекингу просмотра */
+function extractWhatAmIWatching(text: string): VoiceCommand | null {
+  if (/что\s+я\s+смотр|какое\s+аниме\s+я\s+смотр|на\s+какой\s+серии\s+я|мой\s+прогресс|прогресс\s+просмотра|какая\s+серия\s+была/.test(text)) {
+    return { type: VoiceCommandType.WhatAmIWatching, params: {}, confidence: 0.9, label: 'Что я смотрю' }
   }
   return null
 }
@@ -589,6 +598,9 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
 
   const cont = extractContinueWatching(text)
   if (cont) return cont
+
+  const watching = extractWhatAmIWatching(text)
+  if (watching) return watching
 
   const status = extractWatchStatus(text)
   if (status) return status

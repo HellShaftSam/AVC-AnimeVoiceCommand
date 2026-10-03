@@ -14,6 +14,15 @@
 | 5 | Отложено | PASS | postpone | BLOCKED | BLOCKED | BLOCKED |
 | 6 | Неизвестный список | PASS (публичный счётчик `/anime/111/lists` вернул list_id:6) | нет в UI-конфиге | NOT_SUPPORTED (назначение неизвестно; не используем) | — | — |
 
+## ЧТЕНИЕ библиотеки — ПОДТВЕРЖДЕНО живой сессией (2026-10-03, Task web-library-1)
+
+- `GET /api/users/{ЧИСЛОВОЙ_id}/lists/{list_id}` → 200 `{response:[...]}` — работает для list_id 0..5. ID пользователя — ТОЛЬКО число: `id470161` → 400 Arguments error, `470161` → 200 (снято с бандла: `getLists(t,e) → "/users/".concat(t,"/lists").concat("number"==typeof e?"/"+e:"")`).
+- Числовой id берётся из `GET /api/profile → response.id`.
+- Элемент содержит: title, anime_url (slug), anime_id, poster.*, year, rating (рейтинг сайта), `user.rating` (своя оценка, 0 → нет), `user.list.is_fav`, `user.list.list.{id,href,title}`, anime_status.{title,alias} (вышел/онгоинг/анонс), type.name, next_episode (unix следующей серии, 0 → нет), date (unix добавления).
+- Реальные счётчики пользователя HellShaftSama: Смотрю 16, В Планах 10, Просмотрено 65, Брошено 1, Любимые 0, Отложено 0.
+- Чтение в приложении: `GET /api/yummy/library` (серверная сессия) → панель «Библиотека» с табами статусов.
+- Пагинация на эндпоинте не обнаружена (Просмотрено 65 пришло целиком одним ответом).
+
 Механика записи: `PUT /api/anime/{id}/list {list:<0|1|2|3|5>}`; избранное отдельно: `PUT /api/anime/{id}/list/fav {date}` / `DELETE`. Удаление из списка: `DELETE /api/anime/{id}/list`. Публичные счётчики: `GET /api/anime/{id}/lists → [{list_id,count}]` (проверено: Наруто → Смотрю 3865, В Планах 2176, Просмотрено 34509, …).
 
 ## Оценки

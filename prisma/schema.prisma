@@ -52,4 +52,24 @@ model VoiceAlias {
   @@unique([targetType, targetName, alias])
 }
 
+// Локальный трекинг просмотра: какое аниме смотрели, на какой серии остановились.
+// Сайт прогресс серий наружу не отдаёт (только пишет PUT /video/{id} внутри
+// своей сессии), поэтому приложение ведёт собственную честную запись.
+// accountKey = userId сайта (изоляция аккаунтов) либо 'anon' для гостя.
+model WatchProgressEntry {
+  id            String   @id @default(cuid())
+  accountKey    String
+  animeId       Int
+  slug          String   @default("")
+  title         String
+  poster        String?
+  episode       Int?
+  episodesTotal Int?
+  dubbing       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([accountKey, animeId])
+}
+
 // regenerated for fresh client (task 9-b)

@@ -39,7 +39,7 @@ Mute, Unmute,
 OpenNewTab, CloseTab, NextTab, PreviousTab, SelectTab(index), Reload, Back, Forward,
 ScrollUp, ScrollDown, SelectVoice(dub|next|index), ShowEpisodes, ShowHelp, SelectOption(index),
 SetWatchStatus(status), ToggleFavorite(favorite), RateAnime(rating), RemoveRating,
-ContinueWatching, ShowLibrary, OpenProfile, CheckAccount, AccountLogout,
+ContinueWatching, WhatAmIWatching, ShowLibrary, OpenProfile, CheckAccount, AccountLogout,
 AddVoiceAlias(alias,target), Unknown.
 
 Значения SetWatchStatus.status (реальные статусы сайта YummyAnime):
@@ -63,7 +63,7 @@ ToggleFavorite.params.favorite: true = добавить в любимые/изб
 - "добавь в избранное/любимые" -> ToggleFavorite favorite=true; "убери из избранного" -> favorite=false
 - "выключи звук" -> Mute; "включи звук" -> Unmute
 - "следующая озвучка" -> SelectVoice params.next=true; "озвучка anidub" -> SelectVoice params.dub="anidub"
-- "продолжить просмотр" -> ContinueWatching; "открой библиотеку" -> ShowLibrary
+- "продолжить просмотр" -> ContinueWatching; "что я смотрю"/"на какой серии я" -> WhatAmIWatching; "открой библиотеку" -> ShowLibrary
 - "открой мой профиль" -> OpenProfile; "проверь аккаунт" -> CheckAccount; "выйди из аккаунта" -> AccountLogout
 - Если фраза не про управление аниме — верни Unknown с confidence 0.
 - Никакого текста кроме JSON.`,

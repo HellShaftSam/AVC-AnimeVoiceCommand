@@ -60,7 +60,9 @@ export enum VoiceCommandType {
   /** «убери оценку» — DELETE /anime/{id}/rate через сессию сайта (EXE) */
   RemoveRating = 'RemoveRating',
   ContinueWatching = 'ContinueWatching', // «продолжить просмотр» (по локальной сессионной метке)
-  ShowLibrary = 'ShowLibrary', // «открой библиотеку» — панель избранного YummyAnime
+  ShowLibrary = 'ShowLibrary', // «открой библиотеку» — панель библиотеки YummyAnime
+  /** «что я смотрю», «на какой серии я» — ответ по локальному трекингу просмотра */
+  WhatAmIWatching = 'WhatAmIWatching',
   /** «открой мой профиль», «проверь аккаунт», «выйди из аккаунта» */
   OpenProfile = 'OpenProfile',
   CheckAccount = 'CheckAccount',
@@ -182,6 +184,94 @@ export interface YummyFavoritesResult {
   items: YummyFavoriteItem[]
   reason: string | null
   lastSync: string | null
+}
+
+// --- Библиотека YummyAnime (списки статусов с сайта) --------------------------
+// Эндпоинт снят с живого сайта (октябрь 2026, session-проверка):
+// GET /api/users/{numericId}/lists/{listId} → { response: [...] }
+// listId — точные значения из бандла сайта (массив Rt) и профиля.
+
+export type YummyListId = 0 | 1 | 2 | 3 | 4 | 5
+
+/** Точные названия списков на сайте (list_id → название) */
+export const YUMMY_LIST_NAMES: Record<YummyListId, string> = {
+  0: 'Смотрю',
+  1: 'В Планах',
+  2: 'Просмотрено',
+  3: 'Брошено',
+  4: 'Любимые',
+  5: 'Отложено',
+}
+
+export const YUMMY_LIST_IDS: readonly YummyListId[] = [0, 1, 2, 3, 4, 5]
+
+/** Элемент списка библиотеки с сайта (защитно нормализованный) */
+export interface YummyLibraryItem {
+  animeId: number | null
+  slug: string | null
+  title: string
+  poster: string | null
+  year: number | null
+  /** Рейтинг сайта (например 6.18) */
+  siteRating: number | null
+  /** Своя оценка (user.rating, 1..10; 0 → null) */
+  ownRating: number | null
+  /** В избранном (user.list.is_fav) */
+  isFavorite: boolean
+  /** Фактический список, в котором лежит тайтл (user.list.list.id) */
+  listId: number | null
+  /** Название списка как на сайте (user.list.list.title) */
+  listTitle: string | null
+  /** Статус тайтла: «вышел» / «онгоинг» / «анонс» */
+  animeStatus: string | null
+  /** released / ongoing / announced */
+  animeStatusAlias: string | null
+  /** Тип: TV / OVA / Фильм … */
+  type: string | null
+  /** Unix-время выхода следующей серии (0/нет → null) */
+  nextEpisodeAt: number | null
+  /** Unix-время добавления в список */
+  addedAt: number | null
+}
+
+/** Один список библиотеки */
+export interface YummyLibraryList {
+  listId: YummyListId
+  name: string
+  count: number
+  items: YummyLibraryItem[]
+}
+
+/** Ответ GET /api/yummy/library. unavailable → честная причина */
+export interface YummyLibraryResult {
+  available: boolean
+  /** Порядок фиксированный: 0,1,2,3,5,4 (Любимые последними, как на сайте) */
+  lists: YummyLibraryList[]
+  reason: string | null
+  lastSync: string | null
+}
+
+// --- Локальный трекинг просмотра (БД приложения) ------------------------------
+// Сайт пишет прогресс внутри своей сессии (PUT /video/{id}), но наружу
+// состояние серий не отдаёт — приложение ведёт собственную запись.
+
+export interface WatchProgressItem {
+  animeId: number
+  slug: string
+  title: string
+  poster: string | null
+  /** Последняя открытая серия (null — аниме открыто, но серия не включалась) */
+  episode: number | null
+  /** Всего серий известно приложению на момент записи */
+  episodesTotal: number | null
+  dubbing: string | null
+  updatedAt: string
+}
+
+export interface WatchProgressResult {
+  available: boolean
+  items: WatchProgressItem[]
+  reason: string | null
 }
 
 export interface PlaybackContext {

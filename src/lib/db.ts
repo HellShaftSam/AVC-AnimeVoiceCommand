@@ -11,7 +11,11 @@ const globalForPrisma = globalThis as unknown as {
  * Если глобальный клиент устарел — гасим его и создаём свежий по текущей схеме.
  */
 function isStaleClient(c: PrismaClient | undefined): boolean {
-  return !!c && !((c as unknown as Record<string, unknown>).user)
+  if (!c) return false
+  const rec = c as unknown as Record<string, unknown>
+  // Клиент, сгенерированный до появления модели, не знает о ней (undefined) —
+  // все маршруты с этой моделью упадут с 500. Проверяем несколько моделей.
+  return rec.user === undefined || rec.watchProgressEntry === undefined
 }
 
 if (isStaleClient(globalForPrisma.prisma)) {

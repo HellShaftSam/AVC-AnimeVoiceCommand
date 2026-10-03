@@ -18,11 +18,14 @@
  */
 import type {
   VoiceAliasRow,
+  WatchProgressItem,
+  WatchProgressResult,
   YummyAccountSnapshot,
   YummyAnimeActionRequest,
   YummyAnimeActionResponse,
   YummyAuthSelfTestReport,
   YummyFavoritesResult,
+  YummyLibraryResult,
 } from './types'
 
 /** Достать сообщение об ошибке из ответа сервера ({error} или статус) */
@@ -229,6 +232,76 @@ export const avcApi = {
     const bridge = getElectronBridge()
     if (!bridge) return null
     return bridge.resetYummySession()
+  },
+
+  /**
+   * ПОЛНАЯ библиотека YummyAnime — списки статусов с сайта
+   * (Смотрю/В Планах/Просмотрено/Брошено/Отложено/Любимые).
+   * Веб и EXE одинаково: GET /api/yummy/library (сервер сессии сайта).
+   */
+  async yummyLibrary(): Promise<YummyLibraryResult> {
+    try {
+      const res = await jsonFetch('/api/yummy/library')
+      if (!res.ok) throw new Error(await readError(res))
+      return (await res.json()) as YummyLibraryResult
+    } catch (e) {
+      return {
+        available: false,
+        lists: [],
+        reason: e instanceof Error ? e.message : 'Не удалось загрузить библиотеку',
+        lastSync: null,
+      }
+    }
+  },
+
+  /**
+   * Локальный трекинг просмотра (БД приложения): что смотрели, на какой серии.
+   * Работает и без входа на сайт (accountKey='anon').
+   */
+  async watchProgressList(accountKey: string): Promise<WatchProgressResult> {
+    try {
+      const res = await jsonFetch(
+        `/api/watch-progress?accountKey=${encodeURIComponent(accountKey)}`,
+      )
+      if (!res.ok) throw new Error(await readError(res))
+      return (await res.json()) as WatchProgressResult
+    } catch {
+      return { available: false, items: [], reason: 'Не удалось загрузить прогресс' }
+    }
+  },
+
+  /** Сохранить/обновить прогресс просмотра (fire-and-forget; ошибки молча). */
+  async watchProgressSave(entry: {
+    accountKey: string
+    animeId: number
+    slug?: string
+    title: string
+    poster?: string | null
+    episode?: number | null
+    episodesTotal?: number | null
+    dubbing?: string | null
+  }): Promise<void> {
+    try {
+      await jsonFetch('/api/watch-progress', {
+        method: 'POST',
+        body: JSON.stringify(entry),
+        keepalive: true,
+      })
+    } catch {
+      /* прогресс — вспомогательные данные: не мешаем просмотру */
+    }
+  },
+
+  /** Удалить запись прогресса (одно аниме или всё) */
+  async watchProgressDelete(accountKey: string, animeId?: number): Promise<boolean> {
+    try {
+      const q = new URLSearchParams({ accountKey })
+      if (animeId !== undefined) q.set('animeId', String(animeId))
+      const res = await jsonFetch(`/api/watch-progress?${q.toString()}`, { method: 'DELETE' })
+      return res.ok
+    } catch {
+      return false
+    }
   },
 
   /** Пользовательские алиасы озвучек (глобальные) */
