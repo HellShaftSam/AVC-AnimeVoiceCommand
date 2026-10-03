@@ -67,33 +67,33 @@ export function HistoryPanel() {
   return (
     <aside
       aria-label="История команд"
-      className="hidden w-72 shrink-0 flex-col border-l border-zinc-800 bg-zinc-950 lg:flex"
+      className="hidden w-72 shrink-0 flex-col border-l border-border bg-background lg:flex"
     >
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2.5">
-        <h2 className="text-sm font-semibold text-zinc-200">История команд</h2>
+      <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
+        <h2 className="text-sm font-semibold text-foreground">История команд</h2>
         <Button
           variant="ghost"
           size="icon"
           aria-label="Очистить историю"
           title="Очистить историю"
-          className="h-8 w-8 text-zinc-500 hover:text-rose-400"
+          className="h-8 w-8 text-muted-foreground hover:text-rose-400"
           onClick={() => void clearAll()}
         >
           <Trash2 className="h-4 w-4" aria-hidden />
         </Button>
       </div>
       <div className="avc-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
-        {loading && <p className="p-2 text-xs text-zinc-500">Загрузка...</p>}
+        {loading && <p className="p-2 text-xs text-muted-foreground">Загрузка...</p>}
         {!loading && items.length === 0 && (
-          <p className="p-2 text-xs text-zinc-500">Пока нет команд. Скажите что-нибудь!</p>
+          <p className="p-2 text-xs text-muted-foreground">Пока нет команд. Скажите что-нибудь!</p>
         )}
         {items.map((item) => (
           <div
             key={item.id}
-            className="rounded-lg border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-2 text-xs"
+            className="rounded-lg border border-border/80 bg-card/60 px-2.5 py-2 text-xs"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 font-medium text-zinc-200">
+              <span className="flex items-center gap-1.5 font-medium text-foreground">
                 {item.success ? (
                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
                 ) : (
@@ -101,16 +101,16 @@ export function HistoryPanel() {
                 )}
                 <span className="truncate">{commandLabel(item.command)}</span>
               </span>
-              <span className="shrink-0 tabular-nums text-zinc-500">{timeOf(item.createdAt)}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">{timeOf(item.createdAt)}</span>
             </div>
-            <div className="mt-1 truncate text-zinc-400" title={item.raw}>
+            <div className="mt-1 truncate text-muted-foreground" title={item.raw}>
               «{item.raw}»
             </div>
             <div className="mt-1 flex items-center gap-2">
               <span
                 className={cn(
                   'tabular-nums',
-                  item.confidence >= 0.7 ? 'text-emerald-400/80' : 'text-amber-400/80',
+                  item.confidence >= 0.7 ? 'text-emerald-400/80' : 'text-sky-400/40',
                 )}
               >
                 {Math.round(item.confidence * 100)}%

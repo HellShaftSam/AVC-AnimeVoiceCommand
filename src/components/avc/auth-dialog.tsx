@@ -162,7 +162,7 @@ export function AuthDialog() {
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-amber-400" aria-hidden />
+            <KeyRound className="h-5 w-5 text-sky-400" aria-hidden />
             Вход через YummyAnime
           </DialogTitle>
           <DialogDescription>
@@ -178,7 +178,7 @@ export function AuthDialog() {
               <Button
                 onClick={() => void loginViaSite()}
                 disabled={anyBusy}
-                className="min-h-11 w-full gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+                className="min-h-11 w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {loginBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -192,7 +192,7 @@ export function AuthDialog() {
                 variant="outline"
                 disabled={anyBusy}
                 onClick={() => void verifyNow()}
-                className="min-h-11 gap-2 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+                className="min-h-11 gap-2 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
               >
                 {verifyBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -206,7 +206,7 @@ export function AuthDialog() {
             {loginBusy && (
               <p
                 role="status"
-                className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs leading-relaxed text-amber-200"
+                className="flex items-start gap-2 rounded-lg border border-sky-400/40 bg-sky-400/40 p-2.5 text-xs leading-relaxed text-sky-200"
               >
                 <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
                 Открыто окно сайта — завершите вход там. Это окно закроется автоматически
@@ -214,7 +214,7 @@ export function AuthDialog() {
               </p>
             )}
 
-            <p className="text-xs leading-relaxed text-zinc-500">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Форма «Вход» находится вверху главной страницы сайта (там же вход через
               Telegram / VK / Shikimori). Сессия сохраняется в постоянном профиле сайта
               и переживёт перезапуск приложения.
@@ -225,7 +225,7 @@ export function AuthDialog() {
             {/* РЕАЛЬНАЯ форма входа: логин + пароль → сервер сайта */}
             <form onSubmit={loginWithPassword} className="flex flex-col gap-3" noValidate>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="avc-web-login" className="text-xs text-zinc-400">
+                <Label htmlFor="avc-web-login" className="text-xs text-muted-foreground">
                   Логин или e-mail от YummyAnime
                 </Label>
                 <Input
@@ -238,11 +238,11 @@ export function AuthDialog() {
                   value={webLogin}
                   onChange={(e) => setWebLogin(e.target.value)}
                   disabled={webBusy}
-                  className="min-h-11 border-zinc-700 bg-zinc-900/70"
+                  className="min-h-11 border-border bg-card/60"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="avc-web-password" className="text-xs text-zinc-400">
+                <Label htmlFor="avc-web-password" className="text-xs text-muted-foreground">
                   Пароль
                 </Label>
                 <Input
@@ -254,7 +254,7 @@ export function AuthDialog() {
                   value={webPassword}
                   onChange={(e) => setWebPassword(e.target.value)}
                   disabled={webBusy}
-                  className="min-h-11 border-zinc-700 bg-zinc-900/70"
+                  className="min-h-11 border-border bg-card/60"
                 />
               </div>
 
@@ -270,7 +270,7 @@ export function AuthDialog() {
               <Button
                 type="submit"
                 disabled={webBusy}
-                className="min-h-11 w-full gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+                className="min-h-11 w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {webBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -286,7 +286,7 @@ export function AuthDialog() {
                 variant="outline"
                 disabled={webCheckBusy}
                 onClick={() => void checkWeb()}
-                className="min-h-11 gap-2 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+                className="min-h-11 gap-2 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
               >
                 {webCheckBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -299,14 +299,14 @@ export function AuthDialog() {
               <Button
                 variant="ghost"
                 onClick={openSite}
-                className="min-h-11 gap-2 text-zinc-400 hover:text-amber-300"
+                className="min-h-11 gap-2 text-muted-foreground hover:text-sky-300"
               >
                 <ExternalLink className="h-4 w-4" aria-hidden />
                 Войти в браузере (Telegram / VK / Shikimori)
               </Button>
             </div>
 
-            <p className="text-xs leading-relaxed text-zinc-500">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Пароль уходит только на сервер old.yummyani.me (тот же запрос, что и на
               сайте) и нигде не сохраняется. Вход через Telegram / VK / Shikimori —
               только в окне сайта (кнопка выше или EXE-сборка).
@@ -314,7 +314,7 @@ export function AuthDialog() {
           </>
         )}
 
-        <p className="text-xs leading-relaxed text-zinc-600">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           После входа все действия — «добавь в смотрю», «оцени на 8», «добавь в
           избранное» — выполняются в вашем аккаунте на сайте, и результат виден на
           самом YummyAnime.

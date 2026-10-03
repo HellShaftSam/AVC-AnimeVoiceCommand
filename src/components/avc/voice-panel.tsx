@@ -48,7 +48,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   // Живой уровень микрофона 0..1 (обновляется ~10 раз/с, пока идёт listening)
   const micLevelPct = Math.round(Math.min(1, Math.max(0, voice.micLevel)) * 100)
   const levelColor =
-    micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-amber-400' : 'bg-rose-500'
+    micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-sky-400' : 'bg-rose-500'
   const interim = listening && voice.interimText.trim() ? voice.interimText.trim() : null
   const engineLabel =
     voice.engineName === 'local' ? 'Локально (офлайн)' : voice.engineName === 'browser' ? 'Браузер' : 'Сервер'
@@ -85,17 +85,17 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             }
             aria-pressed={pushToTalk ? undefined : listening}
             className={cn(
-              'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:opacity-40',
+              'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-40',
               listening
                 ? 'animate-pulse border-rose-300/60 bg-rose-500 text-white shadow-[0_0_26px_rgba(244,63,94,0.55)]'
-                : 'border-amber-300/50 bg-amber-400 text-zinc-950 shadow-[0_0_18px_rgba(251,191,36,0.35)] hover:bg-amber-300',
+                : 'border-sky-300/50 bg-sky-400 text-sky-950 shadow-[0_0_18px_rgba(56, 189, 248,0.35)] hover:bg-sky-300',
             )}
           >
             <Mic className="h-6 w-6" aria-hidden />
           </button>
-          {/* Уровень микрофона: zinc-600 < 30% < amber-400 < 70% < rose-500 */}
+          {/* Уровень микрофона: zinc-600 < 30% < sky-400 < 70% < rose-500 */}
           <div
-            className="h-1.5 w-14 overflow-hidden rounded-full bg-zinc-800"
+            className="h-1.5 w-14 overflow-hidden rounded-full bg-secondary"
             role="meter"
             aria-label="Уровень микрофона"
             aria-valuenow={micLevelPct}
@@ -119,7 +119,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
           >
             {voiceStatus === 'executing' ? (
               <span className="flex items-center gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" aria-hidden />
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" aria-hidden />
                 {statusLine(voiceStatus, voiceMessage)}
               </span>
             ) : (
@@ -127,14 +127,14 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             )}
             {/* Бейдж фактического движка распознавания */}
             <span
-              className="ml-1.5 inline-block rounded border border-zinc-700 px-1 py-px align-middle text-[10px] font-normal leading-4 text-zinc-500"
+              className="ml-1.5 inline-block rounded border border-border px-1 py-px align-middle text-[10px] font-normal leading-4 text-muted-foreground"
               title="Движок распознавания"
             >
               {engineLabel}
             </span>
           </div>
           {interim && (
-            <div className="truncate text-xs italic text-zinc-400" aria-live="polite">
+            <div className="truncate text-xs italic text-muted-foreground" aria-live="polite">
               «{interim}»
             </div>
           )}
@@ -157,11 +157,11 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
       >
         <SelectTrigger
           aria-label="Режим микрофона"
-          className="h-11 w-full shrink-0 border-zinc-800 bg-zinc-900/60 text-xs sm:w-[168px]"
+          className="h-11 w-full shrink-0 border-border bg-card/60 text-xs sm:w-[168px]"
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className="border-zinc-800 bg-zinc-900">
+        <SelectContent className="border-border bg-card">
           <SelectItem value="push-to-talk">🎙 Рация (удерживать)</SelectItem>
           <SelectItem value="always-listening">📡 Постоянное слушание</SelectItem>
         </SelectContent>
@@ -173,13 +173,13 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
           onChange={(e) => setTestText(e.target.value)}
           placeholder="Тест команды без микрофона: следующая серия"
           aria-label="Тестовая текстовая команда"
-          className="h-11 min-w-0 border-zinc-800 bg-zinc-900/60 text-sm placeholder:text-zinc-600 focus-visible:ring-amber-400/50"
+          className="h-11 min-w-0 border-border bg-card/60 text-sm placeholder:text-muted-foreground focus-visible:ring-ring/60"
         />
         <Button
           type="submit"
           size="icon"
           aria-label="Выполнить команду"
-          className="h-11 w-11 shrink-0 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+          className="h-11 w-11 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Send className="h-4 w-4" aria-hidden />
         </Button>

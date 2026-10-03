@@ -60,19 +60,19 @@ function HomeView() {
   return (
     <div className="mx-auto max-w-4xl py-6">
       <div className="text-center">
-        <h2 className="bg-gradient-to-r from-amber-200 via-amber-400 to-rose-400 bg-clip-text text-2xl font-bold text-transparent md:text-4xl">
+        <h2 className="bg-gradient-to-r from-sky-200 via-sky-400 to-rose-400 bg-clip-text text-2xl font-bold text-transparent md:text-4xl">
           Скажите команду или нажмите микрофон
         </h2>
-        <p className="mt-3 text-sm text-zinc-400 md:text-base">
+        <p className="mt-3 text-sm text-muted-foreground md:text-base">
           Голосовое управление аниме-сайтом: поиск, каталоги, серии, озвучки, плеер и вкладки.
-          Удерживайте <kbd className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-xs">Ctrl + Space</kbd> или кнопку микрофона внизу.
+          Удерживайте <kbd className="rounded border border-border bg-card px-1.5 py-0.5 text-xs">Ctrl + Space</kbd> или кнопку микрофона внизу.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           {HINT_CHIPS.map((chip) => (
             <button
               key={chip}
               onClick={() => void executeText(chip, 'text')}
-              className="min-h-11 rounded-full border border-zinc-800 bg-zinc-900/60 px-4 text-sm text-zinc-300 transition-all hover:border-amber-400/50 hover:text-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              className="min-h-11 rounded-full border border-border bg-card/60 px-4 text-sm text-foreground transition-all hover:border-sky-400/40 hover:text-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               «{chip}»
             </button>
@@ -89,13 +89,13 @@ function HomeView() {
         ].map(({ icon: Icon, title, text }) => (
           <div
             key={title}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-colors hover:border-zinc-700"
+            className="rounded-xl border border-border bg-card/60 p-4 transition-colors hover:border-border"
           >
-            <div className="flex items-center gap-2 text-amber-400">
+            <div className="flex items-center gap-2 text-sky-400">
               <Icon className="h-5 w-5" aria-hidden />
-              <span className="font-semibold text-zinc-100">{title}</span>
+              <span className="font-semibold text-foreground">{title}</span>
             </div>
-            <p className="mt-2 text-sm leading-relaxed text-zinc-400">{text}</p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{text}</p>
           </div>
         ))}
       </div>
@@ -105,7 +105,7 @@ function HomeView() {
           variant="outline"
           onClick={() => void runDiagnostics()}
           disabled={diagLoading}
-          className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+          className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
         >
           {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
           Диагностика сайта
@@ -118,7 +118,7 @@ function HomeView() {
             {diag.map((d) => (
               <li
                 key={d.name}
-                className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm"
+                className="flex items-start gap-2 rounded-lg border border-border bg-card/60 px-3 py-2 text-sm"
               >
                 {d.ok ? (
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
@@ -126,8 +126,8 @@ function HomeView() {
                   <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" aria-hidden />
                 )}
                 <span className="min-w-0">
-                  <span className="text-zinc-200">{d.name}</span>
-                  <span className="block truncate text-xs text-zinc-500">{d.detail}</span>
+                  <span className="text-foreground">{d.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{d.detail}</span>
                 </span>
               </li>
             ))}
@@ -198,7 +198,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
         <h2 className="text-lg font-bold">{data?.title ?? tab.title}</h2>
         <div className="flex items-center gap-2">
           {data?.source === 'demo' && (
-            <Badge className="border border-amber-400/40 bg-amber-400/10 text-amber-300">
+            <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-300">
               Демо-данные (сайт недоступен)
             </Badge>
           )}
@@ -210,11 +210,11 @@ function SectionView({ tab }: { tab: BrowserTab }) {
                 aria-label="Предыдущая страница"
                 disabled={page <= 1}
                 onClick={() => goToPage(page - 1)}
-                className="h-11 w-11 border-zinc-700 bg-zinc-900/60"
+                className="h-11 w-11 border-border bg-card/60"
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
-              <span className="min-w-14 text-center text-sm text-zinc-400">
+              <span className="min-w-14 text-center text-sm text-muted-foreground">
                 {page} / {data.totalPages}
               </span>
               <Button
@@ -223,7 +223,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
                 aria-label="Следующая страница"
                 disabled={data.totalPages !== null && page >= data.totalPages}
                 onClick={() => goToPage(page + 1)}
-                className="h-11 w-11 border-zinc-700 bg-zinc-900/60"
+                className="h-11 w-11 border-border bg-card/60"
               >
                 <ChevronRight className="h-5 w-5" />
               </Button>
@@ -240,7 +240,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
             <Button
               variant="outline"
               onClick={() => bumpReload(tab.id)}
-              className="min-h-11 border-zinc-700"
+              className="min-h-11 border-border"
             >
               Повторить
             </Button>
@@ -249,7 +249,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
       )}
       {!loading && !error && data && <AnimeGrid items={data.items} />}
       {!loading && !error && data && data.items.length === 0 && (
-        <p className="py-10 text-center text-sm text-zinc-500">Секция пуста</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">Секция пуста</p>
       )}
     </div>
   )
@@ -293,12 +293,12 @@ function SearchView({ tab }: { tab: BrowserTab }) {
   return (
     <div>
       <h2 className="mb-4 text-lg font-bold">
-        Результаты: <span className="text-amber-300">{query}</span>
+        Результаты: <span className="text-sky-300">{query}</span>
       </h2>
       {loading && <AnimeGridSkeleton />}
       {!loading && error && <p className="text-sm text-rose-400">✗ {error}</p>}
       {!loading && !error && items.length === 0 && (
-        <p className="py-10 text-center text-sm text-zinc-500">
+        <p className="py-10 text-center text-sm text-muted-foreground">
           Ничего не найдено по запросу «{query}»
         </p>
       )}

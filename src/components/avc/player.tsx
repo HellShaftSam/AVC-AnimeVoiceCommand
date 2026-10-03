@@ -329,7 +329,7 @@ export function Player() {
   }
 
   const iconBtn =
-    'h-11 w-11 rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-amber-300 focus-visible:ring-amber-400/60'
+    'h-11 w-11 rounded-full text-foreground hover:bg-accent hover:text-sky-300 focus-visible:ring-ring/60'
   /** Кнопка ±30: иконка с маленьким бейджем «30» в углу */
   const seekBtn = cn(iconBtn, 'relative')
 
@@ -339,7 +339,7 @@ export function Player() {
         'flex flex-col bg-black',
         fullscreen
           ? 'fixed inset-0 z-50'
-          : 'mx-auto w-full max-w-4xl overflow-hidden rounded-xl border border-zinc-800 shadow-[0_0_30px_rgba(0,0,0,0.5)]',
+          : 'mx-auto w-full max-w-4xl overflow-hidden rounded-xl border border-border shadow-[0_0_30px_rgba(0,0,0,0.5)]',
       )}
       role="region"
       aria-label="Видеоплеер"
@@ -360,7 +360,7 @@ export function Player() {
             allowFullScreen
           />
         ) : (
-          <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 text-zinc-600">
+          <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 text-muted-foreground">
             <Play className="h-10 w-10" aria-hidden />
             <p className="max-w-xs px-4 text-center text-sm">
               Выберите серию — плеер появится здесь
@@ -391,18 +391,18 @@ export function Player() {
               tabIndex={-1}
               aria-hidden
               className={cn(
-                'flex items-center justify-center rounded-full bg-amber-400 text-zinc-950 shadow-[0_0_40px_rgba(251,191,36,0.55)] transition-transform hover:scale-105',
+                'flex items-center justify-center rounded-full bg-sky-400 text-sky-950 shadow-[0_0_40px_rgba(56, 189, 248,0.55)] transition-transform hover:scale-105',
                 fullscreen ? 'h-28 w-28' : 'h-[88px] w-[88px]',
               )}
             >
               <Play className={fullscreen ? 'h-14 w-14' : 'h-11 w-11'} aria-hidden />
             </button>
             <div className="px-6 text-center">
-              <p className="text-base font-semibold text-zinc-100 sm:text-lg">
+              <p className="text-base font-semibold text-foreground sm:text-lg">
                 Скажите «запусти» или нажмите
               </p>
-              <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-zinc-400 sm:text-sm">
-                <Mic className="h-3.5 w-3.5 text-amber-300" aria-hidden />
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-muted-foreground sm:text-sm">
+                <Mic className="h-3.5 w-3.5 text-sky-300" aria-hidden />
                 {hasStickyActivation()
                   ? 'Голосовой запуск активен — серия стартует автоматически'
                   : 'Один клик (или старт микрофона) включает голосовое управление'}
@@ -415,7 +415,7 @@ export function Player() {
       <div
         className={cn(
           'flex flex-wrap items-center gap-1.5 px-3 py-2',
-          fullscreen ? 'border-t border-zinc-800 bg-zinc-950/95' : 'bg-zinc-950/80',
+          fullscreen ? 'border-t border-border bg-background/95' : 'bg-background/95',
         )}
       >
         <Button variant="ghost" size="icon" aria-label="Предыдущая серия" className={iconBtn} onClick={() => ctrl(VoiceCommandType.PreviousEpisode)}>
@@ -423,7 +423,7 @@ export function Player() {
         </Button>
         <Button variant="ghost" size="icon" aria-label="Назад на 30 секунд" title="Назад на 30 секунд" className={seekBtn} onClick={() => ctrl(VoiceCommandType.SeekBackward, { seconds: 30 })}>
           <RotateCcw className="h-5 w-5" />
-          <span className="absolute bottom-0 right-0.5 text-[9px] font-bold leading-none text-zinc-500" aria-hidden>
+          <span className="absolute bottom-0 right-0.5 text-[9px] font-bold leading-none text-muted-foreground" aria-hidden>
             30
           </span>
         </Button>
@@ -433,7 +433,7 @@ export function Player() {
         <Button
           size="icon"
           aria-label={isPlaying ? 'Пауза' : 'Воспроизведение'}
-          className="h-12 w-12 rounded-full bg-amber-400 text-zinc-950 shadow-[0_0_18px_rgba(251,191,36,0.4)] hover:bg-amber-300"
+          className="h-12 w-12 rounded-full bg-sky-400 text-sky-950 shadow-[0_0_18px_rgba(56, 189, 248,0.4)] hover:bg-sky-300"
           onClick={() => ctrl(VoiceCommandType.TogglePlayPause)}
         >
           {executing ? (
@@ -449,7 +449,7 @@ export function Player() {
         </Button>
         <Button variant="ghost" size="icon" aria-label="Вперёд на 30 секунд" title="Вперёд на 30 секунд" className={seekBtn} onClick={() => ctrl(VoiceCommandType.SeekForward, { seconds: 30 })}>
           <RotateCw className="h-5 w-5" />
-          <span className="absolute bottom-0 right-0.5 text-[9px] font-bold leading-none text-zinc-500" aria-hidden>
+          <span className="absolute bottom-0 right-0.5 text-[9px] font-bold leading-none text-muted-foreground" aria-hidden>
             30
           </span>
         </Button>
@@ -458,9 +458,9 @@ export function Player() {
         </Button>
 
         {/* Реальный таймлайн из событий плеера (kodik_player_time_update/duration_update) */}
-        <div className="ml-1 hidden items-center gap-1 font-mono text-xs tabular-nums text-zinc-400 md:flex">
-          <span className="text-zinc-200">{fmtTime(currentTime)}</span>
-          <span className="text-zinc-600">/</span>
+        <div className="ml-1 hidden items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground md:flex">
+          <span className="text-foreground">{fmtTime(currentTime)}</span>
+          <span className="text-muted-foreground">/</span>
           <span>{fmtTime(duration > 0 ? duration : null)}</span>
         </div>
 
@@ -470,7 +470,7 @@ export function Player() {
             size="icon"
             aria-label={volume > 0 ? 'Выключить звук' : 'Включить звук'}
             title={volume > 0 ? 'Выключить звук' : 'Включить звук'}
-            className="h-9 w-9 shrink-0 rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-amber-300"
+            className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:bg-accent hover:text-sky-300"
             onClick={() => ctrl(volume > 0 ? VoiceCommandType.Mute : VoiceCommandType.Unmute)}
           >
             {volume > 0 ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4 text-rose-400" />}
@@ -492,7 +492,7 @@ export function Player() {
                 })
               }
             }}
-            className="w-full [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+            className="w-full [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
           />
         </div>
 

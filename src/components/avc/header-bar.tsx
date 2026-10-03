@@ -45,7 +45,7 @@ function statusDotClass(state: string): string {
     case 'loggedIn':
       return 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
     case 'checking':
-      return 'bg-amber-400 animate-pulse'
+      return 'bg-sky-400 animate-pulse'
     case 'sessionExpired':
       return 'bg-rose-400'
     case 'unavailable':
@@ -149,11 +149,11 @@ export function HeaderBar() {
   const loggedIn = account.state === 'loggedIn' && user !== null
 
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2 sm:px-4">
+    <header className="flex items-center justify-between gap-3 border-b border-border bg-background/95 px-3 py-2 sm:px-4">
       <h1 className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg">
-        <Mic className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+        <Mic className="h-5 w-5 shrink-0 text-sky-400" aria-hidden />
         <span className="truncate">
-          Anime <span className="text-amber-400">Voice</span> Controller
+          Anime <span className="text-sky-400">Voice</span> Controller
         </span>
       </h1>
       <nav className="flex items-center gap-1" aria-label="Панель инструментов">
@@ -176,17 +176,17 @@ export function HeaderBar() {
               <Button
                 variant="ghost"
                 aria-label={`Аккаунт YummyAnime: ${user.username ?? ''}`}
-                className="h-11 min-h-11 gap-1.5 px-2.5 text-zinc-200 hover:text-amber-300"
+                className="h-11 min-h-11 gap-1.5 px-2.5 text-foreground hover:text-sky-300"
               >
                 <span className="relative shrink-0">
                   {user.avatarUrl ? (
                     <img
                       src={user.avatarUrl}
                       alt=""
-                      className="h-6 w-6 rounded-full border border-zinc-700 object-cover"
+                      className="h-6 w-6 rounded-full border border-border object-cover"
                     />
                   ) : (
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-bold text-amber-300">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-secondary text-xs font-bold text-sky-300">
                       {(user.username ?? '?').slice(0, 1).toUpperCase()}
                     </span>
                   )}
@@ -203,12 +203,12 @@ export function HeaderBar() {
                 </span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="border-zinc-800 bg-zinc-900">
-              <DropdownMenuLabel className="text-zinc-400">
+            <DropdownMenuContent align="end" className="border-border bg-card">
+              <DropdownMenuLabel className="text-muted-foreground">
                 YummyAnime:{' '}
-                <span className="text-zinc-100">{user.username ?? 'без имени'}</span>
+                <span className="text-foreground">{user.username ?? 'без имени'}</span>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-zinc-800" />
+              <DropdownMenuSeparator className="bg-secondary" />
               <DropdownMenuItem
                 onClick={() => {
                   const base = useAvcStore.getState().settings.baseUrl
@@ -224,7 +224,7 @@ export function HeaderBar() {
                 <RefreshCw className="h-4 w-4" aria-hidden />
                 Проверить аккаунт
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-zinc-800" />
+              <DropdownMenuSeparator className="bg-secondary" />
               <DropdownMenuItem
                 disabled={loggingOut}
                 onClick={() => void logout()}
@@ -245,7 +245,7 @@ export function HeaderBar() {
             size="sm"
             aria-label="Войти через YummyAnime"
             className={cn(
-              'min-h-11 gap-1.5 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300',
+              'min-h-11 gap-1.5 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300',
               account.state === 'sessionExpired' && 'border-rose-400/40 text-rose-300',
             )}
             onClick={() => setAuthOpen(true)}
@@ -267,7 +267,7 @@ export function HeaderBar() {
             size="icon"
             aria-label="Отладочная панель"
             title="Отладка"
-            className={cn('h-11 w-11', debugOpen && 'text-amber-400')}
+            className={cn('h-11 w-11', debugOpen && 'text-sky-400')}
             onClick={() => setDebugOpen(true)}
           >
             <Bug className="h-5 w-5" />
@@ -278,7 +278,7 @@ export function HeaderBar() {
           size="icon"
           aria-label="Справка по командам"
           title="Справка"
-          className={cn('h-11 w-11', helpOpen && 'text-amber-400')}
+          className={cn('h-11 w-11', helpOpen && 'text-sky-400')}
           onClick={() => setHelpOpen(true)}
         >
           <CircleHelp className="h-5 w-5" />
@@ -288,7 +288,7 @@ export function HeaderBar() {
           size="icon"
           aria-label="Настройки"
           title="Настройки"
-          className={cn('h-11 w-11', settingsOpen && 'text-amber-400')}
+          className={cn('h-11 w-11', settingsOpen && 'text-sky-400')}
           onClick={() => setSettingsOpen(true)}
         >
           <Settings className="h-5 w-5" />

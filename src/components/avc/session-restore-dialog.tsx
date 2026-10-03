@@ -95,13 +95,13 @@ export function SessionRestoreDialog({ onResolved }: { onResolved: () => void })
           <Button
             variant="outline"
             onClick={() => void decline()}
-            className="min-h-11 border-zinc-700 bg-zinc-900/60"
+            className="min-h-11 border-border bg-card/60"
           >
             Нет, начать заново
           </Button>
           <Button
             onClick={accept}
-            className="min-h-11 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+            className="min-h-11 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             Да, восстановить
           </Button>

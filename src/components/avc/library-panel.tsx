@@ -92,7 +92,7 @@ function StatusPill({ item }: { item: YummyLibraryItem }) {
       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
       : alias === 'announced'
         ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
-        : 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30'
+        : 'bg-zinc-500/15 text-foreground border-zinc-500/30'
   return <span className={cn('rounded border px-1.5 py-0.5 text-[10px] leading-none', cls)}>{label}</span>
 }
 
@@ -111,26 +111,26 @@ function ProgressRow({
       ? Math.min(100, Math.round((item.episode / item.episodesTotal) * 100))
       : null
   return (
-    <div className="group flex items-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
+    <div className="group flex items-center gap-2.5 rounded-xl border border-border bg-card/60 p-2">
       {item.poster ? (
         <img
           src={item.poster}
           alt=""
           loading="lazy"
-          className="h-14 w-10 shrink-0 rounded-lg border border-zinc-800 object-cover"
+          className="h-14 w-10 shrink-0 rounded-lg border border-border object-cover"
         />
       ) : (
-        <span className="flex h-14 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900">
+        <span className="flex h-14 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
           <Play className="h-3.5 w-3.5 text-zinc-700" aria-hidden />
         </span>
       )}
       <button
         onClick={onContinue}
-        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         aria-label={`Продолжить: ${item.title}`}
       >
-        <span className="block truncate text-sm text-zinc-100">{item.title}</span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
+        <span className="block truncate text-sm text-foreground">{item.title}</span>
+        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Clock3 className="h-3 w-3 shrink-0" aria-hidden />
           {item.episode !== null ? `серия ${item.episode}` : 'серия не включалась'}
           {item.episodesTotal !== null && item.episode !== null ? ` из ${item.episodesTotal}` : ''}
@@ -138,8 +138,8 @@ function ProgressRow({
           {relativeTime(item.updatedAt)}
         </span>
         {pct !== null && (
-          <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-zinc-800">
-            <span className="block h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+          <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-secondary">
+            <span className="block h-full rounded-full bg-sky-400" style={{ width: `${pct}%` }} />
           </span>
         )}
       </button>
@@ -147,7 +147,7 @@ function ProgressRow({
         size="icon"
         onClick={onContinue}
         aria-label={`Продолжить просмотр: ${item.title}`}
-        className="h-9 w-9 shrink-0 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+        className="h-9 w-9 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
       >
         <Play className="h-4 w-4" aria-hidden />
       </Button>
@@ -156,7 +156,7 @@ function ProgressRow({
         variant="ghost"
         onClick={onForget}
         aria-label={`Забыть: ${item.title}`}
-        className="h-8 w-8 shrink-0 text-zinc-600 hover:text-zinc-300"
+        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" aria-hidden />
       </Button>
@@ -177,23 +177,23 @@ function LibraryCard({
   return (
     <button
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2 text-left transition-colors hover:border-amber-400/40 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-colors hover:border-sky-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       {item.poster ? (
         <img
           src={item.poster}
           alt=""
           loading="lazy"
-          className="h-16 w-12 shrink-0 rounded-lg border border-zinc-800 object-cover"
+          className="h-16 w-12 shrink-0 rounded-lg border border-border object-cover"
         />
       ) : (
-        <span className="flex h-16 w-12 shrink-0 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900">
+        <span className="flex h-16 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
           <BookOpen className="h-4 w-4 text-zinc-700" aria-hidden />
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm text-zinc-100">{item.title}</span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+        <span className="block truncate text-sm text-foreground">{item.title}</span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {item.year !== null && <span>{item.year}</span>}
           {item.type && <span aria-hidden>·</span>}
           {item.type && <span>{item.type}</span>}
@@ -201,7 +201,7 @@ function LibraryCard({
           {item.nextEpisodeAt !== null && (
             <>
               <span aria-hidden>·</span>
-              <span className="text-amber-300/90">
+              <span className="text-sky-300/90">
                 новая серия: {nextEpisodeDate(item.nextEpisodeAt) ?? 'скоро'}
               </span>
             </>
@@ -209,12 +209,12 @@ function LibraryCard({
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
           {item.ownRating !== null && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-300">
+            <span className="inline-flex items-center gap-0.5 rounded bg-sky-400/40 px-1.5 py-0.5 text-[10px] text-sky-300">
               <Star className="h-2.5 w-2.5" aria-hidden /> моя: {item.ownRating}
             </span>
           )}
           {progress?.episode !== null && progress?.episode !== undefined && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-zinc-700/40 px-1.5 py-0.5 text-[10px] text-zinc-300">
+            <span className="inline-flex items-center gap-0.5 rounded bg-zinc-700/40 px-1.5 py-0.5 text-[10px] text-foreground">
               <Play className="h-2.5 w-2.5" aria-hidden />
               вы на серии {progress.episode}
               {progress.episodesTotal !== null ? ` из ${progress.episodesTotal}` : ''}
@@ -370,22 +370,22 @@ export function LibraryPanel() {
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-3 border-zinc-800 bg-zinc-950 p-4 sm:max-w-md"
+        className="flex w-full flex-col gap-3 border-border bg-background p-4 sm:max-w-md"
       >
         <SheetHeader className="p-0">
           <SheetTitle className="flex items-center gap-2 text-lg">
-            <BookOpen className="h-5 w-5 text-amber-400" aria-hidden />
+            <BookOpen className="h-5 w-5 text-sky-400" aria-hidden />
             Библиотека YummyAnime
           </SheetTitle>
-          <SheetDescription className="text-xs text-zinc-500">
+          <SheetDescription className="text-xs text-muted-foreground">
             Списки вашего аккаунта с сайта + прогресс серий приложения
           </SheetDescription>
         </SheetHeader>
 
         {/* ЛОКАЛЬНЫЙ ТРЕКИНГ: продолжить просмотр (работает всегда) */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="rounded-xl border border-border bg-card/60 p-3">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Продолжить просмотр
             </span>
             {progress?.items && progress.items.length > 0 && (
@@ -393,7 +393,7 @@ export function LibraryPanel() {
                 size="sm"
                 variant="ghost"
                 onClick={() => void continueWatchingFromLast()}
-                className="h-7 gap-1 px-2 text-xs text-amber-300 hover:bg-amber-400/10 hover:text-amber-200"
+                className="h-7 gap-1 px-2 text-xs text-sky-300 hover:bg-sky-400/40 hover:text-sky-200"
               >
                 <Play className="h-3 w-3" aria-hidden />
                 Последнее
@@ -402,10 +402,10 @@ export function LibraryPanel() {
           </div>
           {!progress ? (
             <div className="flex justify-center py-3">
-              <Loader2 className="h-4 w-4 animate-spin text-amber-400" aria-hidden />
+              <Loader2 className="h-4 w-4 animate-spin text-sky-400" aria-hidden />
             </div>
           ) : progress.items.length === 0 ? (
-            <p className="py-2 text-xs text-zinc-500">
+            <p className="py-2 text-xs text-muted-foreground">
               Пока пусто — включите любую серию, и приложение запомнит на какой вы остановились.
             </p>
           ) : (
@@ -429,7 +429,7 @@ export function LibraryPanel() {
 
         {/* БИБЛИОТЕКА САЙТА: заголовок + обновить + открыть на сайте */}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Списки аккаунта
           </span>
           <div className="flex gap-1">
@@ -439,7 +439,7 @@ export function LibraryPanel() {
               aria-label="Обновить библиотеку"
               disabled={loading}
               onClick={() => void load(true)}
-              className="h-9 w-9 text-zinc-400 hover:text-amber-300"
+              className="h-9 w-9 text-muted-foreground hover:text-sky-300"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -458,7 +458,7 @@ export function LibraryPanel() {
                   'noopener',
                 )
               }
-              className="h-9 w-9 text-zinc-400 hover:text-amber-300"
+              className="h-9 w-9 text-muted-foreground hover:text-sky-300"
             >
               <ExternalLink className="h-4 w-4" aria-hidden />
             </Button>
@@ -466,8 +466,8 @@ export function LibraryPanel() {
         </div>
 
         {!loggedIn ? (
-          <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-sm">
-            <p className="text-zinc-300">
+          <div className="space-y-3 rounded-xl border border-border bg-card/60 p-4 text-sm">
+            <p className="text-foreground">
               Списки (Смотрю, В Планах, Просмотрено, Брошено, Отложено, Любимые) хранятся в вашем
               аккаунте YummyAnime. Войдите — и они появятся здесь.
             </p>
@@ -476,19 +476,19 @@ export function LibraryPanel() {
                 setOpen(false)
                 setAuthOpen(true)
               }}
-              className="min-h-11 w-full gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+              className="min-h-11 w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
             >
               Войти через YummyAnime
             </Button>
           </div>
         ) : !library ? (
           <div className="flex justify-center py-6">
-            <Loader2 className="h-6 w-6 animate-spin text-amber-400" aria-hidden />
+            <Loader2 className="h-6 w-6 animate-spin text-sky-400" aria-hidden />
           </div>
         ) : !library.available ? (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-300">
+          <div className="rounded-xl border border-border bg-card/60 p-4 text-sm text-foreground">
             <p className="mb-2">{library.reason ?? 'Библиотека недоступна'}</p>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted-foreground">
               Мы не показываем выдуманные данные — попробуйте обновить позже.
             </p>
           </div>
@@ -510,10 +510,10 @@ export function LibraryPanel() {
                     aria-selected={active}
                     onClick={() => setTab(t.key)}
                     className={cn(
-                      'flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                      'flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                       active
-                        ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                        : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200',
+                        ? 'border-sky-400/40 bg-sky-400/40 text-sky-200'
+                        : 'border-border bg-card/60 text-muted-foreground hover:border-border hover:text-foreground',
                     )}
                   >
                     <Icon className="h-3.5 w-3.5" aria-hidden />
@@ -522,7 +522,7 @@ export function LibraryPanel() {
                       <span
                         className={cn(
                           'rounded-full px-1.5 py-0.5 text-[10px] leading-none',
-                          active ? 'bg-amber-400/20 text-amber-200' : 'bg-zinc-800 text-zinc-500',
+                          active ? 'bg-sky-400/40 text-sky-200' : 'bg-secondary text-muted-foreground',
                         )}
                       >
                         {t.count}
@@ -539,18 +539,18 @@ export function LibraryPanel() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск по названию…"
               aria-label="Поиск по библиотеке"
-              className="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-400/50 focus:outline-none"
+              className="h-10 w-full rounded-xl border border-border bg-card/60 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-sky-400/40 focus:outline-none"
             />
 
             {/* Список тайтлов */}
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               {library.reason && (
-                <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/5 p-2 text-xs text-amber-200/80">
+                <p className="mb-2 rounded-lg border border-sky-400/40 bg-sky-400/40 p-2 text-xs text-sky-200/80">
                   {library.reason}
                 </p>
               )}
               {visibleItems.length === 0 ? (
-                <p className="py-8 text-center text-sm text-zinc-500">
+                <p className="py-8 text-center text-sm text-muted-foreground">
                   {query.trim() !== ''
                     ? 'Ничего не найдено'
                     : tab === 'all'

@@ -52,24 +52,24 @@ export function MiniPlayer() {
   if (!animeTitle) return null
 
   const iconBtn =
-    'h-10 w-10 rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-amber-300 focus-visible:ring-amber-400/60'
+    'h-10 w-10 rounded-full text-foreground hover:bg-accent hover:text-sky-300 focus-visible:ring-ring/60'
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
       <div className="hidden min-w-0 flex-1 md:block">
-        <div className="truncate text-sm font-medium text-zinc-100" title={animeTitle}>
+        <div className="truncate text-sm font-medium text-foreground" title={animeTitle}>
           {animeTitle}
         </div>
-        <div className="flex items-center gap-1 truncate text-xs text-zinc-500">
+        <div className="flex items-center gap-1 truncate text-xs text-muted-foreground">
           <span className="truncate">
             Серия {currentEpisode ?? '—'}/{episodesAired ?? '—'} · {currentDub ?? 'озвучка не выбрана'}
           </span>
-          {executing && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-amber-400" aria-hidden />}
+          {executing && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-sky-400" aria-hidden />}
         </div>
         {/* Реальный таймлайн из событий плеера */}
-        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-zinc-500">
-          <span className="text-zinc-300">{fmtTime(currentTime)}</span>
-          <span className="mx-1 text-zinc-600">/</span>
+        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="text-foreground">{fmtTime(currentTime)}</span>
+          <span className="mx-1 text-muted-foreground">/</span>
           {fmtTime(duration > 0 ? duration : null)}
         </div>
       </div>
@@ -83,7 +83,7 @@ export function MiniPlayer() {
       <Button
         size="icon"
         aria-label={isPlaying ? 'Пауза' : 'Воспроизведение'}
-        className="h-11 w-11 shrink-0 rounded-full bg-amber-400 text-zinc-950 shadow-[0_0_16px_rgba(251,191,36,0.35)] hover:bg-amber-300"
+        className="h-11 w-11 shrink-0 rounded-full bg-sky-400 text-sky-950 shadow-[0_0_16px_rgba(56, 189, 248,0.35)] hover:bg-sky-300"
         onClick={() => ctrl(VoiceCommandType.TogglePlayPause)}
       >
         {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
@@ -101,7 +101,7 @@ export function MiniPlayer() {
           size="icon"
           aria-label={volume > 0 ? 'Выключить звук' : 'Включить звук'}
           title={volume > 0 ? 'Выключить звук' : 'Включить звук'}
-          className="h-9 w-9 shrink-0 rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-amber-300"
+          className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:bg-accent hover:text-sky-300"
           onClick={() =>
             void executeCommand({
               type: volume > 0 ? VoiceCommandType.Mute : VoiceCommandType.Unmute,
@@ -129,7 +129,7 @@ export function MiniPlayer() {
               })
             }
           }}
-          className="w-full [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+          className="w-full [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
         />
       </div>
 
@@ -137,7 +137,7 @@ export function MiniPlayer() {
         variant="ghost"
         size="icon"
         aria-label="Полный экран"
-        className="h-10 w-10 rounded-full text-zinc-300 hover:bg-zinc-800 hover:text-amber-300 focus-visible:ring-amber-400/60"
+        className="h-10 w-10 rounded-full text-foreground hover:bg-accent hover:text-sky-300 focus-visible:ring-ring/60"
         onClick={() => setFullscreen(true)}
       >
         <Maximize className="h-4 w-4" />

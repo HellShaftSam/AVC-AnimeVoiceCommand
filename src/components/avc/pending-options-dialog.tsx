@@ -46,9 +46,9 @@ export function PendingOptionsDialog() {
             <li key={`${item.animeId}-${i}`}>
               <button
                 onClick={() => select(i + 1)}
-                className="flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-2 text-left transition-all hover:border-amber-400/50 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-all hover:border-sky-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-400/50 text-sm font-bold text-amber-300">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-sky-400/40 text-sm font-bold text-sky-300">
                   {i + 1}
                 </span>
                 {item.poster ? (
@@ -56,19 +56,19 @@ export function PendingOptionsDialog() {
                     src={item.poster}
                     alt=""
                     loading="lazy"
-                    className="h-16 w-12 shrink-0 rounded-md border border-zinc-800 object-cover"
+                    className="h-16 w-12 shrink-0 rounded-md border border-border object-cover"
                   />
                 ) : (
-                  <span className="h-16 w-12 shrink-0 rounded-md border border-zinc-800 bg-zinc-900" />
+                  <span className="h-16 w-12 shrink-0 rounded-md border border-border bg-card" />
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-zinc-100">
+                  <span className="block truncate text-sm font-medium text-foreground">
                     {item.title}
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
+                  <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                     {item.year !== null && <span>{item.year}</span>}
                     {item.rating !== null && item.rating > 0 && (
-                      <Badge className="border border-amber-400/30 bg-amber-400/10 text-[10px] text-amber-300">
+                      <Badge className="border border-sky-400/40 bg-sky-400/40 text-[10px] text-sky-300">
                         ★ {item.rating.toFixed(1)}
                       </Badge>
                     )}

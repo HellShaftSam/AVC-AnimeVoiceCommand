@@ -46,7 +46,7 @@ export function QuickSections() {
   }
 
   return (
-    <div className="avc-scroll overflow-x-auto border-b border-zinc-800 bg-zinc-950 px-3 py-2 sm:px-4">
+    <div className="avc-scroll overflow-x-auto border-b border-border bg-background px-3 py-2 sm:px-4">
       <div className="flex gap-2">
         {SECTIONS.map(({ id, label, icon: Icon }) => {
           const activeBtn = isActive(id)
@@ -57,10 +57,10 @@ export function QuickSections() {
               aria-label={`Открыть: ${label}`}
               aria-current={activeBtn ? 'page' : undefined}
               className={cn(
-                'flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                'flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                 activeBtn
-                  ? 'border-amber-400/60 bg-amber-400/10 text-amber-300 shadow-[0_0_18px_rgba(251,191,36,0.15)]'
-                  : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100',
+                  ? 'border-sky-400/40 bg-sky-400/40 text-sky-300 shadow-[0_0_18px_rgba(56, 189, 248,0.15)]'
+                  : 'border-border bg-card/60 text-foreground hover:border-border hover:text-foreground',
               )}
             >
               <Icon className="h-5 w-5" aria-hidden />

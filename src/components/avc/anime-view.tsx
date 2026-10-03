@@ -126,11 +126,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
     return (
       <div className="mx-auto max-w-5xl">
         <div className="flex flex-col gap-5 sm:flex-row">
-          <Skeleton className="aspect-[3/4] w-full rounded-xl bg-zinc-900 sm:w-44" />
+          <Skeleton className="aspect-[3/4] w-full rounded-xl bg-card sm:w-44" />
           <div className="flex-1 space-y-3">
-            <Skeleton className="h-7 w-3/4 rounded bg-zinc-900" />
-            <Skeleton className="h-4 w-1/2 rounded bg-zinc-900" />
-            <Skeleton className="h-24 w-full rounded bg-zinc-900" />
+            <Skeleton className="h-7 w-3/4 rounded bg-card" />
+            <Skeleton className="h-4 w-1/2 rounded bg-card" />
+            <Skeleton className="h-24 w-full rounded bg-card" />
           </div>
         </div>
       </div>
@@ -145,7 +145,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
           <Button
             variant="outline"
             onClick={() => bumpReload(tab.id)}
-            className="min-h-11 border-zinc-700"
+            className="min-h-11 border-border"
           >
             <RotateCw className="h-4 w-4" aria-hidden />
             Повторить
@@ -191,10 +191,10 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
             src={details.poster}
             alt={details.title}
             loading="lazy"
-            className="aspect-[3/4] w-full shrink-0 rounded-xl border border-zinc-800 object-cover sm:w-44"
+            className="aspect-[3/4] w-full shrink-0 rounded-xl border border-border object-cover sm:w-44"
           />
         ) : (
-          <div className="flex aspect-[3/4] w-full shrink-0 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-600 sm:w-44">
+          <div className="flex aspect-[3/4] w-full shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground sm:w-44">
             <Film className="h-8 w-8" aria-hidden />
           </div>
         )}
@@ -210,28 +210,28 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
           </h2>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {details.year !== null && (
-              <Badge variant="outline" className="border-zinc-700 text-zinc-300">
+              <Badge variant="outline" className="border-border text-foreground">
                 {details.year}
               </Badge>
             )}
             {details.rating !== null && details.rating > 0 && (
-              <Badge className="border border-amber-400/30 bg-amber-400/10 text-amber-300">
+              <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-300">
                 <Star className="h-3 w-3" aria-hidden />
                 {details.rating.toFixed(1)}
               </Badge>
             )}
             {details.status && (
-              <Badge variant="outline" className="border-zinc-700 text-zinc-300">
+              <Badge variant="outline" className="border-border text-foreground">
                 {details.status}
               </Badge>
             )}
             {details.type && (
-              <Badge variant="outline" className="border-zinc-700 text-zinc-300">
+              <Badge variant="outline" className="border-border text-foreground">
                 {details.type}
               </Badge>
             )}
             {details.genres.slice(0, 5).map((g) => (
-              <Badge key={g} variant="outline" className="border-zinc-800 text-zinc-500">
+              <Badge key={g} variant="outline" className="border-border text-muted-foreground">
                 {g}
               </Badge>
             ))}
@@ -239,13 +239,13 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 
           {desc && (
             <div className="mt-3">
-              <p className={cn('leading-relaxed text-zinc-300', !expanded && 'line-clamp-4')}>
+              <p className={cn('leading-relaxed text-foreground', !expanded && 'line-clamp-4')}>
                 {desc}
               </p>
               {desc.length > 180 && (
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="mt-1 text-xs text-amber-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                  className="mt-1 text-xs text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
                   {expanded ? 'Свернуть' : 'Показать полностью'}
                 </button>
@@ -261,13 +261,13 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 
           {/* Локальный трекинг: «вы останавливались на серии N» — до включения серии */}
           {localProgress && localProgress.episode !== null && playback.currentEpisode === null && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/5 p-2.5 text-sm">
-              <Play className="h-4 w-4 shrink-0 text-amber-300" aria-hidden />
-              <span className="text-zinc-300">
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/40 bg-sky-400/40 p-2.5 text-sm">
+              <Play className="h-4 w-4 shrink-0 text-sky-300" aria-hidden />
+              <span className="text-foreground">
                 Вы смотрели здесь: серия{' '}
-                <span className="font-semibold text-amber-300">{localProgress.episode}</span>
+                <span className="font-semibold text-sky-300">{localProgress.episode}</span>
                 {localProgress.episodesTotal !== null && (
-                  <span className="text-zinc-500"> из {localProgress.episodesTotal}</span>
+                  <span className="text-muted-foreground"> из {localProgress.episodesTotal}</span>
                 )}
               </span>
               <Button
@@ -279,22 +279,22 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
                     `Продолжить с серии ${localProgress.episode}`,
                   )
                 }
-                className="min-h-9 gap-1.5 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+                className="min-h-9 gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 Продолжить с {localProgress.episode}
               </Button>
             </div>
           )}
 
-          <p className="mt-3 text-sm text-zinc-400">
-            Серия <span className="font-semibold text-amber-300">{currentEp ?? '—'}</span> из{' '}
+          <p className="mt-3 text-sm text-muted-foreground">
+            Серия <span className="font-semibold text-sky-300">{currentEp ?? '—'}</span> из{' '}
             {maxEp > 0 ? maxEp : '—'} · Озвучка:{' '}
-            <span className="text-zinc-200">{playback.currentDub ?? 'не выбрана'}</span>
+            <span className="text-foreground">{playback.currentDub ?? 'не выбрана'}</span>
           </p>
 
           {details.dubs.length > 0 && (
             <div className="mt-3">
-              <div className="mb-1.5 text-xs uppercase tracking-wide text-zinc-500">
+              <div className="mb-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                 Озвучки (в скобках — серий в этой озвучке)
               </div>
               <div className="flex flex-wrap gap-2">
@@ -312,15 +312,15 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
                       }
                       aria-pressed={active}
                       className={cn(
-                        'min-h-11 rounded-full border px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                        'min-h-11 rounded-full border px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                         active
-                          ? 'border-amber-400 bg-amber-400/10 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.15)]'
-                          : 'border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500',
+                          ? 'border-sky-400 bg-sky-400/40 text-sky-300 shadow-[0_0_14px_rgba(56, 189, 248,0.15)]'
+                          : 'border-border bg-card/60 text-foreground hover:border-zinc-500',
                       )}
                     >
                       {d.shortName}
                       {d.episodes.length > 0 && (
-                        <span className="ml-1 text-zinc-500">· {d.episodes.length} эп.</span>
+                        <span className="ml-1 text-muted-foreground">· {d.episodes.length} эп.</span>
                       )}
                     </button>
                   )
@@ -368,9 +368,9 @@ function AccountActionBar({
   const username = account.user?.username ?? null
 
   return (
-    <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+    <div className="mt-4 rounded-xl border border-border bg-card/60 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-muted-foreground">
           {loggedIn && username
             ? `Аккаунт YummyAnime: ${username}`
             : 'Списки, избранное и оценки — в вашем аккаунте YummyAnime'}
@@ -380,7 +380,7 @@ function AccountActionBar({
           size="sm"
           onClick={onOpenSite}
           aria-label="Открыть страницу тайтла на сайте"
-          className="min-h-9 gap-1.5 px-2 text-xs text-zinc-500 hover:text-amber-300"
+          className="min-h-9 gap-1.5 px-2 text-xs text-muted-foreground hover:text-sky-300"
         >
           <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           На сайте
@@ -398,7 +398,7 @@ function AccountActionBar({
               onAct(VoiceCommandType.SetWatchStatus, { status: s.alias }, `Статус: ${s.title}`)
             }
             aria-label={`Добавить «${details.title}» в список «${s.title}»`}
-            className="min-h-9 border-zinc-700 bg-zinc-900/60 px-2.5 text-xs text-zinc-300 hover:border-amber-400/50 hover:text-amber-300"
+            className="min-h-9 border-border bg-card/60 px-2.5 text-xs text-foreground hover:border-sky-400/40 hover:text-sky-300"
           >
             {s.title}
           </Button>
@@ -410,7 +410,7 @@ function AccountActionBar({
             onAct(VoiceCommandType.ToggleFavorite, { favorite: true }, 'В Любимые')
           }
           aria-label={`Добавить «${details.title}» в Любимые (избранное)`}
-          className="min-h-9 gap-1 border-zinc-700 bg-zinc-900/60 px-2.5 text-xs text-zinc-300 hover:border-rose-400/60 hover:text-rose-300"
+          className="min-h-9 gap-1 border-border bg-card/60 px-2.5 text-xs text-foreground hover:border-rose-400/60 hover:text-rose-300"
         >
           <Heart className="h-3.5 w-3.5" aria-hidden />
           Любимое
@@ -419,7 +419,7 @@ function AccountActionBar({
 
       {/* Оценка 1..10 (шкала сайта) */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Star className="h-4 w-4 text-amber-300" aria-hidden />
+        <Star className="h-4 w-4 text-sky-300" aria-hidden />
         <Select
           value=""
           onValueChange={(v: string) => {
@@ -431,13 +431,13 @@ function AccountActionBar({
         >
           <SelectTrigger
             aria-label="Поставить оценку от 1 до 10"
-            className="h-9 w-44 border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300"
+            className="h-9 w-44 border-border bg-card/60 text-xs text-foreground"
           >
             <SelectValue placeholder="Оценить (1–10)" />
           </SelectTrigger>
-          <SelectContent className="border-zinc-800 bg-zinc-900">
+          <SelectContent className="border-border bg-card">
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => (
-              <SelectItem key={n} value={String(n)} className="text-xs text-zinc-300">
+              <SelectItem key={n} value={String(n)} className="text-xs text-foreground">
                 {n} — {RATE_TITLES[n]}
               </SelectItem>
             ))}
@@ -448,7 +448,7 @@ function AccountActionBar({
           size="sm"
           onClick={() => onAct(VoiceCommandType.RemoveRating, {}, 'Убрать оценку')}
           aria-label="Убрать мою оценку"
-          className="min-h-9 px-2 text-xs text-zinc-500 hover:text-rose-300"
+          className="min-h-9 px-2 text-xs text-muted-foreground hover:text-rose-300"
         >
           Убрать оценку
         </Button>
@@ -497,10 +497,10 @@ function EpisodeGrid({
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">{title}</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
         {/* Честный счётчик: заявленное число серий ≠ позиций в озвучке (аудит §3 п.2б) */}
-        <p className="text-xs text-zinc-500">
-          Серий: <span className="font-semibold text-zinc-300">{totalCount && totalCount > 0 ? totalCount : maxEp}</span>
+        <p className="text-xs text-muted-foreground">
+          Серий: <span className="font-semibold text-foreground">{totalCount && totalCount > 0 ? totalCount : maxEp}</span>
           {totalCount && totalCount > 0 && totalCount !== maxEp && (
             <span> (доступно {maxEp})</span>
           )}
@@ -519,10 +519,10 @@ function EpisodeGrid({
             aria-label={`Включить серию ${n}`}
             aria-current={currentEp === n ? 'true' : undefined}
             className={cn(
-              'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+              'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               currentEp === n
-                ? 'border-amber-400 bg-amber-400/15 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.2)]'
-                : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-amber-400/40 hover:text-amber-200',
+                ? 'border-sky-400 bg-sky-400/40 text-sky-300 shadow-[0_0_14px_rgba(56, 189, 248,0.2)]'
+                : 'border-border bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-200',
             )}
           >
             {n}
@@ -537,11 +537,11 @@ function EpisodeGrid({
             disabled={safePage <= 1}
             onClick={() => setPage(safePage - 1)}
             aria-label="Предыдущая страница серий"
-            className="min-h-9 border-zinc-700 text-xs text-zinc-300"
+            className="min-h-9 border-border text-xs text-foreground"
           >
             ‹ Назад
           </Button>
-          <span className="min-w-20 text-center text-xs tabular-nums text-zinc-500">
+          <span className="min-w-20 text-center text-xs tabular-nums text-muted-foreground">
             {from}–{to} из {maxEp}
           </span>
           <Button
@@ -550,7 +550,7 @@ function EpisodeGrid({
             disabled={safePage >= totalPages}
             onClick={() => setPage(safePage + 1)}
             aria-label="Следующая страница серий"
-            className="min-h-9 border-zinc-700 text-xs text-zinc-300"
+            className="min-h-9 border-border text-xs text-foreground"
           >
             Вперёд ›
           </Button>
@@ -590,7 +590,7 @@ function EpisodesDialog({ details, maxEp }: { details: AnimeDetails; maxEp: numb
             }}
           />
         ) : (
-          <p className="text-sm text-zinc-500">Серии не найдены</p>
+          <p className="text-sm text-muted-foreground">Серии не найдены</p>
         )}
       </DialogContent>
     </Dialog>

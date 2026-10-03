@@ -57,7 +57,7 @@ import { cn } from '@/lib/utils'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-400/90">
+    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
       {children}
     </h3>
   )
@@ -75,8 +75,8 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <div className="min-w-0">
-        <div className="text-sm text-zinc-200">{label}</div>
-        {hint && <div className="text-xs text-zinc-500">{hint}</div>}
+        <div className="text-sm text-foreground">{label}</div>
+        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -119,17 +119,17 @@ export function SettingsDialog() {
         </DialogHeader>
 
         <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col gap-3">
-          <TabsList className="shrink-0 bg-zinc-900/70">
-            <TabsTrigger value="general" className="data-[state=active]:text-amber-300">
+          <TabsList className="shrink-0 bg-card/60">
+            <TabsTrigger value="general" className="data-[state=active]:text-sky-300">
               Общие
             </TabsTrigger>
-            <TabsTrigger value="mic" className="data-[state=active]:text-amber-300">
+            <TabsTrigger value="mic" className="data-[state=active]:text-sky-300">
               Микрофон
             </TabsTrigger>
-            <TabsTrigger value="voices" className="data-[state=active]:text-amber-300">
+            <TabsTrigger value="voices" className="data-[state=active]:text-sky-300">
               Озвучки
             </TabsTrigger>
-            <TabsTrigger value="ai" className="data-[state=active]:text-amber-300">
+            <TabsTrigger value="ai" className="data-[state=active]:text-sky-300">
               AI
             </TabsTrigger>
           </TabsList>
@@ -140,7 +140,7 @@ export function SettingsDialog() {
               <section>
                 <SectionTitle>Общие</SectionTitle>
                 <div className="py-1">
-                  <div className="text-sm text-zinc-200">Режим микрофона</div>
+                  <div className="text-sm text-foreground">Режим микрофона</div>
                   <RadioGroup
                     value={settings.voiceMode}
                     onValueChange={(v: string) =>
@@ -152,13 +152,13 @@ export function SettingsDialog() {
                   >
                     <div className="flex items-center gap-2">
                       <RadioGroupItem value="push-to-talk" id="vm-ptt" />
-                      <Label htmlFor="vm-ptt" className="text-sm text-zinc-300">
+                      <Label htmlFor="vm-ptt" className="text-sm text-foreground">
                         Рация — удерживать кнопку / Ctrl+Space
                       </Label>
                     </div>
                     <div className="flex items-center gap-2">
                       <RadioGroupItem value="always-listening" id="vm-always" />
-                      <Label htmlFor="vm-always" className="text-sm text-zinc-300">
+                      <Label htmlFor="vm-always" className="text-sm text-foreground">
                         Постоянное слушание (с автоостановкой по тишине)
                       </Label>
                     </div>
@@ -176,7 +176,7 @@ export function SettingsDialog() {
                       onChange={(e) => change({ wakeWord: e.target.value })}
                       disabled={!settings.wakeWordEnabled}
                       aria-label="Слово-активатор"
-                      className="h-9 w-28 border-zinc-800 bg-zinc-900"
+                      className="h-9 w-28 border-border bg-card"
                     />
                   </div>
                 </SettingRow>
@@ -189,14 +189,14 @@ export function SettingsDialog() {
                 </SettingRow>
               </section>
 
-              <Separator className="bg-zinc-800" />
+              <Separator className="bg-secondary" />
 
               <section>
                 <SectionTitle>Голос</SectionTitle>
                 <div className="py-2">
-                  <div className="flex items-center justify-between text-sm text-zinc-200">
+                  <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Порог уверенности</span>
-                    <span className="tabular-nums text-amber-300">
+                    <span className="tabular-nums text-sky-300">
                       {Math.round(settings.confidenceThreshold * 100)}%
                     </span>
                   </div>
@@ -206,7 +206,7 @@ export function SettingsDialog() {
                     max={0.9}
                     step={0.05}
                     aria-label="Порог уверенности распознавания"
-                    className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
                     onValueChange={(v: number[]) => {
                       const val = Array.isArray(v) ? v[0] : undefined
                       if (typeof val === 'number') change({ confidenceThreshold: val })
@@ -222,7 +222,7 @@ export function SettingsDialog() {
                 </SettingRow>
               </section>
 
-              <Separator className="bg-zinc-800" />
+              <Separator className="bg-secondary" />
 
               <section>
                 <SectionTitle>Воспроизведение</SectionTitle>
@@ -233,11 +233,11 @@ export function SettingsDialog() {
                   >
                     <SelectTrigger
                       aria-label="Шаг перемотки"
-                      className="h-9 w-24 border-zinc-800 bg-zinc-900"
+                      className="h-9 w-24 border-border bg-card"
                     >
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="border-zinc-800 bg-zinc-900">
+                    <SelectContent className="border-border bg-card">
                       <SelectItem value="5">5 сек</SelectItem>
                       <SelectItem value="10">10 сек</SelectItem>
                       <SelectItem value="30">30 сек</SelectItem>
@@ -252,11 +252,11 @@ export function SettingsDialog() {
                   >
                     <SelectTrigger
                       aria-label="Шаг громкости"
-                      className="h-9 w-24 border-zinc-800 bg-zinc-900"
+                      className="h-9 w-24 border-border bg-card"
                     >
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="border-zinc-800 bg-zinc-900">
+                    <SelectContent className="border-border bg-card">
                       <SelectItem value="5">5%</SelectItem>
                       <SelectItem value="10">10%</SelectItem>
                       <SelectItem value="20">20%</SelectItem>
@@ -264,9 +264,9 @@ export function SettingsDialog() {
                   </Select>
                 </SettingRow>
                 <div className="py-2">
-                  <div className="flex items-center justify-between text-sm text-zinc-200">
+                  <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Громкость по умолчанию</span>
-                    <span className="tabular-nums text-amber-300">{settings.defaultVolume}%</span>
+                    <span className="tabular-nums text-sky-300">{settings.defaultVolume}%</span>
                   </div>
                   <Slider
                     value={[settings.defaultVolume]}
@@ -274,7 +274,7 @@ export function SettingsDialog() {
                     max={100}
                     step={5}
                     aria-label="Громкость по умолчанию"
-                    className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
                     onValueChange={(v: number[]) => {
                       const val = Array.isArray(v) ? v[0] : undefined
                       if (typeof val === 'number') change({ defaultVolume: val })
@@ -300,7 +300,7 @@ export function SettingsDialog() {
                 </SettingRow>
               </section>
 
-              <Separator className="bg-zinc-800" />
+              <Separator className="bg-secondary" />
 
               <section>
                 <SectionTitle>Сайт</SectionTitle>
@@ -309,12 +309,12 @@ export function SettingsDialog() {
                     value={settings.baseUrl}
                     onChange={(e) => change({ baseUrl: e.target.value })}
                     aria-label="Базовый URL сайта"
-                    className="h-9 w-56 border-zinc-800 bg-zinc-900 text-xs"
+                    className="h-9 w-56 border-border bg-card text-xs"
                   />
                 </SettingRow>
               </section>
 
-              <Separator className="bg-zinc-800" />
+              <Separator className="bg-secondary" />
 
               <section>
                 <SectionTitle>Приватность</SectionTitle>
@@ -471,7 +471,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
 
   const levelPct = Math.round(Math.min(1, Math.max(0, liveLevel)) * 100)
   const levelColor =
-    levelPct < 30 ? 'bg-zinc-600' : levelPct < 70 ? 'bg-amber-400' : 'bg-rose-500'
+    levelPct < 30 ? 'bg-zinc-600' : levelPct < 70 ? 'bg-sky-400' : 'bg-rose-500'
 
   return (
     <div>
@@ -485,10 +485,10 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             value={settings.sttEngine}
             onValueChange={(v: string) => change({ sttEngine: v as SttEngine })}
           >
-            <SelectTrigger aria-label="Движок распознавания" className="h-9 w-52 border-zinc-800 bg-zinc-900 text-xs">
+            <SelectTrigger aria-label="Движок распознавания" className="h-9 w-52 border-border bg-card text-xs">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="border-zinc-800 bg-zinc-900">
+            <SelectContent className="border-border bg-card">
               <SelectItem value="auto">Авто (браузер → сервер)</SelectItem>
               <SelectItem value="browser">Браузерный (Chrome/Edge)</SelectItem>
               <SelectItem value="server">Серверный (Whisper)</SelectItem>
@@ -498,7 +498,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         </SettingRow>
       </section>
 
-      <Separator className="bg-zinc-800" />
+      <Separator className="bg-secondary" />
 
       <section>
         <SectionTitle>Микрофон</SectionTitle>
@@ -514,11 +514,11 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             >
               <SelectTrigger
                 aria-label="Устройство микрофона"
-                className="h-9 w-44 border-zinc-800 bg-zinc-900 text-xs"
+                className="h-9 w-44 border-border bg-card text-xs"
               >
                 <SelectValue placeholder="По умолчанию" />
               </SelectTrigger>
-              <SelectContent className="border-zinc-800 bg-zinc-900">
+              <SelectContent className="border-border bg-card">
                 <SelectItem value="__default__">По умолчанию</SelectItem>
                 {micDevices.map((d) => (
                   <SelectItem key={d.deviceId} value={d.deviceId}>
@@ -533,7 +533,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
               aria-label="Обновить список микрофонов"
               title="Обновить список"
               onClick={() => void refreshDevices()}
-              className="h-9 w-9 shrink-0 border-zinc-800 bg-zinc-900 hover:border-amber-400/50 hover:text-amber-300"
+              className="h-9 w-9 shrink-0 border-border bg-card hover:border-sky-400/40 hover:text-sky-300"
             >
               {refreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -545,9 +545,9 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         </SettingRow>
 
         <div className="py-2">
-          <div className="flex items-center justify-between text-sm text-zinc-200">
+          <div className="flex items-center justify-between text-sm text-foreground">
             <span>Усиление микрофона</span>
-            <span className="tabular-nums text-amber-300">×{settings.micGain}</span>
+            <span className="tabular-nums text-sky-300">×{settings.micGain}</span>
           </div>
           <Slider
             value={[settings.micGain]}
@@ -555,21 +555,21 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={4}
             step={0.25}
             aria-label="Усиление микрофона"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ micGain: val })
             }}
           />
-          <p className="mt-1.5 text-xs text-zinc-500">
+          <p className="mt-1.5 text-xs text-muted-foreground">
             Если вы далеко от микрофона — поставьте 2–3
           </p>
         </div>
 
         <div className="py-2">
-          <div className="flex items-center justify-between text-sm text-zinc-200">
+          <div className="flex items-center justify-between text-sm text-foreground">
             <span>Чувствительность</span>
-            <span className="tabular-nums text-amber-300">{settings.vadSensitivity}</span>
+            <span className="tabular-nums text-sky-300">{settings.vadSensitivity}</span>
           </div>
           <Slider
             value={[settings.vadSensitivity]}
@@ -577,19 +577,19 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={100}
             step={1}
             aria-label="Чувствительность к тишине"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ vadSensitivity: val })
             }}
           />
-          <p className="mt-1.5 text-xs text-zinc-500">Выше = лучше ловит тихую речь</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">Выше = лучше ловит тихую речь</p>
         </div>
 
         <div className="py-2">
-          <div className="flex items-center justify-between text-sm text-zinc-200">
+          <div className="flex items-center justify-between text-sm text-foreground">
             <span>Максимальная длительность фразы</span>
-            <span className="tabular-nums text-amber-300">
+            <span className="tabular-nums text-sky-300">
               {Math.round(settings.maxUtteranceMs / 1000)} с
             </span>
           </div>
@@ -599,13 +599,13 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={30000}
             step={1000}
             aria-label="Максимальная длительность фразы"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-amber-400 [&_[data-slot=slider-thumb]]:border-amber-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ maxUtteranceMs: val })
             }}
           />
-          <p className="mt-1.5 text-xs text-zinc-500">
+          <p className="mt-1.5 text-xs text-muted-foreground">
             Если микрофон обрезает длинные фразы — увеличьте до 20–30 с
           </p>
         </div>
@@ -633,18 +633,18 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         </SettingRow>
 
         {/* Проверка микрофона */}
-        <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="mt-3 rounded-xl border border-border bg-card/60 p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm text-zinc-200">Проверить микрофон</div>
-              <div className="text-xs text-zinc-500">Запись 3.5 с и серверное распознавание</div>
+              <div className="text-sm text-foreground">Проверить микрофон</div>
+              <div className="text-xs text-muted-foreground">Запись 3.5 с и серверное распознавание</div>
             </div>
             <Button
               variant="outline"
               onClick={() => void runMicTest()}
               disabled={testState !== 'idle'}
               aria-label="Проверить микрофон"
-              className="min-h-11 shrink-0 gap-1.5 border-zinc-700 bg-zinc-900 hover:border-amber-400/50 hover:text-amber-300"
+              className="min-h-11 shrink-0 gap-1.5 border-border bg-card hover:border-sky-400/40 hover:text-sky-300"
             >
               {testState !== 'idle' ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -661,7 +661,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
 
           {testState === 'recording' && (
             <div
-              className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+              className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-secondary"
               role="meter"
               aria-label="Уровень записи"
               aria-valuenow={levelPct}
@@ -735,10 +735,10 @@ function VoiceAliasesSettings() {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400/90">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
           Мои алиасы озвучек
         </h3>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground">
           Скажите: «добавь ани либрия как команду для AniLibria» — и приложение запомнит
         </p>
       </div>
@@ -748,19 +748,19 @@ function VoiceAliasesSettings() {
           {voiceAliases.map((row) => (
             <li
               key={row.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 px-2.5 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card/60 px-2.5 py-2"
             >
               <span className="min-w-0 truncate text-sm">
-                <span className="text-zinc-100">«{row.alias}»</span>
-                <span className="mx-1.5 text-zinc-600">→</span>
-                <span className="text-amber-300">{row.targetName}</span>
+                <span className="text-foreground">«{row.alias}»</span>
+                <span className="mx-1.5 text-muted-foreground">→</span>
+                <span className="text-sky-300">{row.targetName}</span>
               </span>
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label={`Удалить алиас ${row.alias}`}
                 onClick={() => void removeAlias(row.id)}
-                className="h-8 w-8 shrink-0 rounded-full text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400"
+                className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400"
               >
                 <X className="h-4 w-4" aria-hidden />
               </Button>
@@ -770,9 +770,9 @@ function VoiceAliasesSettings() {
       )}
 
       {(
-        <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="space-y-2 rounded-xl border border-border bg-card/60 p-3">
           <div className="space-y-1.5">
-            <Label htmlFor="avc-alias-input" className="text-xs text-zinc-400">
+            <Label htmlFor="avc-alias-input" className="text-xs text-muted-foreground">
               Произношение (как вы это говорите)
             </Label>
             <Input
@@ -781,11 +781,11 @@ function VoiceAliasesSettings() {
               onChange={(e) => setAliasInput(e.target.value)}
               placeholder="ани либрия"
               aria-label="Алиас произношения"
-              className="h-10 border-zinc-800 bg-zinc-900 focus-visible:ring-amber-400/50"
+              className="h-10 border-border bg-card focus-visible:ring-ring/60"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="avc-alias-target" className="text-xs text-zinc-400">
+            <Label htmlFor="avc-alias-target" className="text-xs text-muted-foreground">
               Официальное имя озвучки
             </Label>
             <Input
@@ -794,14 +794,14 @@ function VoiceAliasesSettings() {
               onChange={(e) => setTargetInput(e.target.value)}
               placeholder="AniLibria"
               aria-label="Официальное имя озвучки"
-              className="h-10 border-zinc-800 bg-zinc-900 focus-visible:ring-amber-400/50"
+              className="h-10 border-border bg-card focus-visible:ring-ring/60"
             />
           </div>
           <Button
             onClick={() => void addAlias()}
             disabled={busy || !aliasInput.trim() || !targetInput.trim()}
             aria-label="Добавить алиас"
-            className="min-h-11 w-full gap-1.5 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+            className="min-h-11 w-full gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             Добавить
@@ -810,7 +810,7 @@ function VoiceAliasesSettings() {
       )}
 
       <Collapsible open={openList} onOpenChange={setOpenList}>
-        <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2.5 text-xs font-medium text-zinc-300 hover:border-amber-400/40 hover:text-amber-300">
+        <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-2.5 text-xs font-medium text-foreground hover:border-sky-400/40 hover:text-sky-300">
           <ChevronDown
             className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180"
             aria-hidden
@@ -818,12 +818,12 @@ function VoiceAliasesSettings() {
           Встроенные варианты произношения
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ul className="mt-2 space-y-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+          <ul className="mt-2 space-y-1.5 rounded-lg border border-border bg-card/60 p-3">
             {Object.entries(DEFAULT_VOICE_ALIASES).map(([target, aliases]) => (
               <li key={target} className="text-xs leading-relaxed">
-                <span className="font-medium text-amber-300">{target}</span>
-                <span className="text-zinc-600"> — </span>
-                <span className="text-zinc-400">{aliases.join(', ')}</span>
+                <span className="font-medium text-sky-300">{target}</span>
+                <span className="text-muted-foreground"> — </span>
+                <span className="text-muted-foreground">{aliases.join(', ')}</span>
               </li>
             ))}
           </ul>
@@ -865,7 +865,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
       <div className="space-y-3">
         <section>
           <SectionTitle>Локальный AI</SectionTitle>
-          <p className="py-2 text-sm text-zinc-400">
+          <p className="py-2 text-sm text-muted-foreground">
             Локальный AI (офлайн-распознавание T-One, локальный роутер Qwen3 и голосовые ответы)
             доступен в приложении AVC-Anime (EXE). В браузере используются браузерное/серверное
             распознавание и облачный fallback.
@@ -878,7 +878,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
   const readyBadge = (ready: boolean, state: string, error: string | null) => {
     if (ready) return <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-400">READY</span>
     if (error) return <span className="rounded bg-rose-950 px-1.5 py-0.5 text-[11px] text-rose-400">ОШИБКА</span>
-    return <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">{state || 'OFF'}</span>
+    return <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{state || 'OFF'}</span>
   }
 
   return (
@@ -886,7 +886,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
       {/* Фаза 5 аудита: каталог AI-моделей, безопасная миграция, список моделей */}
       <ModelsManagerCard />
 
-      <Separator className="bg-zinc-800" />
+      <Separator className="bg-secondary" />
 
       <section>
         <SectionTitle>Локальный AI</SectionTitle>
@@ -898,10 +898,10 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
               void getElectronBridge()?.ai?.setProfile(v)
             }}
           >
-            <SelectTrigger aria-label="Профиль AI" className="h-9 w-56 border-zinc-800 bg-zinc-900 text-xs">
+            <SelectTrigger aria-label="Профиль AI" className="h-9 w-56 border-border bg-card text-xs">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="border-zinc-800 bg-zinc-900">
+            <SelectContent className="border-border bg-card">
               <SelectItem value="max_responsiveness">Максимальная отзывчивость</SelectItem>
               <SelectItem value="balanced">Сбалансированный</SelectItem>
               <SelectItem value="quality">Качество</SelectItem>
@@ -923,10 +923,10 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
               void getElectronBridge()?.ai?.setVoice(v)
             }}
           >
-            <SelectTrigger aria-label="Голос TTS" className="h-9 w-52 border-zinc-800 bg-zinc-900 text-xs">
+            <SelectTrigger aria-label="Голос TTS" className="h-9 w-52 border-border bg-card text-xs">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="border-zinc-800 bg-zinc-900">
+            <SelectContent className="border-border bg-card">
               {(status?.voices ?? [{ id: 'irina', name: 'Ирина (женский)', default: true }]).map((v) => (
                 <SelectItem key={v.id} value={v.id}>
                   {v.name}
@@ -937,12 +937,12 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
         </SettingRow>
       </section>
 
-      <Separator className="bg-zinc-800" />
+      <Separator className="bg-secondary" />
 
       <section>
         <SectionTitle>Модели и диагностика</SectionTitle>
         {hardware && (
-          <div className="mb-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-2 text-xs text-zinc-400">
+          <div className="mb-2 rounded-md border border-border bg-card/60 p-2 text-xs text-muted-foreground">
             {hardware.cpu} · RAM {hardware.ramHuman}
             {hardware.gpu?.name ? ` · GPU ${hardware.gpu.name}` : ''}
             {hardware.freeDisk != null ? ` · диск ${(hardware.freeDisk / 1024 / 1024 / 1024).toFixed(1)} ГБ` : ''}
@@ -952,33 +952,33 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
           <div className="space-y-2">
             <div className="grid grid-cols-1 gap-1.5">
               {status.models.map((m) => (
-                <div key={m.key} className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
-                  <span className="truncate text-zinc-300">{m.name}</span>
-                  <span className={m.installed ? 'text-emerald-400' : 'text-amber-400'}>
+                <div key={m.key} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                  <span className="truncate text-foreground">{m.name}</span>
+                  <span className={m.installed ? 'text-emerald-400' : 'text-sky-400'}>
                     {m.installed ? 'Установлено' : 'Не установлено'}
                   </span>
                 </div>
               ))}
             </div>
             <div className="grid grid-cols-1 gap-1.5">
-              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
-                <span className="text-zinc-300">STT · T-One (распознавание)</span>
+              <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                <span className="text-foreground">STT · T-One (распознавание)</span>
                 <span className="flex items-center gap-2">
-                  {status.stt.lastFinalMs != null && <span className="text-zinc-500">{status.stt.lastFinalMs} мс</span>}
+                  {status.stt.lastFinalMs != null && <span className="text-muted-foreground">{status.stt.lastFinalMs} мс</span>}
                   {readyBadge(status.ready.stt, status.stt.state, status.stt.error)}
                 </span>
               </div>
-              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
-                <span className="text-zinc-300">LLM · Qwen3 (семантика)</span>
+              <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                <span className="text-foreground">LLM · Qwen3 (семантика)</span>
                 <span className="flex items-center gap-2">
-                  {status.llm.lastRouteMs != null && <span className="text-zinc-500">{status.llm.lastRouteMs} мс</span>}
+                  {status.llm.lastRouteMs != null && <span className="text-muted-foreground">{status.llm.lastRouteMs} мс</span>}
                   {readyBadge(status.ready.llm, status.llm.state, status.llm.error)}
                 </span>
               </div>
-              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
-                <span className="text-zinc-300">TTS · офлайн-синтез</span>
+              <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                <span className="text-foreground">TTS · офлайн-синтез</span>
                 <span className="flex items-center gap-2">
-                  {status.tts.lastSynthMs != null && <span className="text-zinc-500">{status.tts.lastSynthMs} мс</span>}
+                  {status.tts.lastSynthMs != null && <span className="text-muted-foreground">{status.tts.lastSynthMs} мс</span>}
                   {readyBadge(status.ready.tts, status.tts.state, status.tts.error)}
                 </span>
               </div>
@@ -990,7 +990,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 py-3 text-xs text-zinc-500">
+          <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Загружаю статус AI…
           </div>
         )}

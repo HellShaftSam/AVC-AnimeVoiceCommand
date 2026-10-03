@@ -76,16 +76,16 @@ export function InstallPwa() {
   }
 
   return (
-    <Card className="fixed bottom-3 left-3 z-50 w-72 gap-0 border-zinc-800 bg-zinc-900/95 p-3 shadow-[0_8px_30px_rgba(0,0,0,0.6)] backdrop-blur">
+    <Card className="fixed bottom-3 left-3 z-50 w-72 gap-0 border-border bg-card/60 p-3 shadow-[0_8px_30px_rgba(0,0,0,0.6)] backdrop-blur">
       <div className="flex items-start gap-2.5">
-        <Download className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
-        <p className="min-w-0 flex-1 text-xs leading-relaxed text-zinc-300">
+        <Download className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-foreground">
           Установить AnimeVC на устройство — как приложение
         </p>
         <button
           onClick={dismiss}
           aria-label="Не показывать предложение установки"
-          className="-mt-0.5 -mr-0.5 shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+          className="-mt-0.5 -mr-0.5 shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <X className="h-3.5 w-3.5" aria-hidden />
         </button>
@@ -94,7 +94,7 @@ export function InstallPwa() {
         size="sm"
         onClick={() => void install()}
         aria-label="Установить приложение"
-        className="mt-2.5 min-h-9 w-full gap-1.5 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+        className="mt-2.5 min-h-9 w-full gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
       >
         <Download className="h-3.5 w-3.5" aria-hidden />
         Установить

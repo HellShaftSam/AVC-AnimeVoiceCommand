@@ -13,7 +13,7 @@
  *     очисткой и возвращает путь к бэкапу.
  */
 import { useEffect, useState } from 'react'
-import { Activity, Loader2, ShieldAlert, Stethoscope } from 'lucide-react'
+import { Activity, Loader2, Mic, ShieldAlert, Stethoscope } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { avcApi, getElectronBridge } from '@/lib/avc/api'
 import { siteBase } from '@/lib/avc/site-urls'
@@ -58,8 +58,8 @@ const AUTH_STATE_LABELS: Record<YummyAccountSnapshot['state'], string> = {
 const STATUS_BADGE: Record<YummySelfTestStatus, string> = {
   PASS: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   FAIL: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
-  SKIP: 'border-zinc-600 bg-zinc-800/60 text-zinc-400',
-  BLOCKED: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  SKIP: 'border-border bg-accent/60 text-muted-foreground',
+  BLOCKED: 'border-amber-500/40 bg-amber-500/10 text-sky-300',
 }
 
 /** Крупные итоги отчёта: ключ + русская подпись */
@@ -98,6 +98,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
   const [account, setAccount] = useState<YummyAccountSnapshot | null>(null)
   const [testBusy, setTestBusy] = useState(false)
   const [report, setReport] = useState<YummyAuthSelfTestReport | null>(null)
+  const [voiceRestartBusy, setVoiceRestartBusy] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetResult, setResetResult] = useState<{
@@ -132,6 +133,27 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
 
   /** Отображаемое состояние: свежий снимок, иначе — текущее значение store */
   const view = account ?? storeAccount
+
+  /** Фаза 6.7: перезапуск голосового сервиса — переинициализация AI-воркера */
+  const restartVoice = async () => {
+    const ai = getElectronBridge()?.ai
+    if (!ai?.initialize) return
+    setVoiceRestartBusy(true)
+    try {
+      await ai.initialize()
+      const st = await ai.getStatus().catch(() => null)
+      const r = st?.ready
+      toast({
+        description: r
+          ? `Голосовой сервис перезапущен: STT ${r.stt ? 'готов' : 'недоступен'}, TTS ${r.tts ? 'готов' : 'недоступен'}, LLM ${r.llm ? 'готов' : 'недоступен'}`
+          : 'Голосовой сервис перезапущен',
+      })
+    } catch (e) {
+      toast({ description: `Не удалось перезапустить: ${e instanceof Error ? e.message : String(e)}`, variant: 'destructive' })
+    } finally {
+      setVoiceRestartBusy(false)
+    }
+  }
 
   const runSelfTest = async () => {
     setTestBusy(true)
@@ -203,7 +225,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Stethoscope className="h-5 w-5 text-amber-400" aria-hidden />
+              <Stethoscope className="h-5 w-5 text-sky-400" aria-hidden />
               Диагностика входа YummyAnime
             </DialogTitle>
             <DialogDescription>
@@ -214,28 +236,28 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
 
           {/* Шапка: текущее состояние (без секретов) */}
           <section aria-label="Текущее состояние входа">
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs">
-              <dt className="text-zinc-500">Сайт</dt>
-              <dd className="truncate text-zinc-200">{siteHost(baseUrl)}</dd>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border border-border bg-card/60 p-3 text-xs">
+              <dt className="text-muted-foreground">Сайт</dt>
+              <dd className="truncate text-foreground">{siteHost(baseUrl)}</dd>
 
-              <dt className="text-zinc-500">Сессия</dt>
-              <dd className="text-zinc-200">{hasBridge ? 'Постоянная (EXE)' : 'Недоступна (web)'}</dd>
+              <dt className="text-muted-foreground">Сессия</dt>
+              <dd className="text-foreground">{hasBridge ? 'Постоянная (EXE)' : 'Недоступна (web)'}</dd>
 
-              <dt className="text-zinc-500">Состояние</dt>
-              <dd className="text-zinc-200">{AUTH_STATE_LABELS[view.state]}</dd>
+              <dt className="text-muted-foreground">Состояние</dt>
+              <dd className="text-foreground">{AUTH_STATE_LABELS[view.state]}</dd>
 
-              <dt className="text-zinc-500">Пользователь</dt>
-              <dd className="truncate text-zinc-200">{username ?? '—'}</dd>
+              <dt className="text-muted-foreground">Пользователь</dt>
+              <dd className="truncate text-foreground">{username ?? '—'}</dd>
 
-              <dt className="text-zinc-500">Профиль</dt>
-              <dd className="text-zinc-200">{profileLabel}</dd>
+              <dt className="text-muted-foreground">Профиль</dt>
+              <dd className="text-foreground">{profileLabel}</dd>
 
-              <dt className="text-zinc-500">Последняя проверка</dt>
-              <dd className="tabular-nums text-zinc-200">
+              <dt className="text-muted-foreground">Последняя проверка</dt>
+              <dd className="tabular-nums text-foreground">
                 {view.lastSync ? new Date(view.lastSync).toLocaleTimeString('ru-RU') : '—'}
               </dd>
 
-              <dt className="text-zinc-500">Сеть</dt>
+              <dt className="text-muted-foreground">Сеть</dt>
               <dd
                 className={cn(
                   'font-medium',
@@ -253,7 +275,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
             <Button
               onClick={() => void runSelfTest()}
               disabled={testBusy}
-              className="min-h-11 gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+              className="min-h-11 gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {testBusy ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -263,11 +285,28 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
               Запустить тест аутентификации
             </Button>
 
+            {/* Фаза 6.7: перезапуск голосового сервиса (восстановление после сбоев) */}
+            {typeof window !== 'undefined' && getElectronBridge()?.ai?.initialize && (
+              <Button
+                variant="outline"
+                disabled={voiceRestartBusy}
+                onClick={() => void restartVoice()}
+                className="min-h-11 gap-2 border-border bg-card/60 text-sky-300 hover:border-sky-400/50 hover:bg-sky-400/10 hover:text-sky-200"
+              >
+                {voiceRestartBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Mic className="h-4 w-4" aria-hidden />
+                )}
+                Перезапустить голосовой сервис (AI)
+              </Button>
+            )}
+
             <Button
               variant="outline"
               disabled={resetBusy}
               onClick={() => setResetOpen(true)}
-              className="min-h-11 gap-2 border-zinc-700 bg-zinc-900/60 text-rose-300 hover:border-rose-500/50 hover:bg-rose-500/10 hover:text-rose-200"
+              className="min-h-11 gap-2 border-border bg-card/60 text-rose-300 hover:border-rose-500/50 hover:bg-rose-500/10 hover:text-rose-200"
             >
               {resetBusy ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -290,7 +329,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
             >
               {resetResult.message}
               {resetResult.backupPath && (
-                <span className="mt-1 block break-all text-zinc-400">
+                <span className="mt-1 block break-all text-muted-foreground">
                   Бэкап профиля: {resetResult.backupPath}
                 </span>
               )}
@@ -301,9 +340,9 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
           {report && (
             <section
               aria-label="Отчёт теста аутентификации"
-              className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"
+              className="space-y-3 rounded-xl border border-border bg-card/60 p-3"
             >
-              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>Отчёт от {new Date(report.ranAt).toLocaleTimeString('ru-RU')}</span>
                 <span aria-hidden>·</span>
                 <span>Сеть оболочки: {report.network}</span>
@@ -334,8 +373,8 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
                       {step.status}
                     </Badge>
                     <span className="min-w-0">
-                      <span className="text-zinc-200">{step.name}</span>
-                      <span className="block break-all text-zinc-500">{step.detail}</span>
+                      <span className="text-foreground">{step.name}</span>
+                      <span className="block break-all text-muted-foreground">{step.detail}</span>
                     </span>
                   </li>
                 ))}
@@ -347,12 +386,12 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
 
       {/* ОПАСНОЕ действие: двухшаговое подтверждение (спека, секция 22) */}
       <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
-        <AlertDialogContent className="border-zinc-800 bg-zinc-950 sm:max-w-md">
+        <AlertDialogContent className="border-border bg-background sm:max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-zinc-100">
+            <AlertDialogTitle className="text-foreground">
               Сбросить сессию сайта?
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-zinc-400">
+            <AlertDialogDescription className="text-muted-foreground">
               Постоянный профиль сайта (вход в YummyAnime) будет очищен — вход придётся
               выполнить заново. Перед очисткой оболочка сохранит резервную копию профиля
               и покажет путь к ней. Действие нельзя отменить.
@@ -361,7 +400,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={resetBusy}
-              className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-amber-300"
+              className="border-border bg-card text-foreground hover:text-sky-300"
             >
               Отмена
             </AlertDialogCancel>

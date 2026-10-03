@@ -138,7 +138,7 @@ export default function Page() {
   return (
     <div
       className={cn(
-        'flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100 selection:bg-amber-400/30',
+        'flex h-screen flex-col overflow-hidden bg-background text-foreground selection:bg-sky-400/40',
         couchMode ? 'text-[17px] lg:text-[21px]' : 'text-sm',
       )}
     >
@@ -158,7 +158,7 @@ export default function Page() {
         {!couchMode && <HistoryPanel />}
       </div>
 
-      <footer className="mt-auto flex flex-col gap-2 border-t border-zinc-800 bg-zinc-950/95 px-3 py-2.5 backdrop-blur sm:flex-row sm:items-center sm:gap-4 sm:px-4">
+      <footer className="mt-auto flex flex-col gap-2 border-t border-border bg-background/95 px-3 py-2.5 backdrop-blur sm:flex-row sm:items-center sm:gap-4 sm:px-4">
         <VoicePanel voice={voice} />
         <MiniPlayer />
       </footer>

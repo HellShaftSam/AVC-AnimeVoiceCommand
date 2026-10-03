@@ -153,13 +153,13 @@ export function HelpDialog() {
         <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400/90">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
                 {group.title}
               </h3>
               <ul className="space-y-1">
                 {group.items.map((item) => (
-                  <li key={item} className="flex items-start gap-2 text-sm text-zinc-300">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/70" aria-hidden />
+                  <li key={item} className="flex items-start gap-2 text-sm text-foreground">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400/40" aria-hidden />
                     <span>«{item}»</span>
                   </li>
                 ))}
@@ -169,25 +169,25 @@ export function HelpDialog() {
         </div>
 
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400/90">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
             Горячие клавиши
           </h3>
           <ul className="grid gap-1.5 sm:grid-cols-2">
             {HOTKEYS.map((hk) => (
               <li
                 key={hk.keys}
-                className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 px-2.5 py-1.5 text-xs"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 py-1.5 text-xs"
               >
-                <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-amber-300">
+                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-sky-300">
                   {hk.keys}
                 </kbd>
-                <span className="text-zinc-400">{hk.action}</span>
+                <span className="text-muted-foreground">{hk.action}</span>
               </li>
             ))}
           </ul>
         </section>
 
-        <p className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs leading-relaxed text-zinc-400">
+        <p className="mt-2 rounded-lg border border-border bg-card/60 p-3 text-xs leading-relaxed text-muted-foreground">
           Если локальный парсер не уверен во фразе, включается LLM-fallback — команда будет
           понята гибче (отключается в Настройках → Приватность). Wake word: включите в
           настройках, чтобы команды срабатывали только после слова-активатора. При неуверенном

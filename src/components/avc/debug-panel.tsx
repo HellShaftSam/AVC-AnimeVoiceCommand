@@ -36,9 +36,9 @@ interface DiagResult {
 }
 
 const STAGE_STYLES: Record<PipelineStep['stage'], string> = {
-  RAW: 'border-zinc-600 bg-zinc-700/40 text-zinc-300',
-  NORMALIZED: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  COMMAND: 'border-amber-500/40 bg-amber-500/15 text-amber-200',
+  RAW: 'border-border bg-zinc-700/40 text-foreground',
+  NORMALIZED: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
+  COMMAND: 'border-amber-500/40 bg-amber-500/15 text-sky-200',
   PARAMS: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
   CONFIDENCE: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   RESULT: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
@@ -48,9 +48,9 @@ const STAGE_STYLES: Record<PipelineStep['stage'], string> = {
 /** Цвет бейджа способа сопоставления резолвера озвучек */
 const VIA_STYLES: Record<VoiceProviderMatch['matchedVia'], string> = {
   exact: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  alias: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  alias: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
   translit: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
-  fuzzy: 'border-zinc-600 bg-zinc-800/60 text-zinc-300',
+  fuzzy: 'border-border bg-accent/60 text-foreground',
 }
 
 export function DebugPanel() {
@@ -124,11 +124,11 @@ export function DebugPanel() {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="right"
-          className="flex w-full flex-col border-zinc-800 bg-zinc-950 sm:max-w-md"
+          className="flex w-full flex-col border-border bg-background sm:max-w-md"
         >
           <SheetHeader>
-            <SheetTitle className="text-zinc-100">Отладка</SheetTitle>
-            <SheetDescription className="text-zinc-500">
+            <SheetTitle className="text-foreground">Отладка</SheetTitle>
+            <SheetDescription className="text-muted-foreground">
               Пайплайн распознавания и состояние адаптера
             </SheetDescription>
           </SheetHeader>
@@ -139,7 +139,7 @@ export function DebugPanel() {
               size="sm"
               onClick={() => void runDiagnostics()}
               disabled={diagLoading}
-              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
             >
               {diagLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -152,7 +152,7 @@ export function DebugPanel() {
               variant="outline"
               size="sm"
               onClick={() => setAuthDiagOpen(true)}
-              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
             >
               <Activity className="h-4 w-4" aria-hidden />
               Диагностика входа YummyAnime
@@ -161,7 +161,7 @@ export function DebugPanel() {
               variant="outline"
               size="sm"
               onClick={() => void copyDebug()}
-              className="min-h-11 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
             >
               <Copy className="h-4 w-4" aria-hidden />
               Копировать отладку
@@ -169,7 +169,7 @@ export function DebugPanel() {
           </div>
 
         {diag && (
-          <ul className="space-y-1.5 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2.5">
+          <ul className="space-y-1.5 rounded-xl border border-border bg-card/60 p-2.5">
             {diag.map((d) => (
               <li key={d.name} className="flex items-start gap-2 text-xs">
                 {d.ok ? (
@@ -178,20 +178,20 @@ export function DebugPanel() {
                   <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-400" aria-hidden />
                 )}
                 <span className="min-w-0">
-                  <span className="text-zinc-200">{d.name}</span>
-                  <span className="block break-all text-zinc-500">{d.detail}</span>
+                  <span className="text-foreground">{d.name}</span>
+                  <span className="block break-all text-muted-foreground">{d.detail}</span>
                 </span>
               </li>
             ))}
           </ul>
         )}
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-secondary" />
 
         {/* Резолвер озвучек */}
         <section aria-label="Резолвер озвучек">
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            <FlaskConical className="h-3.5 w-3.5 text-amber-400" aria-hidden />
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <FlaskConical className="h-3.5 w-3.5 text-sky-400" aria-hidden />
             Резолвер озвучек
           </h3>
           <div className="flex gap-1.5">
@@ -206,22 +206,22 @@ export function DebugPanel() {
               }}
               placeholder="ани либрию"
               aria-label="Произнесённое название озвучки"
-              className="h-11 min-h-11 border-zinc-800 bg-zinc-900/60 text-sm placeholder:text-zinc-600 focus-visible:ring-amber-400/50"
+              className="h-11 min-h-11 border-border bg-card/60 text-sm placeholder:text-muted-foreground focus-visible:ring-ring/60"
             />
             <Button
               variant="outline"
               onClick={runResolver}
               disabled={!resolverInput.trim()}
-              className="min-h-11 shrink-0 border-zinc-700 bg-zinc-900/60 hover:border-amber-400/50 hover:text-amber-300"
+              className="min-h-11 shrink-0 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
             >
               Проверить
             </Button>
           </div>
           {resolverResult && (
-            <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5 text-xs">
+            <div className="mt-2 rounded-lg border border-border bg-card/60 p-2.5 text-xs">
               {resolverResult.match ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-zinc-100">{resolverResult.match.name}</span>
+                  <span className="font-medium text-foreground">{resolverResult.match.name}</span>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -234,46 +234,46 @@ export function DebugPanel() {
                   </Badge>
                 </div>
               ) : (
-                <span className="text-zinc-500">Совпадений ниже порога (null)</span>
+                <span className="text-muted-foreground">Совпадений ниже порога (null)</span>
               )}
-              <p className="mt-1 text-[10px] text-zinc-600">
+              <p className="mt-1 text-[10px] text-muted-foreground">
                 Кандидатов: {resolverResult.candidates}
               </p>
             </div>
           )}
         </section>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-secondary" />
 
         {/* Статус приложения */}
         <section aria-label="Статус приложения">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Статус
           </h3>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5 text-xs">
-            <dt className="text-zinc-500">Аккаунт YummyAnime</dt>
-            <dd className={yummyAccount.state === 'loggedIn' ? 'text-zinc-200' : 'text-zinc-500'}>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card/60 p-2.5 text-xs">
+            <dt className="text-muted-foreground">Аккаунт YummyAnime</dt>
+            <dd className={yummyAccount.state === 'loggedIn' ? 'text-foreground' : 'text-muted-foreground'}>
               {yummyAccount.state === 'loggedIn'
                 ? (yummyAccount.user?.username ?? 'вход подтверждён')
                 : yummyAccount.state === 'sessionExpired'
                   ? 'сессия истекла'
                   : 'не залогинен'}
             </dd>
-            <dt className="text-zinc-500">Алиасов озвучек</dt>
-            <dd className="tabular-nums text-zinc-200">{aliasCount}</dd>
-            <dt className="text-zinc-500">Движок STT</dt>
-            <dd className="text-zinc-200">{sttEngine}</dd>
+            <dt className="text-muted-foreground">Алиасов озвучек</dt>
+            <dd className="tabular-nums text-foreground">{aliasCount}</dd>
+            <dt className="text-muted-foreground">Движок STT</dt>
+            <dd className="text-foreground">{sttEngine}</dd>
           </dl>
         </section>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-secondary" />
 
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Пайплайн ({pipeline.length}/40)
         </h3>
         <div className="avc-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pb-4">
           {pipeline.length === 0 && (
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted-foreground">
               Пусто. Выполните команду голосом или через тестовый ввод.
             </p>
           )}
@@ -291,7 +291,7 @@ export function DebugPanel() {
                 >
                   {s.stage}
                 </Badge>
-                <span className="min-w-0 break-all text-xs text-zinc-300">{s.text}</span>
+                <span className="min-w-0 break-all text-xs text-foreground">{s.text}</span>
               </div>
             )
           })}

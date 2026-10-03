@@ -25,9 +25,9 @@ import { cn } from '@/lib/utils'
 /** Цвет бейджа способа сопоставления резолвера */
 const VIA_STYLES: Record<VoiceProviderMatch['matchedVia'], string> = {
   exact: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  alias: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  alias: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
   translit: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
-  fuzzy: 'border-zinc-600 bg-zinc-800/60 text-zinc-300',
+  fuzzy: 'border-border bg-accent/60 text-foreground',
 }
 
 const VIA_LABELS: Record<VoiceProviderMatch['matchedVia'], string> = {
@@ -65,13 +65,13 @@ export function VoiceConfirmDialog() {
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mic className="h-4 w-4 text-amber-400" aria-hidden />
+            <Mic className="h-4 w-4 text-sky-400" aria-hidden />
             Уточним озвучку
           </DialogTitle>
           <DialogDescription>
             {voiceConfirm && (
               <>
-                Вы говорите: «<span className="italic text-zinc-300">{voiceConfirm.spoken}</span>».
+                Вы говорите: «<span className="italic text-foreground">{voiceConfirm.spoken}</span>».
                 Больше всего похоже на:
               </>
             )}
@@ -80,8 +80,8 @@ export function VoiceConfirmDialog() {
 
         {voiceConfirm && (
           <>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-center">
-              <p className="text-lg font-bold text-amber-300">{voiceConfirm.match.name}</p>
+            <div className="rounded-xl border border-border bg-card/60 p-4 text-center">
+              <p className="text-lg font-bold text-sky-300">{voiceConfirm.match.name}</p>
               <div className="mt-2 flex items-center justify-center gap-2">
                 <Badge
                   variant="outline"
@@ -89,7 +89,7 @@ export function VoiceConfirmDialog() {
                 >
                   {Math.round(voiceConfirm.match.confidence * 100)}%
                 </Badge>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-muted-foreground">
                   {VIA_LABELS[voiceConfirm.match.matchedVia]}
                 </span>
               </div>
@@ -100,7 +100,7 @@ export function VoiceConfirmDialog() {
                 ref={confirmBtnRef}
                 onClick={() => close(true)}
                 aria-label="Да, переключить озвучку"
-                className="min-h-11 flex-1 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+                className="min-h-11 flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 Да, переключить
               </Button>
@@ -108,13 +108,13 @@ export function VoiceConfirmDialog() {
                 variant="outline"
                 onClick={() => close(false)}
                 aria-label="Нет, отмена"
-                className="min-h-11 flex-1 border-zinc-700 bg-zinc-900/60 hover:border-zinc-500"
+                className="min-h-11 flex-1 border-border bg-card/60 hover:border-zinc-500"
               >
                 Нет, отмена
               </Button>
             </div>
 
-            <p className="text-xs leading-relaxed text-zinc-500">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               Не то? Скажите название точнее или выберите озвучку на странице аниме. Уверенные
               команды ({'>'}= 85%) переключаются без вопроса.
             </p>

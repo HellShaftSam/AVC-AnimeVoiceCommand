@@ -826,3 +826,14 @@ Work Log:
 - ВОСПРОИЗВЕДЕНО: на 1024×768 поле ввода сжималось до 26px и вылезало в зону мини-плеера (voicePanel×input/send пересечения; reason: status-блок с длинным текстом отъедал ширину, форма без min-width)
 - ФИКС voice-panel.tsx: корень flex-wrap; status-блок flex-1 (сжимается с truncate, а не выдавливает форму); форма min-w-[220px] flex-[2] — ввод и Send всегда доступны
 - ВЕРИФИКАЦИЯ интерсекций и переполнений на 1920/1366/1024/900/800 (с длинной командой в поле): input 446/261/170/170/326px, пересечений нет, горизонтального overflow нет, всё в окне; скриншоты tool-results/responsive-{1920,800}.png; lint 0
+
+---
+Task ID: postrelease-fix-6
+Agent: Z.ai Code (main)
+Task: Приоритет 6 — Navy Blue тема (фаза 7) + кнопка перезапуска голоса (фаза 6.7)
+
+Work Log:
+- globals.css: токены переведены на палитру ТЗ §7.1 (фон #07111F, панель #10223A, primary #2563EB, cyan #38BDF8, текст #E6F0FF, граница #203A57, success/warning/error из ТЗ); navy = дефолт (:root), .dark зеркалит; selection и скроллбары cyan
+- Массовый перевод компонентов (21 файл) с упорядоченными правилами: zinc-поверхности → semantic-токены (bg-background/card/secondary/accent), zinc-тексты → foreground/muted-foreground, amber-акценты → sky/cyan, свечения rgba→cyan, primary-кнопки → bg-primary/text-primary-foreground; rose/emerald сохранены как error/success (совпадают с ТЗ)
+- diagnostics-dialog: кнопка «Перезапустить голосовой сервис (AI)» (ai.initialize + статус-отчёт) — фаза 6.7
+- ВЕРИФИКАЦИЯ: lint 0; скриншоты navy-home-1920 / navy-settings / navy-anime — тёмная navy, blue/cyan-акценты, контраст читаемый; layout-тесты адаптивности повторно зелёные
