@@ -1,0 +1,40 @@
+{
+  "ranAt": "2026-10-03T19:02:13.447Z",
+  "tests": [
+    {
+      "name": "services-init",
+      "status": "PASS",
+      "detail": "STT=ready TTS=ready LLM=ready"
+    },
+    {
+      "name": "hardware-info",
+      "status": "PASS",
+      "detail": "CPU: Intel(R) Xeon(R) Processor ×2; RAM: 3.95 GB; GPU: вне Electron — null (честно)"
+    },
+    {
+      "name": "tts-stt-early-pause",
+      "status": "PASS",
+      "detail": "TTS «Пауза.» → STT final: «пауза»; early-command Pause ×1; final после early помечен earlyCommandType=Pause (§14)"
+    },
+    {
+      "name": "unsafe-early-blocked",
+      "status": "PASS",
+      "detail": "«удали из списка» → null (раннее исполнение запрещено)"
+    },
+    {
+      "name": "llm-fallback",
+      "status": "PASS",
+      "detail": "«включи то, на чём я вчера остановился» → ContinueWatching (5536 мс)"
+    },
+    {
+      "name": "tts-reply",
+      "status": "PASS",
+      "detail": "ответ TTS: irina-7590197cae0bcbdb04dec58901fdc29e7e2009a1.wav (кэш)"
+    },
+    {
+      "name": "diagnostics-status",
+      "status": "PASS",
+      "detail": "STT/LLM/TTS ready, моделей установлено: 4/4"
+    }
+  ]
+}

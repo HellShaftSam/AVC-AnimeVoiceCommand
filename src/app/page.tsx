@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import { avcApi, getElectronBridge } from '@/lib/avc/api'
 import { AuthDialog } from '@/components/avc/auth-dialog'
+import { AiSetupDialog } from '@/components/avc/ai-setup-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
 import { HeaderBar } from '@/components/avc/header-bar'
 import { HelpDialog } from '@/components/avc/help-dialog'
@@ -165,6 +166,7 @@ export default function Page() {
       {/* Диалоги и панели */}
       <PendingOptionsDialog />
       <SettingsDialog />
+      <AiSetupDialog />
       <HelpDialog />
       {!couchMode && <DebugPanel />}
       <SessionRestoreDialog onResolved={() => setSessionResolved(true)} />

@@ -21,7 +21,7 @@ import {
   DubCandidate,
   resolveVoiceProvider,
 } from '@/lib/voice/provider-resolver'
-import { avcApi } from './api'
+import { avcApi, getElectronBridge } from './api'
 import {
   hasStickyActivation,
   playerWindowAvailable,
@@ -1243,7 +1243,34 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
 
 // --- интерпретация LLM (fallback) --------------------------------------------------
 
+/**
+ * Локальный LLM-роутер (спецификация §28–§47): в EXE вызывается ПЕРВЫМ —
+ * работает офлайн без облака (§3). При недоступности — облачный /api/voice/interpret.
+ */
+async function localLlmInterpret(raw: string, context: BrowserContext): Promise<VoiceCommand[] | null> {
+  const bridge = getElectronBridge()
+  const ai = bridge?.ai
+  if (!ai?.available) return null
+  try {
+    const res = await ai.llmRoute(raw, context)
+    if (!res || !res.commands?.length) return null
+    const { VoiceCommandType: VCT } = await import('./types')
+    return res.commands
+      .map((c) => {
+        const type = (VCT as unknown as Record<string, string>)[c.type] ?? null
+        if (!type) return null
+        return { type, params: c.params ?? {}, confidence: c.confidence ?? 0.6, label: c.type } as VoiceCommand
+      })
+      .filter((c): c is VoiceCommand => c !== null)
+  } catch {
+    return null
+  }
+}
+
 async function llmInterpret(raw: string, context: BrowserContext): Promise<VoiceCommand[] | null> {
+  // §30/§46: сначала локальный офлайн-роутер, затем облачный fallback
+  const local = await localLlmInterpret(raw, context)
+  if (local && local.length > 0) return local
   try {
     const res = await fetch('/api/voice/interpret', {
       method: 'POST',
@@ -1270,6 +1297,28 @@ export interface ExecuteTextResult {
 export function getBrowserContext(): BrowserContext {
   const s = useAvcStore.getState()
   return { navigation: s.navigation, playback: s.playback }
+}
+
+/**
+ * Исполнение РАННЕЙ команды (спецификация §12): safe-интент по частичной фразе.
+ * ЕДИНЫЙ путь исполнения — через executeCommand; дедупликация как у executeText.
+ * Возвращает null, если тип не из безопасного реестра (§13).
+ */
+const EARLY_ALLOWED = new Set<string>([
+  'NextEpisode', 'PreviousEpisode', 'Pause', 'Play', 'VolumeUp', 'VolumeDown', 'Mute', 'Unmute',
+])
+
+export async function executeEarlyCommand(type: string): Promise<CommandResult | null> {
+  if (!EARLY_ALLOWED.has(type)) return null // §13: раннее исполнение — только безопасное
+  const VCT = VoiceCommandType as unknown as Record<string, VoiceCommandType>
+  const typeValue = VCT[type]
+  if (!typeValue) return null
+  const cmd: VoiceCommand = { type: typeValue, params: {}, confidence: 0.9, label: LABELS[typeValue] ?? type }
+  try {
+    return await executeCommand(cmd)
+  } catch {
+    return null
+  }
 }
 
 export async function executeText(

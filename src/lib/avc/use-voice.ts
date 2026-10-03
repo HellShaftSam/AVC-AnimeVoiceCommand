@@ -33,7 +33,8 @@ import {
   sensitivityToRms,
   type MicChain,
 } from '../voice/audio-utils'
-import { executeText } from './executor'
+import { executeEarlyCommand, executeText } from './executor'
+import { getElectronBridge } from './api'
 import { useAvcStore, VoiceStatus } from './store'
 
 const SILENCE_MS = 1300
@@ -194,6 +195,14 @@ export function useVoice(): VoiceApi {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const finalTranscriptRef = useRef('')
   const recognitionActiveRef = useRef(false)
+  // Локальный AI-движок (спецификация §4–§14): подписки IPC и дедупликация early
+  const localSessionRef = useRef<{
+    ctx: AudioContext
+    processor: ScriptProcessorNode
+    source: MediaStreamAudioSourceNode
+  } | null>(null)
+  const localFinalHandledRef = useRef<Set<number>>(new Set())
+  const localEarlyDoneRef = useRef<Set<number>>(new Set())
 
   const scheduleErrorClear = useCallback(() => {
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
@@ -269,6 +278,18 @@ export function useVoice(): VoiceApi {
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current)
         urlRef.current = null
+      }
+      // Локальный TTS (спецификация §22–§29): офлайн-синтез в EXE — приоритет (§3)
+      const ai = getElectronBridge()?.ai
+      if (ai?.available && useAvcStore.getState().settings.aiLocalTts) {
+        const local = await ai.ttsSpeak(text)
+        if (local?.dataUrl) {
+          const el = new Audio(local.dataUrl)
+          audioElRef.current = el
+          void el.play().catch(() => undefined)
+          return
+        }
+        // локальный TTS недоступен — падаем на облачный путь (§129)
       }
       const res = await fetch('/api/voice/tts', {
         method: 'POST',
@@ -563,6 +584,116 @@ export function useVoice(): VoiceApi {
     }
   }, [ensureStream, processRecording, scheduleErrorClear, startRafLoop, teardownAudio])
 
+  /**
+   * Движок «local» (спецификация §4–§14): захват 16 кГц → IPC → Silero VAD +
+   * T-One стриминговый STT в AI-воркере. Частичные результаты — interimText +
+   * безопасное раннее исполнение (§12); финал — тот же handleRecognizedText (§41).
+   */
+  const startLocalSession = useCallback(async () => {
+    const seq = sessionSeqRef.current
+    const ai = getElectronBridge()?.ai
+    if (!ai?.available) return false
+    try {
+      const settings = useAvcStore.getState().settings
+      const stream = await ensureStream()
+      if (seq !== sessionSeqRef.current || !mountedRef.current) return true
+      // AudioContext с принудительными 16 кГц — без ресемплов на стороне рендерера
+      const Ctor: typeof AudioContext =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new Ctor({ sampleRate: 16000 })
+      const source = ctx.createMediaStreamSource(stream)
+      const processor = ctx.createScriptProcessor(4096, 1, 1)
+      source.connect(processor)
+      // анализатор для индикатора уровня
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 1024
+      source.connect(analyser)
+      analyserRef.current = analyser
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0)
+        const int16 = new Int16Array(input.length)
+        for (let i = 0; i < input.length; i++) {
+          const v = Math.max(-1, Math.min(1, input[i] * (settings.micGain || 1)))
+          int16[i] = Math.round(v * 32767)
+        }
+        void ai.feedAudio(int16).catch(() => undefined)
+      }
+      // ScriptProcessor требует подключение к destination
+      const mute = ctx.createGain()
+      mute.gain.value = 0
+      processor.connect(mute)
+      mute.connect(ctx.destination)
+      localSessionRef.current = { ctx, processor, source }
+      setBrowserEngine(true) // «браузероподобный» движок с interim-результатами
+      useAvcStore.getState().setVoiceStatus('listening', 'Слушаю (локально)...')
+      startRafLoop(false)
+      startedAtRef.current = performance.now()
+      // страховка капа длительности
+      if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
+      maxTimerRef.current = setTimeout(() => {
+        void ai.flushStt().catch(() => undefined)
+        stopRef.current?.()
+      }, Math.min(60000, Math.max(4000, settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS)))
+      return true
+    } catch {
+      return false
+    }
+  }, [ensureStream, startRafLoop])
+
+  // подписки на события локального STT (монтируются один раз)
+  useEffect(() => {
+    const ai = getElectronBridge()?.ai
+    if (!ai?.available) return
+    const offPartial = ai.onSttPartial((p) => {
+      if (p.text) setInterimText(p.text)
+      // §12: безопасное раннее исполнение ещё до финала; §14 — один раз на фразу
+      if (p.earlyCommand && !localEarlyDoneRef.current.has(p.utteranceId)) {
+        localEarlyDoneRef.current.add(p.utteranceId)
+        if (localEarlyDoneRef.current.size > 100) {
+          const first = localEarlyDoneRef.current.values().next().value
+          if (first !== undefined) localEarlyDoneRef.current.delete(first)
+        }
+        useAvcStore.getState().setVoiceStatus('executing', p.earlyCommand)
+        void executeEarlyCommand(p.earlyCommand).then((result) => {
+          if (result) {
+            useAvcStore.getState().setVoiceStatus('idle', result.message)
+            if (useAvcStore.getState().settings.ttsEnabled && result.message) void speak(result.message)
+          }
+        })
+      }
+    })
+    const offFinal = ai.onSttFinal((p) => {
+      // §14: если фраза уже исполнена рано — финал не исполняем второй раз
+      if (p.earlyCommandType || localEarlyDoneRef.current.has(p.utteranceId)) {
+        if (!localFinalHandledRef.current.has(p.utteranceId)) {
+          localFinalHandledRef.current.add(p.utteranceId)
+          if (localFinalHandledRef.current.size > 100) {
+            const first = localFinalHandledRef.current.values().next().value
+            if (first !== undefined) localFinalHandledRef.current.delete(first)
+          }
+          const cur = useAvcStore.getState().voiceStatus
+          if (cur === 'listening' || cur === 'recognizing') useAvcStore.getState().setVoiceStatus('idle')
+        }
+        return
+      }
+      if (localFinalHandledRef.current.has(p.utteranceId)) return
+      localFinalHandledRef.current.add(p.utteranceId)
+      if (localFinalHandledRef.current.size > 100) {
+        const first = localFinalHandledRef.current.values().next().value
+        if (first !== undefined) localFinalHandledRef.current.delete(first)
+      }
+      if (p.text) {
+        useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
+        teardownAudio()
+        void handleRecognizedText(p.text)
+      }
+    })
+    return () => {
+      offPartial()
+      offFinal()
+    }
+  }, [handleRecognizedText, teardownAudio, speak])
+
   const startPushToTalk = useCallback(async () => {
     const st = useAvcStore.getState()
     if (st.voiceStatus === 'listening' || processingRef.current) return
@@ -583,6 +714,19 @@ export function useVoice(): VoiceApi {
       st.setVoiceStatus(
         'error',
         'Браузер не поддерживает распознавание речи (Web Speech API). Выберите движок «auto» или «server» в настройках.',
+      )
+      scheduleErrorClear()
+      return
+    }
+
+    // --- Движок «local» (EXE + локальные модели): Silero VAD + T-One стриминговый STT ---
+    if (settings.sttEngine === 'local') {
+      const okLocal = await startLocalSession()
+      if (okLocal) return
+      if (seq !== sessionSeqRef.current) return
+      useAvcStore.getState().setVoiceStatus(
+        'error',
+        'Локальный STT недоступен (модели не установлены или AI-воркер не запущен). Откройте Настройки → AI.',
       )
       scheduleErrorClear()
       return
@@ -609,13 +753,23 @@ export function useVoice(): VoiceApi {
 
     // --- Движок 2 (fallback / 'server'): MediaRecorder + серверный ASR ---
     await startServerSession()
-  }, [isMicSupported, scheduleErrorClear, startBrowserSession, startServerSession])
+  }, [isMicSupported, scheduleErrorClear, startBrowserSession, startServerSession, startLocalSession])
 
   const stopPushToTalkAndProcess = useCallback(() => {
     sessionSeqRef.current++ // инвалидируем незавершённые асинхронные старты
     if (maxTimerRef.current) {
       clearTimeout(maxTimerRef.current)
       maxTimerRef.current = null
+    }
+    // Локальный движок: завершить фразу в воркере (final придёт событием)
+    const local = localSessionRef.current
+    if (local) {
+      localSessionRef.current = null
+      teardownAudio()
+      const ai = getElectronBridge()?.ai
+      void ai?.flushStt().catch(() => undefined)
+      useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
+      return
     }
     // Web Speech: остановка — результат придёт в onend; индикатор глушим сразу
     // (защита от движка, который так и не вызовет onend)
@@ -712,6 +866,13 @@ export function useVoice(): VoiceApi {
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
       streamDeviceRef.current = null
+      // локальный AI: закрываем WebAudio-сессию
+      const local = localSessionRef.current
+      if (local) {
+        localSessionRef.current = null
+        try { local.processor.disconnect() } catch { /* ок */ }
+        void local.ctx.close().catch(() => undefined)
+      }
       if (audioElRef.current) {
         audioElRef.current.pause()
         audioElRef.current = null

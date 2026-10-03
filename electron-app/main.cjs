@@ -15,11 +15,22 @@
  *                                секции 9/20/24), окно UI не открывается
  */
 const { app, BrowserWindow, ipcMain, session, shell } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, fork: childFork } = require('child_process')
+const childProcess = { fork: childFork }
 const http = require('http')
 const path = require('path')
 const fs = require('fs')
 const { AuthenticationService, PARTITION } = require('./auth/authentication-service.cjs')
+
+// Локальный AI-слой (спецификация §4–§134) — модульный: при отсутствии пакетов/моделей
+// приложение продолжает работать (§0, §129). Загружаем лениво и честно отражаем статус.
+let VoicePipeline = null
+let voicePipeline = null
+try {
+  VoicePipeline = require('./ai/voice-pipeline.cjs').VoicePipeline
+} catch (e) {
+  log(`[AI] voice-pipeline недоступен: ${e.message}`)
+}
 
 // --- структурированный лог (секция 21): без секретов ---------------------------
 
@@ -64,6 +75,12 @@ process.on('uncaughtException', (err) => log(`[Main] Uncaught exception: ${redac
 
 const SELFTEST = process.argv.includes('--auth-selftest')
 if (SELFTEST) {
+  app.disableHardwareAcceleration()
+}
+
+/** Режим самопроверки AI-слоя в РЕАЛЬНОМ main-процессе (§120, §121) — без UI */
+const AI_SELFTEST = process.argv.includes('--ai-selftest')
+if (AI_SELFTEST) {
   app.disableHardwareAcceleration()
 }
 
@@ -199,6 +216,170 @@ function setupIpc(service) {
   ipcMain.handle('avc:anime:action', (_e, req) => service.animeAction(req))
 }
 
+/**
+ * Мост IPC ⇔ AI-воркер (utilityProcess, §130 process isolation).
+ * В main-процессе Electron N-API external arraybuffers запрещены («External buffers
+ * are not allowed») — нативный sherpa-onnx TTS требует их, поэтому весь нативный AI
+ * живёт в изолированном utilityProcess (полный Node), а main только пересылает сообщения.
+ */
+const AI_EVENT_CHANNELS = {
+  'stt-partial': 'avc:ai:stt-partial',
+  'stt-final': 'avc:ai:stt-final',
+  'services-status': 'avc:ai:services-status',
+  'model-progress': 'avc:ai:model-progress',
+  'tts-speak-file': 'avc:ai:tts-speak-file',
+  'tts-cancel': 'avc:ai:tts-cancel',
+}
+
+let aiWorker = null
+let aiWorkerReqId = 0
+const aiWorkerPending = new Map()
+let aiWorkerFailed = null
+
+function aiWorkerRequest(type, args) {
+  if (!aiWorker) return Promise.reject(new Error(aiWorkerFailed || 'AI-воркер не запущен'))
+  return new Promise((resolve, reject) => {
+    const id = `req-${++aiWorkerReqId}`
+    const timer = setTimeout(() => {
+      aiWorkerPending.delete(id)
+      reject(new Error(`AI-воркер: таймаут запроса ${type}`))
+    }, args?.__timeoutMs || 300000)
+    aiWorkerPending.set(id, { resolve, reject, timer })
+    try {
+      aiWorker.send({ id, type, args })
+    } catch (e) {
+      clearTimeout(timer)
+      aiWorkerPending.delete(id)
+      reject(e)
+    }
+  })
+}
+
+/** Путь к чистому Node для AI-воркера: packaged → bundled runtime, dev → PATH */
+function findSystemNode() {
+  if (process.env.AVC_NODE_EXE && fs.existsSync(process.env.AVC_NODE_EXE)) return process.env.AVC_NODE_EXE
+  try {
+    const resourcesDir = process.resourcesPath || null
+    if (resourcesDir) {
+      const cand =
+        process.platform === 'win32'
+          ? path.join(resourcesDir, 'runtime-node', 'node.exe')
+          : path.join(resourcesDir, 'runtime-node', 'bin', 'node')
+      if (fs.existsSync(cand)) return cand
+    }
+  } catch { /* dev-режим */ }
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue
+    const p = process.platform === 'win32' ? path.join(dir, 'node.exe') : path.join(dir, 'node')
+    try { if (fs.existsSync(p)) return p } catch { /* ок */ }
+  }
+  return null
+}
+
+function startAiWorker() {
+  try {
+    const devModels = path.join(app.getAppPath(), 'models')
+    const modelsDir = fs.existsSync(path.join(devModels, 'stt'))
+      ? devModels
+      : path.join(app.getPath('userData'), 'ai-models')
+    // Нативный sherpa-onnx возвращает Float32Array через napi external arraybuffer —
+    // Electron запрещает их В ЛЮБЫХ своих процессах (main/renderer/utility/run-as-node).
+    // Поэтому AI-воркер работает на ЧИСТОМ Node:
+    //   packaged — рантайм из resources/runtime-node (кладёт electron-builder/CI);
+    //   dev — системный node из PATH.
+    // Спека §112 соблюдена: пользователю ничего ставить не надо, рантайм в комплекте.
+    const nodeExe = findSystemNode()
+    if (!nodeExe) {
+      aiWorkerFailed = 'Node-рантайм для AI-воркера не найден (ожидался resources/runtime-node или node в PATH)'
+      log(`[AI] ${aiWorkerFailed}`)
+      return
+    }
+    // packaged: воркер и его node_modules — реальные файлы в resources/ai (не asar)
+    const workerScript = app.isPackaged
+      ? path.join(process.resourcesPath, 'ai', 'ai-worker.cjs')
+      : path.join(__dirname, 'ai', 'ai-worker.cjs')
+    aiWorker = childFork(workerScript, [], {
+      execPath: nodeExe,
+      env: { ...process.env, AVC_MODELS_DIR: modelsDir },
+      // stdout/stderr воркера — в pipe: логи нативных моделей не смешиваются с выводом main
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      // structured clone: Int16Array аудио доезжает до воркера как типизированный массив
+      serialization: 'advanced',
+    })
+    aiWorker.stdout && aiWorker.stdout.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
+    aiWorker.stderr && aiWorker.stderr.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
+    aiWorker.on('message', (msg) => {
+      if (msg && msg.event) {
+        const channel = AI_EVENT_CHANNELS[msg.event]
+        if (channel && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(channel, msg.payload)
+        }
+        return
+      }
+      if (msg && msg.id) {
+        const pending = aiWorkerPending.get(msg.id)
+        if (!pending) return
+        aiWorkerPending.delete(msg.id)
+        clearTimeout(pending.timer)
+        if (msg.ok) pending.resolve(msg.result)
+        else pending.reject(new Error(msg.error || 'ошибка AI-воркера'))
+      }
+    })
+    aiWorker.on('exit', () => {
+      aiWorker = null
+      // честно отклоняем зависшие запросы
+      for (const [id, p] of aiWorkerPending) {
+        clearTimeout(p.timer)
+        p.reject(new Error('AI-воркер завершился'))
+        aiWorkerPending.delete(id)
+      }
+    })
+    log('[AI] Node-процесс воркера запущен (изолированный нативный AI, §130)')
+  } catch (e) {
+    aiWorkerFailed = e.message
+    log(`[AI] Не удалось запустить AI-воркер (AI недоступен): ${e.message}`)
+  }
+}
+
+/** IPC локального AI-слоя (наружу — только не-секретные данные) */
+function setupAiIpc() {
+  ipcMain.handle('avc:ai:status', async () => {
+    try {
+      const st = await aiWorkerRequest('status')
+      return { ...st, worker: 'ok' }
+    } catch (e) {
+      return { enabled: false, worker: 'failed', reason: e.message, ready: { stt: false, llm: false, tts: false } }
+    }
+  })
+  ipcMain.handle('avc:ai:hardware', async () => {
+    const hw = await aiWorkerRequest('hardware')
+    try {
+      const info = await app.getGPUInfo('basic')
+      const dev = info && info.gpuDevice && info.gpuDevice[0]
+      if (dev) hw.gpu = { vendor: dev.vendorId, device: dev.deviceId, name: dev.deviceString || null }
+    } catch { /* gpu остаётся null — честно */ }
+    return hw
+  })
+  ipcMain.handle('avc:ai:install', (_e, args) => aiWorkerRequest('install', { ...args, __timeoutMs: 3600000 }))
+  ipcMain.handle('avc:ai:cancel-install', (_e, args) => aiWorkerRequest('cancel-install', args))
+  ipcMain.handle('avc:ai:recover', () => aiWorkerRequest('recover'))
+  ipcMain.handle('avc:ai:set-enabled', (_e, args) => aiWorkerRequest('set-enabled', args))
+  ipcMain.handle('avc:ai:set-profile', (_e, args) => aiWorkerRequest('set-profile', args))
+  ipcMain.handle('avc:ai:llm-route', (_e, args) =>
+    aiWorkerRequest('llm-route', { ...args, __timeoutMs: (args?.timeoutMs || 8000) + 30000 }),
+  )
+  ipcMain.handle('avc:ai:tts-speak', (_e, args) => aiWorkerRequest('tts-speak', { ...args, __timeoutMs: 60000 }))
+  ipcMain.handle('avc:ai:tts-cancel', () => aiWorkerRequest('tts-cancel'))
+  ipcMain.handle('avc:ai:set-voice', (_e, args) => aiWorkerRequest('set-voice', args))
+  ipcMain.handle('avc:ai:initialize', () => aiWorkerRequest('initialize', { __timeoutMs: 600000 }))
+  ipcMain.handle('avc:ai:stt-feed', (_e, args) => {
+    const samples = args?.samples
+    if (!samples) return false
+    return aiWorkerRequest('feed', { samples })
+  })
+  ipcMain.handle('avc:ai:stt-flush', () => aiWorkerRequest('flush'))
+}
+
 /** Минимальная блокировка рекламных доменов в сессии сайта (не мешает входу) */
 function setupAdShield() {
   const ses = session.fromPartition(PARTITION)
@@ -234,6 +415,84 @@ app.whenReady().then(async () => {
     return
   }
 
+  // AI-самопроверка в реальном main-процессе: ЧЕРЕЗ utilityProcess-воркер (как в продакшне)
+  if (AI_SELFTEST) {
+    try {
+      setupAiIpc()
+      startAiWorker()
+      const report = {
+        ranAt: new Date().toISOString(),
+        platform: process.platform,
+        electron: process.versions.electron,
+        workerStarted: !!aiWorker,
+      }
+      if (!aiWorker) throw new Error(aiWorkerFailed || 'воркер не запустился')
+      // ждём готовности сервисов (worker инициализирует их сам, ждём до 120 с)
+      let status = null
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 1000))
+        status = await aiWorkerRequest('status')
+        if (status.ready.stt && status.ready.tts && status.ready.llm) break
+      }
+      report.models = status.models.map((m) => ({ key: m.key, installed: m.installed }))
+      report.services = status.ready
+      // мини-прогон TTS→STT→early (§121, Test A) через воркер
+      if (status.ready.stt && status.ready.tts) {
+        const events = { partials: 0, finalText: '', early: null, partialTexts: [], rawFirst: null }
+        aiWorker.on('message', (msg) => {
+          if (msg && msg.event === 'stt-partial') {
+            events.partials++
+            if (!events.rawFirst) events.rawFirst = JSON.stringify(msg.payload)
+            events.partialTexts.push(msg.payload && msg.payload.text)
+            if (msg.payload && msg.payload.earlyCommand) events.early = msg.payload.earlyCommand
+          }
+          if (msg && msg.event === 'stt-final') events.finalText = (msg.payload && msg.payload.text) || ''
+        })
+        await aiWorkerRequest('tts-speak', { text: 'Пауза.' })
+        // TTS отдаёт файл через событие tts-speak-file; для самопроверки читаем последний кэш-файл фразы
+        const { TTSService } = require('./ai/tts-service.cjs')
+        const tts = new TTSService({ modelsDir: path.join(__dirname, 'models') })
+        const wav = tts.cachePath('Пауза.')
+        const { readWavAsFloat32 } = require('./ai/stt-service.cjs')
+        const info = readWavAsFloat32(wav)
+        const n = Math.floor(info.samples.length * 16000 / info.sampleRate)
+        const s16 = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          const t = i * (info.sampleRate / 16000)
+          const i0 = Math.floor(t)
+          const a = info.samples[Math.min(i0, info.samples.length - 1)]
+          const b = info.samples[Math.min(i0 + 1, info.samples.length - 1)]
+          s16[i] = a + (b - a) * (t - i0)
+        }
+        const headPad = new Int16Array(16000 * 0.4)
+        const tailPad = new Int16Array(16000 * 0.8)
+        const int16 = new Int16Array(headPad.length + s16.length + tailPad.length)
+        for (let i = 0; i < s16.length; i++) int16[headPad.length + i] = Math.round(s16[i] * 32768)
+        const CH = 512
+        for (let off = 0; off + CH <= int16.length; off += CH) {
+          await aiWorkerRequest('feed', { samples: int16.subarray(off, off + CH) })
+          // реальный темп микрофона: окно 512 сэмплов @16 кГц = 32 мс —
+          // иначе частичные результаты не успевают появляться (§11/§12)
+          await new Promise((r) => setTimeout(r, 30))
+        }
+        await aiWorkerRequest('flush')
+        await new Promise((r) => setTimeout(r, 800))
+        status = await aiWorkerRequest('status')
+        report.loopTest = { partials: events.partials, partialTexts: events.partialTexts, rawFirst: events.rawFirst, finalText: events.finalText, earlyCommand: events.early, sttUtterances: status.stt.utterances, sttLastFinalMs: status.stt.lastFinalMs, sttError: status.stt.error }
+      }
+      process.stdout.write(`[AI-SELFTEST] report: ${path.join(__dirname, 'tools', 'ai-main-selftest-report.json')}\n`)
+      try {
+        fs.writeFileSync(path.join(__dirname, 'tools', 'ai-main-selftest-report.json'), JSON.stringify(report, null, 2))
+      } catch { /* ок */ }
+      const ok = report.workerStarted && status.ready.stt && status.ready.tts && status.ready.llm && report.loopTest && report.loopTest.earlyCommand === 'Pause'
+      app.exit(ok ? 0 : 2)
+    } catch (e) {
+      process.stdout.write(`${JSON.stringify({ error: e.message })}\n`)
+      app.exit(3)
+    }
+    return
+  }
+
   setupAdShield()
 
   authService = new AuthenticationService({
@@ -255,6 +514,11 @@ app.whenReady().then(async () => {
 
   setupIpc(authService)
 
+  // Локальный AI-слой: utilityProcess запускается сразу, IPC ставится до окна (§49):
+  // модели могут отсутствовать — детерминированный голос остаётся рабочим (§0/§129)
+  setupAiIpc()
+  startAiWorker()
+
   const url = await startNextServer()
   await createMainWindow(url)
   log(`[Main] UI ready at ${url}`)
@@ -273,6 +537,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (authService) authService.shutdown()
+  if (aiWorker) {
+    try { aiWorker.kill() } catch { /* ок */ }
+    aiWorker = null
+  }
   if (nextProcess && !nextProcess.killed) nextProcess.kill()
 })
 

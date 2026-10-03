@@ -716,3 +716,27 @@ Stage Summary:
 - ПРОГРЕСС СЕРИЙ: сайт не отдаёт его наружу (проверено) → приложение ведёт собственную запись (SQLite, изоляция по аккаунту): что смотрели, на какой серии, озвучка; «Продолжить просмотр» в панели, подсказка на странице тайтла, голосовые «что я смотрю»/«на какой серии я»/«продолжить просмотр»
 - ЧЕСТНОЕ ОГРАНИЧЕНИЕ: локальный прогресс = трекинг ПРИЛОЖЕНИЯ (какие серии включались в нём); внутриаккаунтный прогресс сайта (секунды в плеере) остаётся на сайте и продолжается самим сайтом через iframe-плеер
 - Новый эндпоинт снят с живого сайта и задокументирован в LIBRARY_STATUS_MATRIX.md («ЧТЕНИЕ библиотеки — ПОДТВЕРЖДЕНО»)
+
+---
+Task ID: ai-spec-1
+Agent: Z.ai Code (main)
+Task: Спека «Ultra-Low-Latency Local AI Voice System» (134 раздела: STT+VAD+парсер+LLM+TTS, модель-менеджер, AI Setup, валидация URL, регресс-тесты после КАЖДОЙ фичи)
+
+Work Log:
+- ИНВЕНТАРИЗАЦИЯ (§134): маппинг существующих систем — детерминированный парсер/исполнитель рендерера не тронуты, AI добавлен модульным слоем (§0/§129)
+- ИССЛЕДОВАНИЕ URL живьём (§65): T-One PASS (128,468,156 B, ranges); официальный Qwen3-0.6B-GGUF УДАЛИЛ Q4_K_M (остался Q8_0) → bartowski-зеркало PASS (484,220,320 B); Silero v5_5_ru.pt доступен (145 MB), НО это PyTorch — в Node/Electron неисполним без Python (запрещено §112) → официальные русские голоса VITS из того же sherpa-onnx (irina/ruslan/dmitri, k2-fsa tts-models) — причина честно в манифесте
+- [A] ai/models-manifest.json (реальные размеры+SHA-256 сняты с загрузок инструментом tools/ai-sha-update.cjs) + ai/model-manager.cjs (temp .part → Range resume → size → SHA-256 → atomic → tar.bz2 → структура → маркер; типизированные ошибки 404/5xx/TLS/TIMEOUT/SIZE/CHECKSUM/DISK_FULL/EXTRACT) + scripts/validate-ai-assets.mjs (HEAD+проба 1 МБ, --full) → ТЕСТ: 6/6 URL PASS; checksum-верификация PASS; коррапт-тест PASS (§108)
+- [C] STT: T-One streaming (ключ toneCtc установлен нативным пробами) + Silero VAD (плоский конфиг, isDetected); ЗАДЕРЖКА VAD ~0.4 c компенсирована кольцевым буфером 1.2 c; endpoint 250 мс; дедуп final+кулдаун → ТЕСТ 6/6: реальная русская речь «сейчас к тебе приедет бригада давай», стриминг 3 partial+1 final, RTF 0.075, тишина-регресс, дедуп
+- [D] LLM: node-llama-cpp v3 (ESM-only → динамический import); LlamaJsonSchemaGrammar 3.22.1 СЛОМАН ($ref) → явная GBNF-грамматика (белый список интентов/полей §37); Qwen3 /no_think (§84); персистентная сессия; few-shot промпт; таймауты/отмена → ТЕСТ 7/7: 10/11 интентов, 11/11 JSON, timeout-fallback, cancel-priority, регресс STT
+- [B] TTS: VITS ru (sherpa OfflineTts) + дисковый кэш SHA1 + prewarm + отмена; ЗАМКНУТЫЙ КОНТУР TTS→STT: «Следующая серия.» → FIR-антиалиасинг 22050→8000 → STT «следующая серия» → ТЕСТ 5/5 (вкл. регресс LLM)
+- [E] VoicePipeline: EarlyCommandDetector (§12 safe / §13 unsafe-блок), дедуп §14, Status/Diagnostics → ТЕСТ 7/7 (TTS «Пауза.» → STT → early Pause → финал помечен)
+- [F] Интеграция: КРИТИЧЕСКОЕ ОТКРЫТИЕ — Electron запрещает napi external arraybuffers ВО ВСЕХ своих процессах (main/renderer/utilityProcess/run-as-node) — sherpa TTS падает «External buffers are not allowed» → AI-воркер на ЧИСТОМ Node (packaged: бандл resources/runtime-node/node.exe от CI; dev: PATH), child fork + serialization advanced; preload.avcElectron.ai (только не-секретное); electron . --ai-selftest → ТЕСТ exit 0: STT+LLM+TTS ready, цикл через IPC с earlyCommand Pause
+- [G] Рендерер: движок 'local' в use-voice (AudioContext 16 кГц → ScriptProcessor → Int16 → feedAudio; partial→interim+early-exec; final→тот же executeText), локальный LLM ПЕРВЫМ в llmInterpret (§30), локальный TTS в speak(), executeEarlyCommand (единый executor §41), AiSetupDialog (§50-53, §59), Settings→AI (§96-97: профиль/голос/диагностика/перезапуск) → БРАУЗЕР-ВЕРИФИКАЦИЯ: в вебе мастер честно скрыт, AI-вкладка честно «EXE-only», настройки roundtrip новых полей 200, «открой наруто» регресс OK, mobile/desktop скриншоты OK, lint 0
+- [H] Упаковка: scripts/assemble-ai-pack.mjs (ai+нативные пакеты реальными файлами вне asar, 130.9 МБ) + electron-builder extraResources + CI-workflow (+validate-ai-assets ДО билда §117, +runtime-node, +ai-pack) — ПО-ПРЕЖНЕМУ в docs/ci/ (пуш заблокирован токеном без scope workflow); отчёты docs/ai/: AI_ARCHITECTURE, AI_TEST_REPORT (реальные прогоны), AI_PERFORMANCE_REPORT (числа песочницы честно помечены), INSTALLER_AI_SETUP, FINAL_BUILD_REPORT (BLOCKED честно), AI_IMPLEMENTATION_NOTES
+- ФИНАЛЬНЫЙ СОВОКУПНЫЙ РЕГРЕСС: model 7/7 + STT 6/6 + TTS 5/5 + pipeline 7/7 + electron --ai-selftest exit 0 + lint 0 + браузер OK
+
+Stage Summary:
+- РЕАЛИЗОВАН полный локальный AI-слой по спеке: STT (T-One+VAD, стриминг, partials, early-команды), LLM (Qwen3-0.6B, GBNF-JSON, офлайн-роутер ПЕРВЫМ), TTS (VITS ru, кэш), модель-менеджер (SHA-256/resume/recover), AI Setup wizard, Настройки→AI с диагностикой, изоляция воркера
+- Каждая фича проверена ОТДЕЛЬНО и в СБОРКЕ с предыдущими (инкрементально по требованию пользователя); все числа — из реальных замеров; BLOCKED/NOT_TESTED проставлены честно (живой микрофон Windows, EXE-сборка)
+- Архитектурные решения зафиксированы: ключ toneCtc (sherpa 1.13.8), GBNF вместо сломанного JSONSchema-конвертера, кольцевой буфер против задержки VAD, отдельный чистый Node для external arraybuffers
+- Push в GitHub по-прежнему приостановлен (требование пользователя); CI-workflow обновлён в docs/ci/build-exe.yml и ждёт команды «можно в GitHub»

@@ -31,6 +31,14 @@
     {
       "from": "../node_modules/.prisma",
       "to": "next-app/node_modules/.prisma"
+    },
+    {
+      "from": "ai-pack",
+      "to": ".",
+      "filter": [
+        "ai/**",
+        "runtime-node/**"
+      ]
     }
   ],
   "win": {

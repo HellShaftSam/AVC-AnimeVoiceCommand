@@ -55,6 +55,60 @@ async function jsonFetch(url: string, init?: RequestInit): Promise<Response> {
 // --- IPC-мост Electron (создаётся preload'ом оболочки) -----------------------
 
 /** Контракт preload-моста EXE-сборки. Все методы возвращают НЕ-секретные данные. */
+/** AI-статус (не-секретный снимок из AI-воркера) */
+export interface AiComponentStatus {
+  key: 'stt' | 'vad' | 'tts' | 'llm'
+  id: string
+  name: string
+  required: boolean
+  sizeBytes: number | null
+  sizeHuman: string
+  installed: boolean
+}
+
+export interface AiStatusSnapshot {
+  enabled: boolean
+  profile: string
+  worker?: 'ok' | 'failed'
+  reason?: string
+  models: AiComponentStatus[]
+  voices: Array<{ id: string; name: string; default: boolean }>
+  ready: { stt: boolean; llm: boolean; tts: boolean }
+  stt: { state: string; profile: string; error: string | null; lastFinalMs: number | null; utterances: number }
+  llm: { state: string; error: string | null; lastRouteMs: number | null; routes: number }
+  tts: { state: string; error: string | null; voice: string; lastSynthMs: number | null; cacheHits: number }
+}
+
+export interface AiHardwareInfo {
+  cpu: string
+  cpuCount: number
+  ramBytes: number
+  ramHuman: string
+  freeDisk: number | null
+  platform: string
+  gpu: { vendor?: string; device?: string; name: string | null } | null
+}
+
+export interface AiModelProgress {
+  key: string
+  id: string
+  phase: string
+  percent?: number
+  receivedBytes?: number
+  totalBytes?: number
+  error?: string
+  kind?: string
+}
+
+/** Ответ локального LLM-роутера — тот же контракт, что у /api/voice/interpret */
+export interface AiLlmRouteResult {
+  commands: Array<{ type: string; params: Record<string, string | number | boolean>; confidence: number }>
+  needsClarification: boolean
+  clarifyQuestion: string
+  source: string
+  ms: number
+}
+
 export interface AvcElectronBridge {
   platform: 'electron'
   getAccountState(refresh?: boolean): Promise<YummyAccountSnapshot>
@@ -69,6 +123,28 @@ export interface AvcElectronBridge {
   onAccountChanged(cb: (snap: YummyAccountSnapshot) => void): () => void
   /** Статусы входа из main-процесса (капча/ошибка/успех) для toast */
   onAuthStatus?(cb: (msg: string) => void): () => void
+  /** Локальный AI-слой (спецификация §4–§134; отсутствует в старых сборках) */
+  ai?: {
+    available: boolean
+    getStatus(): Promise<AiStatusSnapshot>
+    getHardware(): Promise<AiHardwareInfo>
+    install(keys: string[], voiceId?: string): Promise<Array<{ key: string; ok: boolean; skipped?: boolean; kind?: string; message?: string }>>
+    cancelInstall(key: string): Promise<void>
+    recover(): Promise<{ pendingParts: string[]; message: string }>
+    setEnabled(enabled: boolean): Promise<boolean>
+    setProfile(profile: string): Promise<string>
+    llmRoute(text: string, context: unknown, timeoutMs?: number): Promise<AiLlmRouteResult | null>
+    ttsSpeak(text: string): Promise<{ file: string; dataUrl: string; cached: boolean; ms: number; durationMs: number } | null>
+    ttsCancel(): Promise<void>
+    setVoice(voice: string): Promise<string>
+    initialize(): Promise<Record<string, string>>
+    feedAudio(samples: Int16Array): Promise<boolean>
+    flushStt(): Promise<void>
+    onSttPartial(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommand?: string | null }) => void): () => void
+    onSttFinal(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommandType?: string | null }) => void): () => void
+    onModelProgress(cb: (p: AiModelProgress) => void): () => void
+    onServicesStatus(cb: (p: Record<string, string>) => void): () => void
+  }
 }
 
 /** Есть ли мост EXE-сборки (в обычном браузере отсутствует) */

@@ -16,9 +16,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Loader2, Mic, RefreshCw, X } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
-import { avcApi } from '@/lib/avc/api'
+import { avcApi, getElectronBridge, type AiHardwareInfo, type AiStatusSnapshot } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
-import type { AppSettings, SttEngine } from '@/lib/avc/types'
+import type { AiProfile, AppSettings, SttEngine } from '@/lib/avc/types'
 import {
   buildAudioConstraints,
   bufferToBase64,
@@ -127,6 +127,9 @@ export function SettingsDialog() {
             </TabsTrigger>
             <TabsTrigger value="voices" className="data-[state=active]:text-amber-300">
               Озвучки
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="data-[state=active]:text-amber-300">
+              AI
             </TabsTrigger>
           </TabsList>
 
@@ -343,6 +346,11 @@ export function SettingsDialog() {
             <TabsContent value="voices" className="mt-0">
               <VoiceAliasesSettings />
             </TabsContent>
+
+            {/* ------------------------------------------------ Локальный AI */}
+            <TabsContent value="ai" className="mt-0">
+              <AiSettingsPanel change={change} />
+            </TabsContent>
           </div>
         </Tabs>
       </DialogContent>
@@ -483,6 +491,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
               <SelectItem value="auto">Авто (браузер → сервер)</SelectItem>
               <SelectItem value="browser">Браузерный (Chrome/Edge)</SelectItem>
               <SelectItem value="server">Серверный (Whisper)</SelectItem>
+              <SelectItem value="local">Локальный (T-One, офлайн)</SelectItem>
             </SelectContent>
           </Select>
         </SettingRow>
@@ -819,6 +828,203 @@ function VoiceAliasesSettings() {
           </ul>
         </CollapsibleContent>
       </Collapsible>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Вкладка «AI» — локальный AI-слой (спецификация §96–§98)
+// ---------------------------------------------------------------------------
+
+function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) => void }) {
+  const settings = useAvcStore((s) => s.settings)
+  const [status, setStatus] = useState<AiStatusSnapshot | null>(null)
+  const [hardware, setHardware] = useState<AiHardwareInfo | null>(null)
+  const [busy, setBusy] = useState(false)
+  const isExe = typeof window !== 'undefined' && !!getElectronBridge()?.ai?.available
+
+  const refresh = useCallback(async () => {
+    const ai = getElectronBridge()?.ai
+    if (!ai?.available) return
+    try {
+      setStatus(await ai.getStatus())
+      setHardware(await ai.getHardware())
+    } catch {
+      setStatus(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isExe) return
+    void refresh()
+  }, [isExe, refresh])
+
+  if (!isExe) {
+    return (
+      <div className="space-y-3">
+        <section>
+          <SectionTitle>Локальный AI</SectionTitle>
+          <p className="py-2 text-sm text-zinc-400">
+            Локальный AI (офлайн-распознавание T-One, локальный роутер Qwen3 и голосовые ответы)
+            доступен в приложении AVC-Anime (EXE). В браузере используются браузерное/серверное
+            распознавание и облачный fallback.
+          </p>
+        </section>
+      </div>
+    )
+  }
+
+  const readyBadge = (ready: boolean, state: string, error: string | null) => {
+    if (ready) return <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-400">READY</span>
+    if (error) return <span className="rounded bg-rose-950 px-1.5 py-0.5 text-[11px] text-rose-400">ОШИБКА</span>
+    return <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">{state || 'OFF'}</span>
+  }
+
+  return (
+    <div className="space-y-3">
+      <section>
+        <SectionTitle>Локальный AI</SectionTitle>
+        <SettingRow label="Профиль производительности" hint="Максимальная отзывчивость — минимум задержек (§19)">
+          <Select
+            value={settings.aiProfile}
+            onValueChange={(v: string) => {
+              change({ aiProfile: v as AiProfile })
+              void getElectronBridge()?.ai?.setProfile(v)
+            }}
+          >
+            <SelectTrigger aria-label="Профиль AI" className="h-9 w-56 border-zinc-800 bg-zinc-900 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-zinc-800 bg-zinc-900">
+              <SelectItem value="max_responsiveness">Максимальная отзывчивость</SelectItem>
+              <SelectItem value="balanced">Сбалансированный</SelectItem>
+              <SelectItem value="quality">Качество</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow label="Локальная озвучка ответов" hint="Офлайн TTS вместо облачного">
+          <Switch
+            checked={settings.aiLocalTts}
+            onCheckedChange={(v: boolean) => change({ aiLocalTts: v })}
+            aria-label="Локальная озвучка ответов"
+          />
+        </SettingRow>
+        <SettingRow label="Голос" hint="Русский голос офлайн-синтеза">
+          <Select
+            value={settings.aiVoice}
+            onValueChange={(v: string) => {
+              change({ aiVoice: v })
+              void getElectronBridge()?.ai?.setVoice(v)
+            }}
+          >
+            <SelectTrigger aria-label="Голос TTS" className="h-9 w-52 border-zinc-800 bg-zinc-900 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-zinc-800 bg-zinc-900">
+              {(status?.voices ?? [{ id: 'irina', name: 'Ирина (женский)', default: true }]).map((v) => (
+                <SelectItem key={v.id} value={v.id}>
+                  {v.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </section>
+
+      <Separator className="bg-zinc-800" />
+
+      <section>
+        <SectionTitle>Модели и диагностика</SectionTitle>
+        {hardware && (
+          <div className="mb-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-2 text-xs text-zinc-400">
+            {hardware.cpu} · RAM {hardware.ramHuman}
+            {hardware.gpu?.name ? ` · GPU ${hardware.gpu.name}` : ''}
+            {hardware.freeDisk != null ? ` · диск ${(hardware.freeDisk / 1024 / 1024 / 1024).toFixed(1)} ГБ` : ''}
+          </div>
+        )}
+        {status ? (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-1.5">
+              {status.models.map((m) => (
+                <div key={m.key} className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
+                  <span className="truncate text-zinc-300">{m.name}</span>
+                  <span className={m.installed ? 'text-emerald-400' : 'text-amber-400'}>
+                    {m.installed ? 'Установлено' : 'Не установлено'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
+                <span className="text-zinc-300">STT · T-One (распознавание)</span>
+                <span className="flex items-center gap-2">
+                  {status.stt.lastFinalMs != null && <span className="text-zinc-500">{status.stt.lastFinalMs} мс</span>}
+                  {readyBadge(status.ready.stt, status.stt.state, status.stt.error)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
+                <span className="text-zinc-300">LLM · Qwen3 (семантика)</span>
+                <span className="flex items-center gap-2">
+                  {status.llm.lastRouteMs != null && <span className="text-zinc-500">{status.llm.lastRouteMs} мс</span>}
+                  {readyBadge(status.ready.llm, status.llm.state, status.llm.error)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-zinc-800 px-2.5 py-1.5 text-xs">
+                <span className="text-zinc-300">TTS · офлайн-синтез</span>
+                <span className="flex items-center gap-2">
+                  {status.tts.lastSynthMs != null && <span className="text-zinc-500">{status.tts.lastSynthMs} мс</span>}
+                  {readyBadge(status.ready.tts, status.tts.state, status.tts.error)}
+                </span>
+              </div>
+            </div>
+            {(status.stt.error || status.llm.error || status.tts.error) && (
+              <p className="text-[11px] leading-relaxed text-rose-400">
+                {[status.stt.error, status.llm.error, status.tts.error].filter(Boolean).join(' ')}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-3 text-xs text-zinc-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Загружаю статус AI…
+          </div>
+        )}
+
+        <div className="mt-3 flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={busy}>
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden /> Обновить
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await getElectronBridge()?.ai?.initialize()
+                await refresh()
+                toast({ description: 'AI-сервисы инициализированы' })
+              } catch {
+                toast({ variant: 'destructive', description: 'Не удалось инициализировать AI-сервисы' })
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            Перезапустить сервисы
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              localStorage.removeItem('avc-ai-setup-dismissed')
+              toast({ description: 'Мастер установки откроется при следующем запуске, если модели не установлены' })
+            }}
+          >
+            Мастер установки
+          </Button>
+        </div>
+      </section>
     </div>
   )
 }

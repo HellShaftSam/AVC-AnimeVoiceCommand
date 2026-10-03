@@ -1,0 +1,43 @@
+{
+  "ranAt": "2026-10-03T19:00:40.361Z",
+  "tests": [
+    {
+      "name": "initialize",
+      "status": "PASS",
+      "detail": "state=ready, modelLoadMs=809, warmupMs=186, err=—"
+    },
+    {
+      "name": "synthesis",
+      "status": "PASS",
+      "detail": "6/6 фраз синтезированы в WAV"
+    },
+    {
+      "name": "cache-hit",
+      "status": "PASS",
+      "detail": "повторный синтез «Следующая серия.» → из кэша (0 мс)"
+    },
+    {
+      "name": "tts-stt-loop",
+      "status": "PASS",
+      "detail": "TTS: «Следующая серия.» (22050 Гц → 8000 Гц, FIR+pad) → STT: «следующая серия»"
+    },
+    {
+      "name": "regression-llm-with-tts",
+      "status": "PASS",
+      "detail": "после TTS: LLM ready, «стоп» → Pause (4406 мс)"
+    }
+  ],
+  "metrics": {
+    "tts": {
+      "modelLoadMs": 809,
+      "warmupMs": 186,
+      "lastFirstAudioMs": null,
+      "lastSynthMs": 120,
+      "synthCount": 2,
+      "cacheHits": 7,
+      "state": "ready",
+      "voice": "irina",
+      "error": null
+    }
+  }
+}

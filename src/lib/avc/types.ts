@@ -383,7 +383,9 @@ export interface PipelineStep {
 }
 
 export type VoiceMode = 'push-to-talk' | 'always-listening'
-export type SttEngine = 'auto' | 'browser' | 'server'
+export type SttEngine = 'auto' | 'browser' | 'server' | 'local'
+/** Профиль производительности AI-слоя (спецификация §19) */
+export type AiProfile = 'max_responsiveness' | 'balanced' | 'quality'
 
 export interface AppSettings {
   baseUrl: string
@@ -415,6 +417,13 @@ export interface AppSettings {
   maxUtteranceMs: number
   /** Автопропуск опенинга/эндинга по skips из /videos */
   autoSkipIntros: boolean
+  // --- Локальный AI-слой (спецификация §4–§134; работает только в EXE) --------
+  /** Профиль производительности STT/LLM/TTS (§19, §96) */
+  aiProfile: AiProfile
+  /** Локальный TTS для ответов приложения (§22–§29); false — облачный/браузерный */
+  aiLocalTts: boolean
+  /** Голос локального TTS (id из манифеста) */
+  aiVoice: string
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -440,6 +449,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   micDeviceId: '',
   maxUtteranceMs: 12000,
   autoSkipIntros: false,
+  aiProfile: 'max_responsiveness',
+  aiLocalTts: true,
+  aiVoice: 'irina',
 }
 
 // ---------------------------------------------------------------------------

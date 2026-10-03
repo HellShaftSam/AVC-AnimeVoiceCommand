@@ -66,3 +66,10 @@ agent-ctx/
 
 # Сессия YummyAnime (cookie сайта) — НИКОГДА не в git
 db/yummy-session.json
+
+# Локальный AI-слой: модели и рантаймы не в git (скачиваются/собираются отдельно)
+electron-app/models/
+electron-app/runtime-node/
+electron-app/ai-pack/
+node.exe
+node.zip

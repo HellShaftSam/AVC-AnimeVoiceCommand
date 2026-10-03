@@ -64,6 +64,29 @@ jobs:
         working-directory: electron-app
         run: npm install --no-audit --no-fund
 
+      # --- Локальный AI-слой: проверка внешних ассетов ДО сборки (§61–§64, §117) ---
+
+      - name: Validate AI asset URLs (STT/TTS/LLM)
+        run: node scripts/validate-ai-assets.mjs
+
+      # --- Чистый Node-рантайм для изолированного AI-воркера (§112, §130) ---
+
+      - name: Download bundled Node runtime
+        shell: pwsh
+        run: |
+          $v = '22.11.0'
+          $url = "https://nodejs.org/dist/v$v/node-v$v-win-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile node.zip
+          Expand-Archive -Path node.zip -DestinationPath node-tmp
+          New-Item -ItemType Directory -Force -Path electron-app/runtime-node | Out-Null
+          Copy-Item "node-tmp/node-v$v-win-x64/node.exe" electron-app/runtime-node/node.exe
+          node.exe --version 2>$null; electron-app/runtime-node/node.exe --version
+
+      # --- Сборка AI-пака (воркер + нативные модули реальными файлами, §113) ---
+
+      - name: Assemble AI pack
+        run: node scripts/assemble-ai-pack.mjs
+
       - name: Build portable EXE
         working-directory: electron-app
         env:
