@@ -837,3 +837,16 @@ Work Log:
 - Массовый перевод компонентов (21 файл) с упорядоченными правилами: zinc-поверхности → semantic-токены (bg-background/card/secondary/accent), zinc-тексты → foreground/muted-foreground, amber-акценты → sky/cyan, свечения rgba→cyan, primary-кнопки → bg-primary/text-primary-foreground; rose/emerald сохранены как error/success (совпадают с ТЗ)
 - diagnostics-dialog: кнопка «Перезапустить голосовой сервис (AI)» (ai.initialize + статус-отчёт) — фаза 6.7
 - ВЕРИФИКАЦИЯ: lint 0; скриншоты navy-home-1920 / navy-settings / navy-anime — тёмная navy, blue/cyan-акценты, контраст читаемый; layout-тесты адаптивности повторно зелёные
+
+---
+Task ID: postrelease-fix-final
+Agent: Z.ai Code (main)
+Task: Фазы 9-11 — регресс, сборка EXE 1.1.0, релиз, финальная верификация
+
+Work Log:
+- Регресс после всех правок: pipeline-selftest 7/7; парсер 28/28; браузер: «наруто»→вкладка, «следующая серия» без падений, «открой топ сто»→ТОП-100 (не поиск), консоль чистая
+- Production-сборка: теневая копия пересинхронизирована, next build --webpack OK (114MB standalone), version 1.1.0, electron-builder portable EXIT=0, afterpack (иконка+версия) применён
+- Артефакт: AVC-Anime-Portable-1.1.0.exe, 384993748 байт, MZ+Nullsoft, sha256 ff9447a4...00f1e; содержимое (asar/prisma-win/ai-pack/node.exe) соответствует 1.0.0 + все фиксы
+- releases/VERSION.txt + README обновлены; коммит efcb36a запушен
+- РЕЛИЗ v1.1.0 создан (201), EXE залит (201, ~32с); верификация анонимным скачиванием: sha256 совпал байт-в-байт; releases/latest = v1.1.0
+- CI на windows-latest: сборка коммита 274cfeb (тема+все фиксы) — SUCCESS на реальном Windows (rcedit/NSIS/сборка Next/Electron — весь пайплайн подтверждён)
