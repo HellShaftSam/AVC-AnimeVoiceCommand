@@ -1,5 +1,7 @@
 generator client {
   provider = "prisma-client-js"
+  // native — для dev-сервера (linux), windows — Query Engine внутри portable EXE
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {

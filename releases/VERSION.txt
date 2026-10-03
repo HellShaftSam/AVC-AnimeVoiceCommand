@@ -1,0 +1,20 @@
+AVC-Anime — манифест последней собранной версии
+================================================
+
+Файл:        AVC-Anime-Portable-1.0.0.exe
+Версия:      1.0.0
+Размер:      384 987 386 байт (~385 МБ)
+SHA-256:     5cbc75f5b81ef1fc683a74ccb8235e8ddce6595bd76c3692397cb886d55a9d91
+Собран:      2026-10-03 (локальная сборка, Next.js 16 + Electron 33.2.0)
+Коммит:      см. GitHub Release v1.0.0 (номер коммита указан в notes релиза)
+Платформа:   Windows x64 (portable, установка не требуется)
+
+Состав сборки (проверено при упаковке):
+- Next.js UI: standalone-сервер (resources/next-app), собственный порт 3010+
+- Prisma/SQLite: query engine Windows (query_engine-windows.dll.node)
+- Постоянная сессия YummyAnime (partition persist:yummyanime)
+- Локальный AI-слой: STT/LLM/TTS (sherpa-onnx-win-x64, node-llama-cpp 3.22.1 win-x64),
+  изолированный воркер на чистом Node 22.11.0 (resources/runtime-node/node.exe)
+- Модели STT/TTS/LLM скачиваются при первом включении AI в настройках приложения
+
+Где скачать: https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest
