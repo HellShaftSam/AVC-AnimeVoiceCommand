@@ -762,3 +762,23 @@ Stage Summary:
 - EXE v1.0.0 собран и верифицирован локально (385MB, sha256 5cbc75f5b81ef1fc683a74ccb8235e8ddce6595bd76c3692397cb886d55a9d91)
 - releases/ закоммичена; CI-workflow готов к активации; пуш+релиз автоматизированы через watcher после авторизации device-flow
 - Блокер: код 388B-B47C живёт 15 мин; если истёк — перезапустить device-poll.sh и выдать новый код
+
+---
+Task ID: exe-release-2
+Agent: Z.ai Code (main)
+Task: Пуш папки releases/, GitHub Release v1.0.0 с EXE, верификация на remote
+
+Work Log:
+- Device Flow №2 (код 5F9B-6A25) успешен: token с scopes repo+workflow. Причина предыдущих сбоев: песочница убивает фоновые процессы (nohup/setsid гаснут между вызовами) → финализация выполнена ФОНОВЫМ... передним планом одним идемпотентным скриптом /home/z/.gh-avc/finalize.sh
+- Пуш отклонён (non-fast-forward): remote ушёл вперёд на 1 коммит ci-подготовки из прошлой сессии. merge-base 9c816b0; merge origin/main, конфликты (docs/ci/build-exe.yml, electron-builder.json, header-bar.tsx) решены в пользу ЛОКАЛЬНОГО состояния (полный CI-pipeline c AI-шагами, умная кнопка downloadExe); force-push не применялся
+- Пуш OK: 577b859..51c8885 (releases/ + .github/workflows/build-exe.yml + prisma binaryTargets + afterpack.cjs + merge)
+- РЕЛИЗ СОЗДАН: https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/tag/v1.0.0, asset AVC-Anime-Portable-1.0.0.exe 384987386 байт, state=uploaded, mark latest=true; заливка 385MB заняла 32с
+- ВЕРИФИКАЦИЯ ИНТЕГРИТЕТА: EXE скачан с Release АНОНИМНО → SHA-256 5cbc75f5...a9d91 = локальной сборке байт-в-байт
+- releases/ на remote подтверждена API: README.md, VERSION.txt, download-exe.ps1
+- CI: "Build Windows EXE" запущен автоматически на 51c8885 (in_progress) — по завершении опубликует v1.0.1 с windows-runner (сквозное доказательство пайплайна)
+- lint после merge: чисто
+
+Stage Summary:
+- Релиз v1.0.0 опубликован и проверен байт-в-байт; папка releases/ и CI-workflow активированы на remote; токен сохранён в credential store (~/.git-credentials, 600) — git pull/push работают напрямую
+- Следующие релизы: автоматически CI (v1.0.N на каждый пуш main) или руками npx electron-builder
+- Кнопка «Скачать EXE» в приложении теперь указывает на РЕАЛЬНЫЙ релиз (v1.0.0 уже доступен, /releases/latest стабилен)
