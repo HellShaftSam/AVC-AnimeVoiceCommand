@@ -72,8 +72,8 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-      <div className="flex min-w-0 items-center gap-3">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="flex shrink-0 flex-col items-center gap-1">
           <button
             {...micHandlers}
@@ -108,7 +108,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             />
           </div>
         </div>
-        <div className="min-w-0 hidden sm:block">
+        <div className="hidden min-w-0 flex-1 sm:block">
           <div
             className={cn(
               'truncate text-sm font-medium',
@@ -167,7 +167,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
         </SelectContent>
       </Select>
 
-      <form onSubmit={submitTest} className="flex min-w-0 flex-1 gap-1.5">
+      <form onSubmit={submitTest} className="flex min-w-[220px] flex-[2] gap-1.5">
         <Input
           value={testText}
           onChange={(e) => setTestText(e.target.value)}
