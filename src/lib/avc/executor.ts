@@ -654,9 +654,9 @@ export function cancelVoiceMatch(): void {
 /**
  * Единая точка РЕАЛЬНЫХ действий аккаунта YummyAnime (спецификация I §9):
  *   - сессия должна быть подтверждена (иначе — честная просьба войти + диалог);
- *   - действие выполняется ВНУТРИ постоянной сессии сайта (EXE, main-процесс);
+ *   - действие выполняется ВНУТРИ сессии сайта: EXE — main-процесс Electron,
+ *     web — серверная сессия приложения (POST /api/yummy/action);
  *   - результат содержит верификацию ('pass' | 'unconfirmed' | 'mismatch').
- * В веб-режиме моста нет — честное сообщение без выдумок (fallback — сайт).
  */
 async function runAccountAction(
   req: Omit<YummyAnimeActionRequest, 'slug'>,

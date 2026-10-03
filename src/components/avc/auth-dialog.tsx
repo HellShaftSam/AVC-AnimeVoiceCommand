@@ -1,20 +1,20 @@
 'use client'
 /**
- * AuthDialog — «Вход через YummyAnime» (спецификация, секция 4).
+ * AuthDialog — «Вход через YummyAnime».
  *
- * Пароль НИКОГДА не вводится и не хранится в приложении: вход выполняется
- * ТОЛЬКО на сайте, в его собственном окне (капча/2FA — тоже на сайте):
- *   - EXE: openLoginWindow() открывает окно сайта через мост; сессия живёт
- *     в постоянном браузерном профиле оболочки (partition persist:yummyanime)
- *     и не покидает main-процесс. Резолв промиса — после закрытия окна.
- *   - Web: постоянной сессии нет — честно сообщаем о недоступности и
- *     предлагаем открыть сайт в обычной вкладке (без обещаний синхронизации).
+ * ДВА режима входа на РЕАЛЬНЫЙ сайт:
+ *   - EXE: openLoginWindow() открывает окно сайта через мост; пароль вводится
+ *     только на сайте, сессия живёт в постоянном профиле оболочки
+ *     (partition persist:yummyanime) и не покидает main-процесс.
+ *   - Web (превью в браузере): форма «логин + пароль» — сервер приложения
+ *     отправляет их напрямую на сервер сайта (POST /api/profile/login),
+ *     получает cookie-сессию, проверяет её и хранит ТОЛЬКО на сервере
+ *     (db/yummy-session.json, 0600, вне git). Пароль нигде не хранится.
  *
- * Cookie-мост (ручная вставка cookie) УДАЛЁН — запрещён спекой (секции 15/16):
- * приложение не принимает, не показывает и не передаёт cookie/токены.
+ * Cookie-мост (ручная вставка cookie) остаётся запрещён — спека, секции 15/16.
  *
  * ВАЖНО (проверено живым сайтом): отдельной страницы /login НЕТ (404) —
- * форма «Вход» встроена в ГЛАВНУЮ страницу сайта, поэтому кнопка открывает её.
+ * форма «Вход» встроена в ГЛАВНУЮ страницу сайта.
  */
 import { useEffect, useState } from 'react'
 import {
@@ -37,6 +37,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 export function AuthDialog() {
   const open = useAvcStore((s) => s.authOpen)
@@ -48,6 +50,12 @@ export function AuthDialog() {
   const [loginBusy, setLoginBusy] = useState(false)
   const [verifyBusy, setVerifyBusy] = useState(false)
   const [webCheckBusy, setWebCheckBusy] = useState(false)
+
+  // Форма входа веб-режима (пароль живёт только в этом состоянии компонента)
+  const [webLogin, setWebLogin] = useState('')
+  const [webPassword, setWebPassword] = useState('')
+  const [webError, setWebError] = useState<string | null>(null)
+  const [webBusy, setWebBusy] = useState(false)
 
   useEffect(() => {
     setHasBridge(getElectronBridge() !== null)
@@ -100,7 +108,33 @@ export function AuthDialog() {
     }
   }
 
-  /** Web: честная проверка — вернёт «недоступно», сессия живёт в EXE-сборке */
+  /** Web: вход реальными логином/паролем через сервер приложения → сайт */
+  const loginWithPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (webBusy) return
+    setWebError(null)
+    if (webLogin.trim().length < 2 || webPassword.length < 1) {
+      setWebError('Введите логин и пароль от YummyAnime')
+      return
+    }
+    setWebBusy(true)
+    try {
+      const res = await avcApi.yummyLogin(webLogin.trim(), webPassword)
+      if (res.ok && res.snapshot) {
+        setWebPassword('') // пароль не держим в состоянии ни секунды дольше нужного
+        applySnapshot(res.snapshot, true)
+        return
+      }
+      setWebError(res.message ?? 'Сайт отклонил вход')
+      toast({ variant: 'destructive', description: res.message ?? 'Сайт отклонил вход' })
+    } catch {
+      setWebError('Не удалось отправить запрос — попробуйте ещё раз')
+    } finally {
+      setWebBusy(false)
+    }
+  }
+
+  /** Web: честная проверка сохранённой сессии на сайте */
   const checkWeb = async () => {
     setWebCheckBusy(true)
     try {
@@ -132,9 +166,9 @@ export function AuthDialog() {
             Вход через YummyAnime
           </DialogTitle>
           <DialogDescription>
-            Войдите защищённо на YummyAnime: пароль вводится только на сайте, в его
-            собственном окне — приложение пароль не видит. Аккаунт, статусы и избранное
-            живут на YummyAnime.
+            {hasBridge
+              ? 'Войдите защищённо на YummyAnime: пароль вводится только на сайте, в его собственном окне — приложение пароль не видит. Аккаунт, статусы и избранное живут на YummyAnime.'
+              : 'Введите логин и пароль от YummyAnime — они отправятся напрямую на сервер сайта. Пароль нигде не хранится, а сессия живёт на сервере приложения.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -188,23 +222,66 @@ export function AuthDialog() {
           </>
         ) : (
           <>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-              <p className="flex items-start gap-2 text-sm leading-relaxed text-zinc-300">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
-                Постоянная сессия сайта живёт в EXE-сборке — в веб-режиме вход в аккаунт
-                недоступен.
-              </p>
-            </div>
+            {/* РЕАЛЬНАЯ форма входа: логин + пароль → сервер сайта */}
+            <form onSubmit={loginWithPassword} className="flex flex-col gap-3" noValidate>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="avc-web-login" className="text-xs text-zinc-400">
+                  Логин или e-mail от YummyAnime
+                </Label>
+                <Input
+                  id="avc-web-login"
+                  name="login"
+                  type="text"
+                  autoComplete="username"
+                  inputMode="email"
+                  placeholder="например, you@example.com"
+                  value={webLogin}
+                  onChange={(e) => setWebLogin(e.target.value)}
+                  disabled={webBusy}
+                  className="min-h-11 border-zinc-700 bg-zinc-900/70"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="avc-web-password" className="text-xs text-zinc-400">
+                  Пароль
+                </Label>
+                <Input
+                  id="avc-web-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Пароль от сайта"
+                  value={webPassword}
+                  onChange={(e) => setWebPassword(e.target.value)}
+                  disabled={webBusy}
+                  className="min-h-11 border-zinc-700 bg-zinc-900/70"
+                />
+              </div>
+
+              {webError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-rose-400/30 bg-rose-400/10 p-2.5 text-xs leading-relaxed text-rose-200"
+                >
+                  {webError}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                disabled={webBusy}
+                className="min-h-11 w-full gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
+              >
+                {webBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" aria-hidden />
+                )}
+                Войти на YummyAnime
+              </Button>
+            </form>
 
             <div className="flex flex-col gap-2">
-              <Button
-                onClick={openSite}
-                className="min-h-11 gap-2 bg-amber-400 text-zinc-950 hover:bg-amber-300"
-              >
-                <ExternalLink className="h-4 w-4" aria-hidden />
-                Открыть сайт для входа
-              </Button>
-
               <Button
                 variant="outline"
                 disabled={webCheckBusy}
@@ -216,16 +293,31 @@ export function AuthDialog() {
                 ) : (
                   <RefreshCw className="h-4 w-4" aria-hidden />
                 )}
-                Проверить
+                Проверить сохранённую сессию
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={openSite}
+                className="min-h-11 gap-2 text-zinc-400 hover:text-amber-300"
+              >
+                <ExternalLink className="h-4 w-4" aria-hidden />
+                Войти в браузере (Telegram / VK / Shikimori)
               </Button>
             </div>
+
+            <p className="text-xs leading-relaxed text-zinc-500">
+              Пароль уходит только на сервер old.yummyani.me (тот же запрос, что и на
+              сайте) и нигде не сохраняется. Вход через Telegram / VK / Shikimori —
+              только в окне сайта (кнопка выше или EXE-сборка).
+            </p>
           </>
         )}
 
         <p className="text-xs leading-relaxed text-zinc-600">
-          Безопасность: пароли и cookie не хранятся в приложении. Вход выполняется на
-          сайте, а сессия живёт в постоянном профиле сайта внутри EXE-сборки и не
-          покидает её.
+          После входа все действия — «добавь в смотрю», «оцени на 8», «добавь в
+          избранное» — выполняются в вашем аккаунте на сайте, и результат виден на
+          самом YummyAnime.
         </p>
       </DialogContent>
     </Dialog>

@@ -63,3 +63,6 @@ upload/
 tool-results/
 download/
 agent-ctx/
+
+# Сессия YummyAnime (cookie сайта) — НИКОГДА не в git
+db/yummy-session.json

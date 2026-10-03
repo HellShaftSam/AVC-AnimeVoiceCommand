@@ -2,12 +2,17 @@
  * Anime Voice Controller — клиент API (thin client).
  *
  * АУТЕНТИФИКАЦИЯ (спецификация «Production-Ready YummyAnime Authentication»):
- *   Сессия сайта живёт ТОЛЬКО в постоянном браузерном профиле Electron
- *   (partition 'persist:yummyanime') и не покидает главный процесс:
- *     - EXE: снимки аккаунта/избранного приходят через IPC-мост
- *       window.avcElectron (НЕ-секретные данные — секция 15);
- *     - Web (браузер без оболочки): честные «недоступно» ответы без выдумок.
- *   Cookie/пароли/токены через этот слой НЕ передаются никогда.
+ *   - EXE: сессия сайта живёт в постоянном браузерном профиле Electron
+ *     (partition 'persist:yummyanime') и не покидает главный процесс;
+ *     снимки аккаунта/избранного приходят через IPC-мост window.avcElectron
+ *     (НЕ-секретные данные — секция 15).
+ *   - Web (превью в браузере, БЕЗ оболочки): вход выполняется формой
+ *     логин+пароль, сервер Next.js отправляет их напрямую на сервер сайта
+ *     (POST /api/profile/login), хранит cookie-сессию ТОЛЬКО на сервере
+ *     (db/yummy-session.json, 0600, вне git) и выполняет все действия
+ *     аккаунта с ней. Пароль нигде не хранится; клиенту отдаются только
+ *     НЕ-секретные снимки.
+ * Cookie/пароли/токены через ЭТОТ слой не передаются никогда.
  *
  * Публичные данные сайта (поиск/каталог/детали) идут через Next API как раньше.
  */
@@ -75,19 +80,60 @@ const WEB_UNAVAILABLE: YummyAccountSnapshot = {
   user: null,
   lastSync: null,
   source: 'no-session',
-  message:
-    'Постоянная сессия YummyAnime живёт в EXE-сборке. В веб-режиме состояние аккаунта недоступно.',
+  message: 'Постоянная сессия YummyAnime живёт в EXE-сборке.',
+}
+
+const WEB_LOGIN_HINT =
+  'Войдите в аккаунт YummyAnime — списки, оценки и избранное хранятся в вашем аккаунте на сайте'
+
+/** Ответ POST /api/yummy/login */
+export interface WebLoginResult {
+  ok: boolean
+  snapshot?: YummyAccountSnapshot
+  message?: string
+  captchaRequired?: boolean
 }
 
 export const avcApi = {
   /**
-   * Состояние аккаунта YummyAnime (Electron-first).
-   * refresh=true — принудительная проверка на сайте (минуя кеш сервиса).
+   * Состояние аккаунта YummyAnime.
+   * EXE — через IPC (сессия в main-процессе);
+   * Web — живая проверка серверной сессии сайта (GET /api/yummy/account).
    */
   async yummyAccount(refresh = false): Promise<YummyAccountSnapshot> {
     const bridge = getElectronBridge()
     if (bridge) return bridge.getAccountState(refresh)
-    return WEB_UNAVAILABLE
+    try {
+      const res = await jsonFetch('/api/yummy/account')
+      if (!res.ok) throw new Error(await readError(res))
+      return (await res.json()) as YummyAccountSnapshot
+    } catch {
+      return {
+        state: 'unavailable',
+        user: null,
+        lastSync: null,
+        source: 'error',
+        message: 'Не удалось проверить аккаунт — сервер недоступен',
+      }
+    }
+  },
+
+  /**
+   * Вход в аккаунт YummyAnime логином и паролем (режим превью, без EXE).
+   * Пароль отправляется сервером приложения напрямую на сервер сайта и
+   * нигде не хранится. EXE использует окно сайта (openLoginWindow).
+   */
+  async yummyLogin(login: string, password: string): Promise<WebLoginResult> {
+    try {
+      const res = await jsonFetch('/api/yummy/login', {
+        method: 'POST',
+        body: JSON.stringify({ login, password }),
+      })
+      const body = (await res.json()) as WebLoginResult
+      return body
+    } catch {
+      return { ok: false, message: 'Сервер недоступен — попробуйте позже' }
+    }
   },
 
   /** Открыть окно входа на реальный сайт (только EXE). Резолв после закрытия окна. */
@@ -96,7 +142,7 @@ export const avcApi = {
     if (!bridge) {
       return {
         ...WEB_UNAVAILABLE,
-        message: 'Вход выполняется в окне сайта — доступно в EXE-сборке.',
+        message: 'В веб-режиме входите формой ниже — пароль уйдёт прямо на сервер сайта.',
       }
     }
     return bridge.openLoginWindow()
@@ -106,50 +152,68 @@ export const avcApi = {
   async verifyAuthentication(): Promise<YummyAccountSnapshot> {
     const bridge = getElectronBridge()
     if (bridge) return bridge.verifyAuthentication()
-    return WEB_UNAVAILABLE
+    return avcApi.yummyAccount(true)
   },
 
   /** Выход ЧЕРЕЗ САЙТ (сайт инвалидирует сессию), затем локальное подтверждение */
   async yummyLogout(): Promise<YummyAccountSnapshot> {
     const bridge = getElectronBridge()
     if (bridge) return bridge.logout()
-    return {
-      ...WEB_UNAVAILABLE,
-      state: 'loggedOut',
-      message: 'Веб-режим: аккаунт YummyAnime не подключён.',
+    try {
+      const res = await jsonFetch('/api/yummy/login', { method: 'DELETE' })
+      if (!res.ok) throw new Error(await readError(res))
+      const body = (await res.json()) as { snapshot?: YummyAccountSnapshot }
+      return body.snapshot ?? { state: 'loggedOut', user: null, lastSync: null, source: 'live', message: null }
+    } catch {
+      return { state: 'loggedOut', user: null, lastSync: null, source: 'error', message: 'Выход выполнен локально' }
     }
   },
 
   /**
    * Избранное с сайта. EXE — через IPC (данные сессии main-процесса);
-   * web — честная недоступность (available=false с причиной).
+   * web — через серверную сессию сайта (GET /api/yummy/favorites).
    */
   async yummyFavorites(refresh = false): Promise<YummyFavoritesResult> {
     const bridge = getElectronBridge()
     if (bridge) return bridge.getFavorites(refresh)
-    return {
-      available: false,
-      items: [],
-      reason: 'Избранное живёт в постоянной сессии сайта — доступно в EXE-сборке',
-      lastSync: null,
+    try {
+      const res = await jsonFetch('/api/yummy/favorites')
+      if (!res.ok) throw new Error(await readError(res))
+      return (await res.json()) as YummyFavoritesResult
+    } catch {
+      return {
+        available: false,
+        items: [],
+        reason: WEB_LOGIN_HINT,
+        lastSync: null,
+      }
     }
   },
 
   /**
    * РЕАЛЬНОЕ действие аккаунта YummyAnime (список/оценка/избранное).
-   * Выполняется same-origin ВНУТРИ постоянной сессии сайта в main-процессе
-   * (cookie не покидают main) — только EXE. Web — честная недоступность.
+   * EXE — same-origin внутри постоянной сессии сайта (main-процесс);
+   * web — POST /api/yummy/action (серверная сессия сайта) с верификацией
+   * чтением серверного HTML страницы тайтла.
    */
   async animeAction(req: YummyAnimeActionRequest): Promise<YummyAnimeActionResponse> {
     const bridge = getElectronBridge()
     if (bridge?.animeAction) return bridge.animeAction(req)
-    return {
-      ok: false,
-      httpStatus: 0,
-      verification: 'skipped',
-      state: null,
-      message:
-        'Действия аккаунта выполняются внутри постоянной сессии сайта — доступны в EXE-сборке',
+    try {
+      const res = await jsonFetch('/api/yummy/action', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      })
+      const body = (await res.json()) as YummyAnimeActionResponse
+      return body
+    } catch {
+      return {
+        ok: false,
+        httpStatus: 0,
+        verification: 'unconfirmed',
+        state: null,
+        message: 'Сервер недоступен — действие не выполнено',
+      }
     }
   },
 

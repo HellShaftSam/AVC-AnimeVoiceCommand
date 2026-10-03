@@ -37,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ToastAction } from '@/components/ui/toast'
 
 /** Цвет точки статуса сессии */
 function statusDotClass(state: string): string {
@@ -66,6 +67,55 @@ export function HeaderBar() {
   const settingsOpen = useAvcStore((s) => s.settingsOpen)
   const account = useAvcStore((s) => s.yummyAccount)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [exeBusy, setExeBusy] = useState(false)
+
+  /** Скачать EXE одной кнопкой: резолвим последний релиз → прямая ссылка */
+  const downloadExe = async () => {
+    if (exeBusy) return
+    setExeBusy(true)
+    try {
+      const res = await fetch('/api/download-exe', { cache: 'no-store' })
+      const info = (await res.json()) as {
+        ok: boolean
+        downloadUrl: string | null
+        assetName: string | null
+        reason: string | null
+        releasesUrl: string
+      }
+      if (info.ok && info.downloadUrl) {
+        toast({ description: `Скачивание началось: ${info.assetName ?? 'AVC-Anime.exe'}` })
+        // Программный клик по <a download> — не блокируется popup-blocker'ом
+        // (в отличие от window.open после await); GitHub отдаёт ассет с
+        // Content-Disposition: attachment — страница не покидается.
+        const a = document.createElement('a')
+        a.href = info.downloadUrl
+        a.rel = 'noopener'
+        a.download = info.assetName ?? 'AVC-Anime.exe'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      } else {
+        // Честная причина + кликабельное действие прямо в toast (жест пользователя
+        // — popup-blocker не мешает): страница релизов репозитория
+        toast({
+          variant: 'destructive',
+          description: info.reason ?? 'EXE не найден',
+          action: (
+            <ToastAction
+              altText="Открыть страницу релизов"
+              onClick={() => window.open(info.releasesUrl, '_blank', 'noopener')}
+            >
+              Открыть релизы
+            </ToastAction>
+          ),
+        })
+      }
+    } catch {
+      toast({ variant: 'destructive', description: 'Не удалось получить ссылку на EXE' })
+    } finally {
+      setExeBusy(false)
+    }
+  }
 
   // Первичная проверка аккаунта при монтировании шапки (не блокирует UI)
   useEffect(() => {
@@ -243,22 +293,17 @@ export function HeaderBar() {
         >
           <Settings className="h-5 w-5" />
         </Button>
-        {/* Скачать EXE-сборку (GitHub Releases, всегда последняя) */}
+        {/* Скачать EXE-сборку одной кнопкой (GitHub Releases, всегда последняя) */}
         <Button
           variant="ghost"
           size="icon"
-          asChild
-          aria-label="Скачать EXE для Windows (GitHub Releases)"
-          title="Скачать EXE для Windows (GitHub Releases)"
+          aria-label="Скачать EXE для Windows"
+          title="Скачать EXE для Windows (последний релиз)"
           className="h-11 w-11"
+          disabled={exeBusy}
+          onClick={() => void downloadExe()}
         >
-          <a
-            href="https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <PackageOpen className="h-5 w-5" />
-          </a>
+          {exeBusy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <PackageOpen className="h-5 w-5" />}
         </Button>
         {/* Скачать исходники проекта (zip без секретов/мусора) */}
         <Button
