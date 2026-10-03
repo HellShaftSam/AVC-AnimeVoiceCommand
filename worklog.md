@@ -740,3 +740,25 @@ Stage Summary:
 - Каждая фича проверена ОТДЕЛЬНО и в СБОРКЕ с предыдущими (инкрементально по требованию пользователя); все числа — из реальных замеров; BLOCKED/NOT_TESTED проставлены честно (живой микрофон Windows, EXE-сборка)
 - Архитектурные решения зафиксированы: ключ toneCtc (sherpa 1.13.8), GBNF вместо сломанного JSONSchema-конвертера, кольцевой буфер против задержки VAD, отдельный чистый Node для external arraybuffers
 - Push в GitHub по-прежнему приостановлен (требование пользователя); CI-workflow обновлён в docs/ci/build-exe.yml и ждёт команды «можно в GitHub»
+
+---
+Task ID: exe-release-1
+Agent: Z.ai Code (main)
+Task: Отдельная папка в git под EXE + публикация релиза EXE
+
+Work Log:
+- Инвентаризация: репо чистое (main, HEAD 512efb2), remote HTTPS; креды device-flow из прошлой сессии НЕ сохранились (новый контейнер) → пуш требует новой авторизации
+- EXE-сборка локально по шагам docs/ci/build-exe.yml: prisma binaryTargets native+windows (оба движка сгенерированы), Next standalone 114MB собран в ТЕНЕВОЙ копии /tmp/avc-exe-build (Turbopack падает на симлинке node_modules → сборка через --webpack; трассировка standalone корректна: 20 модулей, @prisma + windows-движок внутри)
+- Windows AI-пак: npm pack sherpa-onnx-win-x64@1.13.8 + @node-llama-cpp/win-x64@3.22.1 (извлечены в electron-app/node_modules), node.exe v22.11.0 (80MB) → runtime-node/, assemble-ai-pack с win-фильтром (папка нативника llama называется win-x64, а не win32-x64 — фильтр startsWith('win-'))
+- electron-builder --win portable на Linux БЕЗ wine: signAndEditExecutable=false + afterpack-хук build/afterpack.cjs (pure-JS resedit v3: иконка 256px ICO + VERSIONINFO; API v3 — IconFile в Data, класс VersionInfo в Resource)
+- РЕЗУЛЬТАТ: electron-app/dist/AVC-Anime-Portable-1.0.0.exe, 384987386 байт (~385MB), EXIT 0
+- Верификация артефакта: MZ+Nullsoft маркеры, app.asar (main.cjs/preload.cjs/auth/*), next-app (server.js, static chunks, query_engine-windows.dll.node), db (custom.db+session), ai (worker + sherpa-onnx-win-x64 + @node-llama-cpp/win-x64 + bins), runtime-node/node.exe; SHA-256=5cbc75f5...a9d91. Прогнать exe на Linux нельзя (нет wine) — реальный смоук-тест на Windows сделает пользователь и/или CI
+- releases/ в репо: README.md (как скачать, sha256, запуск), VERSION.txt (манифест сборки), download-exe.ps1 (скачивание последнего релиза через API без токена); сам exe в git НЕ кладём (лимит GitHub 100MB)
+- CI активирован: .github/workflows/build-exe.yml (копия docs/ci) — автосборка при пуше main
+- Коммит ab87979 готов к пушу
+- Автоматизация: /home/z/.gh-avc/{device-poll.sh,watcher.sh,release-notes.md}; Device Flow запущен (scopes repo+workflow), user_code 388B-B47C, watcher ждёт токен → сам пушит main → создаёт Release v1.0.0 → заливает EXE ассетом
+
+Stage Summary:
+- EXE v1.0.0 собран и верифицирован локально (385MB, sha256 5cbc75f5b81ef1fc683a74ccb8235e8ddce6595bd76c3692397cb886d55a9d91)
+- releases/ закоммичена; CI-workflow готов к активации; пуш+релиз автоматизированы через watcher после авторизации device-flow
+- Блокер: код 388B-B47C живёт 15 мин; если истёк — перезапустить device-poll.sh и выдать новый код
