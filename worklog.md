@@ -534,3 +534,105 @@ Stage Summary:
 - Аутентификация = постоянная сессия сайта в Electron; сайт — источник истины; пароли/cookie не покидают профиль (секция 3/15/16 спеки соблюдены буквально)
 - Веб-режим честно сообщает «доступно в EXE»; EXE — полный цикл входа/выхода/диагностики
 - Сборка EXE: bun run build (корень) → npm run dist (electron-app) → portable exe; selftest: npm run auth:test
+---
+Task ID: 1-c
+Agent: general-purpose (YummyTV research)
+Task: Endpoint/feature discovery in public YummyTV client
+
+Work Log:
+- Прочитан хвост worklog.md (контекст: фикс входа в аккаунт, EXE-сессия на old.yummyani.me, honest-web-режим)
+- git clone --depth 1 https://github.com/Helandy/YummyTV → /tmp/yummytv (47MB, последний коммит master 2026-09-30)
+- Map репо: НЕ WPF/Electron — нативный Android (Kotlin, Compose, Ktor/OkHttp, kotlinx.serialization, Room, Hilt, Media3), модульный clean architecture: core/* + feature/* (home, search, top, details, player, library, account, comments, reviews, posts, bloggers, messages, schedule, collection, video-download, pages, faq…)
+- Endpoint discovery: прочитаны ВСЕ 15 API-клиентов (feature/*/data/.../network/*Api.kt) + core/network (YaniEndpoints, YummyEndpoints, YaniHttpClientFactory, YaniRequestHeaderCache) + DTO; полный вызов-список получен через rg '\$YANI_BASE_URL' (≈120 call sites)
+- Изучены auth (YaniAccountApi: login/register/verify/token/profile/logout/password), library (list/fav/rate/video/watch-history/subscribe), episodes (YaniAnimeVideosDto), плеер-экстракторы (kodik/sibnet/alloha/cvh/aksor/vk/rutube/zedfilm) + docs/alloha-player.md, hCaptcha-webview + sitekey, episode-push worker, watched-thresholds, feed/schedule DTO
+- Отчёт записан: research/yummytv-endpoints.md (таблицы endpoints с file:line evidence, коды списков, рейтинг 1..10, auth-механизм, пагинация, фичи, риски); код в проект НЕ копировался (read-only)
+
+Stage Summary:
+- ГЛАВНОЕ: YummyAnime имеет JSON REST API на https://api.yani.tv (не только веб-сайт) — авторизация POST /profile/login {login,password,recaptcha_response} → {response:{token}}, дальше Authorization: Bearer <token> на каждый запрос; refresh = GET /profile/token; 401/403 = сессия отклонена
+- Обязательные заголовки api.yani.tv: X-Application (у YummyTV зашит ze645twqfeql6l1u), Lang: ru|uk; капча = HTTP 420 / error_code 420 / текст "капч|captcha"; hCaptcha sitekey b1847961-208e-4a90-9671-1e6bba9e0b36
+- Списки: list_id 0=смотрю, 1=планы, 2=просмотрено, 3=брошено, 4=избранное (PUT /anime/{id}/list/fav), 5=отложено; PUT /anime/{id}/list {list_id}
+- Рейтинг: целое 1..10 (PUT /anime/{id}/rate {rating}), гистограмма GET /anime/{id}/rates
+- Прогресс: PUT /video/{videoId} {time,duration,times[]}, батч-синк POST /video, снять DELETE /video {video_ids}; история GET /video/watch-history?limit&offset
+- Подписки на новые серии озвучки: PUT/DELETE /video/{videoId}/subscribe + GET /users/{id}/lists/subs; пуши = опрос /profile/notifications (+counts, read, delete)
+- Серии: GET /anime/{id}/videos отдаёт ВЕСЬ список эпизодов одним ответом (video_id, number-строка, iframe_url, data.player/dubbing/player_id, watched, skips{opening,ending}) — пагинации нет, оффлайн-кэш + группировка на клиенте
+- Каталог: GET /anime с q/genres/exclude_genres/types/status/from_year/to_year/season/min_age/sort(title|year|rating|rating_counters|views|top|id)/sort_forward/limit/offset; random = sort=random; топ = sort=top&types=tv|movie|ona; /feed — главная (top_carousel, new, recommends, new_videos, schedule, posts, collections); /anime/schedule; /anime/{id} details с viewing_order (франшизы!) и remote_ids.myanimelist_id
+- Комьюнити-эндпоинты: comments (targetType anime|post|review, skip-пагинация, vote/claim), reviews, posts, collection CRUD+vote, bloggers+subscribe, dialogs (PM), friends, users search, stats (genres/ratings/lists/types-v2), avatar/banner upload (octet-stream)
+- Второй бэкенд yummуtv.kemonos.win/api/anime/mal/{malId} — приватный сервис автора (названия серий из TMDB) — не зависеть
+- Всё помечено LIVE-VERIFY-NEEDED: API реконструирован из стороннего клиента, надо сверить с живым api.yani.tv (особенно X-Application и 420-капчу) — это потенциально более чистый путь входа для нашего EXE, чем cookie-мост
+---
+Task ID: 1-b
+Agent: general-purpose (live site research)
+Task: Read-only research of old.yummyani.me structure (GET-only, guest)
+
+Work Log:
+- GET https://old.yummyani.me/ → 200 (128 KB). Extracted title, nav (all /catalog/* + /users, /users/chat), embedded login form (action="/login/" method=post, inputs email+password, Telegram/VK/Shikimori OAuth buttons), hCaptcha meta key b1847961-208e-4a90-9671-1e6bba9e0b36, JS bundles (/js/build.min.js, /js/es5.build.min.js, /js/react.min.js, v=3.0.308).
+- Downloaded build.min.js (695 KB), es5.build.min.js (935 KB), react.min.js (148 KB); regex-extracted ALL api.method(...) calls → complete endpoint map under base `uu="/api"` with header X-Application: wawegr8j13it4rdw, window.ServerApi exposed.
+- Search: HTML form GET /search?word=… (param `word`); ?query= → "Пустой запрос!"; guest API GET /api/search?q=наруто&limit=5 → 200 JSON with 5 hits (Наруто=naruto-tv-1 id=111, Shippuuden id=119, etc.), rich fields incl. remote_ids, top, blocked_in.
+- Naruto /catalog/item/naruto-tv-1 → 200: ZERO episode links in raw HTML (#video container = loading spinner only); "Количество серий: 220" in sidebar; /api/anime/111 → 200 (episodes.count=220); /api/anime/111/videos → 200, 1793 entries, eps 1..220, fields video_id/dubbing/player/iframe_url/skips(OPENING/ENDING)/views/duration.
+- One Piece /catalog/item/van-pis-tv → 200; /api/anime/1512/videos → 200, 8714 entries, 1180 aired eps (episodes.count=0, aired=1180), players Kodik/Alloha/CVH.
+- Translations: HTML ul.animeVoices → /catalog/dubbing/{60 AniDUB,12 2x2,23 ANI.OMNIA,109 AniRise,437 SHIZA,79178 OPRUS} + /catalog/dubber/{232 ЮКИ,234 Хаттори Ханзо,1012 Алекс Килька}; API translates types dubbing/multivoice/subtitles; iframe hosts: kodikplayer.com, alloha.yani.tv, video.sibnet.ru/shell.php?videoid=.
+- Player: no /watch URLs at all; React renders iframe allow="autoplay *; fullscreen *" from iframe_url; resume via ?start= (Alloha) / ?start_from= (others) from watchedEpisodes; kodik_player_time_update postMessage → PUT /api/video/{video_id} {time,times} (+beforeunload flush); GET /api/video/488827 → 404.
+- Library/rating UI (guest): marker "Зарегистрируйтесь, чтобы добавить аниме в свои списки"; .favorite-favourite fav-type-fav heart button; .rating-info aggregateRating bestRating=10 worstRating=1 ratingCount=6278 ratingValue=8.67; rate modal ul.rating-list li[data-rate=1..10] (шедевр..ничтожно); list registry Rt: watch_now=0, will=1, watched=2, postpone=5, lost=3, favourite=4.
+- Users: /users → 200 (id cards up to id5037xx); /users/id503741 → 200 (Профиль, tabs Списки/Друзья/Комментарии/Рецензии, six list counters, genre cloud); /api/users/id503741 → 200 JSON (nickname, avatars static.yani.tv, banner, roles); /api/users?limit=2 → 200; /api/users/id503741/lists → 400 Arguments error.
+- Sections: /catalog/top 200 (grid .anime-column, Re:Zero S4 #1), /catalog/random → 302 → random /catalog/item/*, /random → 404, /catalog/ongoing 200 (first = van-pis-tv), /catalog/announcement 200, /catalog/schedule 200 (day grid).
+- Guest API: /api/profile → 401 {"error":"Для совершения данного действия необходимо авторизоваться","error_code":1}; /api/favorites → 404 (doesn't exist); /api/bookmarks → 404 (doesn't exist); /api/anime/111/lists → 200 (public list counts, incl. unknown list_id 6); /api/anime/111/rates → 200 (1..10 histogram).
+- Verified prior-session facts: /login → 404, /register → 200, /profile → 404, yummy-anime.ru → old.yummyani.me 200. Corrected: /api/favorites is 404 not 401; real favorites path = /api/anime/{id}/list/fav.
+
+Stage Summary:
+- Canonical HTML pages: /catalog/item/{slug} (anime), /catalog/{top|random|ongoing|announcement|schedule}, /search?word=, /users, /users/id{N}; /login and /profile are 404 — auth UI is homepage-embedded (form POST /login/, captcha = hCaptcha meta hcaptcha-key).
+- ALL dynamic data comes from /api/* (guest-readable): GET /api/search?q=&limit=&offset=, GET /api/anime/{id}, GET /api/anime/{id}/videos (episode+dubbing matrix, iframe_url, skips), /api/anime/{id}/lists (public counts), /api/anime/{id}/rates (histogram), /api/users/id{N}.
+- Episode list is NEVER in raw HTML — client renders from /api/anime/{id}/videos; claimed totals: /api/anime/{id}.episodes.{count,aired}; Naruto=220/220, One Piece=0/1180.
+- Library lists (ids): 0 Смотрю/watch_now, 1 В Планах/will, 2 Просмотрено/watched, 3 Брошено/lost, 4 Любимые/favourite, 5 Отложено/postpone (+API-only list_id 6); writes: PUT /api/anime/{id}/list {list}, PUT/DELETE /api/anime/{id}/list/fav.
+- Rating: 1..10 integer, PUT /api/anime/{id}/rate {rate}; aggregate: /api/anime/{id}/rates + schema.org aggregateRating (bestRating 10).
+- Player: inline iframe per video (hosts kodikplayer.com / alloha.yani.tv / video.sibnet.ru / CVH), progress PUT /api/video/{video_id} {time,times} (auth-gated), resume params start / start_from, skip timings in videos[].skips.
+- Auth endpoints: POST /api/profile/login {login,password,recaptcha_response?}, POST /api/profile/logout, GET /api/profile (401 guest / 200 logged-in), GET /api/profile/token, POST /api/profile/online; export: GET /actions/export-favorites.php?format=&vote=.
+- /api/favorites and /api/bookmarks do NOT exist (404) — desktop client must use /anime/{id}/list* and /users/{id}/lists*.
+- Public headers: X-Application: wawegr8j13it4rdw + Lang (from bundle); static assets on static.yani.tv (posters, avatars, banners); site version param v=3.0.308.
+---
+Task ID: 1-a
+Agent: Explore (codebase audit)
+Task: Full AVC-Anime architecture audit for YummyAnime real-account client spec
+
+Work Log:
+- Прочитаны worklog.md (последние 3 записи: auth-frontend-1, auth-prod-1, login-fix) и AUTHENTICATION_AUDIT.md; сверены контракты api.ts/types.ts/store.ts ↔ electron-app
+- Изучены файлы сборки: package.json, next.config.ts (standalone, ignoreBuildErrors), electron-app/{package.json, electron-builder.json, main.cjs, preload.cjs, README}, docs/ci/build-exe.yml; воспроизведена цепочка EXE: bun run build → standalone+static+public+db+.prisma в extraResources → spawn Next (ELECTRON_RUN_AS_NODE, PORT 3010+, DATABASE_URL с прямыми слэшами) в main.cjs:108-151
+- Разобран Electron-слой: IPC-каналы avc:auth:* (main.cjs:188-198), состояния UNKNOWN…ERROR (authentication-service.cjs:32-41), partition persist:yummyanime, event-driven детекция входа + safety-net 2s, logout через сайт + UI-fallback, favorites (TTL 2min), selftest, resetSession с бэкапом; yummy-auth-adapter.cjs (DETECTION/LOGOUT/FAVORITES_SCRIPT, decide(), parseProfile/parseFavorites); account-store.cjs (userData/yummy-account.json, 0600, атомарно)
+- Разобран renderer: api.ts (getElectronBridge, Electron-first), executor.ts (все 38+ интентов switch 913-1019, confirm-gate, анти-дубль 2500ms, lastWatched по userId), types.ts, store.ts, parser.ts/aliases.ts, use-voice.ts (движки browser/server/auto, MAX_UTTERANCE 12s, VAD, wake word), voice routes (asr/tts/interpret через z-ai-web-dev-sdk)
+- Разобран site-слой: adapter.ts (JSON API /api/search|anime/{id}|anime/{id}/videos, HTML-секции с ?page=N, TTL-кэш 5min, fetch 12s timeout, demo-fallback), /api/site/[[...path]], /api/yummy/{account,favorites} (честные web-заглушки), prisma schema (4 модели, без User)
+- ЭПИЗОДЫ (критично): живые curl-проверки сайта + через работающий dev-сервер: /api/anime/111 → episodes{count:220,aired:220}; /api/anime/111/videos → 1793 записи (по 220 уник. у 2x2/AniDUB/Субтитры; дубли = 3 плеера на серию); Шиппуден 500/4241; Ван-Пис aired 1180, videos 8716 (~5МБ, через app 4с) → серверные данные ПОЛНЫЕ, пагинации на videos API нет. Проверен путь adapter→maxEpisodeOf→anime-view grid
+- Гипотеза «57-58 серий»: (а) грид серий max-h-64 (256px) показывает ~4-5 рядов ≈ 48-60 кнопок на широких экранах, внутренний overflow-y-auto НЕ скроллится голосом («вниз» скроллит только #avc-content, executor.ts:904-910); (б) бейджи озвучек показывают per-dub счётчики — у Ван-Писа есть озвучки ровно с 58 сериями (LE-Production, Макс Летов & ShiYori); (в) 12s timeout на videos (~5МБ) → videos=[] → «Серия не найдена» повсюду; (г) detailsCache без TTL (executor.ts:50)
+- Плеер: player-bridge.ts (двойной формат aksor+kodik envelope, get_time-поллинг, pushPlayerVolume против persist-мьюта), player.tsx (авто-старт 0.7/2/3.8/5.5s + seek-kick, Esc fullscreen), kodik URL pinned ?season=1&only_episode=true&episode=N; autoplayNext и skips(opening/ending) с сайта НЕ используются нигде
+- UI-поверхность: все 22 компонента skimmed; найден РЕАЛЬНЫЙ баг: src/app/page.tsx:89 вызывает toast() БЕЗ импорта (tsc: TS2304; masked ignoreBuildErrors) — ReferenceError в EXE при onAuthStatus; проверено побайтово (python)
+- EXE-readiness: portable target + CI workflow (версия 1.0.run_number, Release), icon build/icon.png, extraResources ../db и ../node_modules/.prisma; speech/ папки в electron-app НЕТ (подтверждено: только auth/, tools/, build/) — STT только серверный z-ai SDK / Web Speech рендерера
+
+Stage Summary:
+- Серверные данные о сериях ПОЛНЫЕ (Наруто 220, Ван-Пис 1180 — проверено живьём и через app API); «57-58 серий» — НЕ баг данных: главные подозреваемые — грид серий max-h-64 с внутренним скроллом, недостижимым для голосовых команд, + per-dub счётчики в бейджах озвучек (58 у Ван-Писа), + 12s timeout на больших videos-ответах
+- Найден реальный баг: page.tsx:89 toast без импорта — падение обработчика onAuthStatus в EXE (скрыто ignoreBuildErrors в next.config.ts)
+- MAX_UTTERANCE_MS = 12000 (use-voice.ts:41) — источник жалобы «микрофон обрезает на ~15с»
+- LLM-промпт /api/voice/interpret не знает новые интенты (Mute/Unmute/аккаунт-команды) — LLM-fallback не сможет их вернуть
+- autoplayNext хранится в настройках, но авто-next НЕ реализован; данные skips (opening/ending) от сайта не используются — auto-skip отсутствует
+- Playback-контекст в store ОДИН глобальный (не per-tab) — открытие аниме во второй вкладке затирает состояние первой
+- Кэши: detailsCache (client Map, без TTL, executor.ts:50) + серверный Map 5min без ограничения размера (adapter.ts:55)
+- Аутентификация EXE соответствует спеке: cookie не покидают main, машина состояний полная, selftest/resetSession с бэкапом; web-режим честно «недоступно»
+- EXE-цепочка готова (portable + CI Release), но нет NSIS-установщика/подписи/автообновления; версия только через CI extraMetadata
+- Speech/папки в electron-app нет; в EXE голос = серверный ASR (z-ai SDK) через встроенный Next; Web Speech в стоковом Electron обычно недоступен (нет Google-ключей) → sttEngine auto падает на сервер
+
+---
+Task ID: audit-main-1
+Agent: Z.ai Code (main)
+Task: Спека «Full Real Account Client» + «Advanced Voice» — этап ИССЛЕДОВАНИЕ/АУДИТ (без изменений архитектуры, без пушей в GitHub по требованию пользователя)
+
+Work Log:
+- GitHub: по требованию пользователя ПУШИ ПРИОСТАНОВЛЕНЫ (device-flow код отменён; CI-workflow лежит в docs/ci/build-exe.yml до команды «можно в GitHub»)
+- Запущены 3 параллельных исследования: 1-a аудит кода (Explore), 1-b живой сайт GET-only (general), 1-c публичный YummyTV (general) — все отчитались, записи в worklog ниже
+- ГЛАВНОЕ ОТКРЫТИЕ (1-b): сайт имеет JSON API /api/* с заголовками X-Application: wawegr8j13it4rdw + Lang: ru; действия аккаунта: PUT/DELETE /anime/{id}/list {list:N}, /list/fav, /rate {rate:1..10}, /video/{id} {time,times} (прогресс), comments/reviews/notifications/dialogs/friends; НЕТ /api/favorites (404) и /api/bookmarks (404); нет per-episode URL (плеер в странице аниме); логин POST /profile/login {login,password,recaptcha_response} (hCaptcha)
+- Реестр статусов сайта (бандл Rt): 0 Смотрю/watch_now, 1 В Планах/will, 2 Просмотрено/watched, 3 Брошено/lost, 4 Любимые/favourite, 5 Отложено/postpone, 6 неизвестный (в публичных счётчиках) — записаны в LIBRARY_STATUS_MATRIX.md
+- Разгадка «Наруто 57-58»: сервер ПОЛНЫЙ (111/videos → 220/220; 1512 → 1180); причины в UI: max-h-64 сетка (~48-60 кнопок без голосового скролла) + per-dub счётчик (у One Piece есть озвучка ровно 58) + таймаут 12с на 5МБ /videos + detailsCache без TTL/инвалидации — EPISODE_PARSER_AUDIT.md
+- Найден КРАШ EXE: page.tsx:89 toast не импортирован (ReferenceError при капче/ошибке входа) — ИСПРАВЛЕН (+import), lint 0
+- YummyTV (1-c): подтверждён token-API api.yani.tv (Bearer, X-Application: ze645twqfeql6l1u, 420=капча) — взят как РЕФЕРЕНС; наш путь — cookie-сессия уже работающая (спека §5), token-API не используем
+- Созданы документы: PROJECT_AUDIT.md, ACCOUNT_MODEL.md, LIBRARY_STATUS_MATRIX.md, EPISODE_PARSER_AUDIT.md (все — только проверенные факты; BLOCKED честно проставлен там, где нужна реальная сессия пользователя)
+
+Stage Summary:
+- Архитектура соответствует спеке: тонкий клиент + персистентная сессия сайта; действия аккаунта будут выполняться same-origin ВНУТРИ сессии (как сам сайт) с верификацией чтением+reload — новых аккаунт-систем и обходов нет
+- Готов пофазный план реализации: (1) быстрые фиксы — сделан краш-toast; (2) эпизоды/счётчики/кэш; (3) реальные действия аккаунта через site-API в сессии; (4) auto-next/auto-skip; (5) голос-спека II (интенты статусов/оценок, контекст, верификация); (6) тесты YUMMYANIME_REAL_SERVER_TESTS.md + EXE
+- Для снятия BLOCKED в матрице нужен реальный вход пользователя в окне сайта (пароль вводит только пользователь)

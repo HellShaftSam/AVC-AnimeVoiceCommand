@@ -26,6 +26,7 @@ import { VoiceConfirmDialog } from '@/components/avc/voice-confirm-dialog'
 import { VoicePanel } from '@/components/avc/voice-panel'
 import { useVoice } from '@/lib/avc/use-voice'
 import { useAvcStore } from '@/lib/avc/store'
+import { toast } from '@/hooks/use-toast'
 import type { AppSettings } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
