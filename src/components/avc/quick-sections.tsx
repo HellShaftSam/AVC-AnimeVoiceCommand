@@ -46,7 +46,7 @@ export function QuickSections() {
   }
 
   return (
-    <div className="avc-scroll overflow-x-auto border-b border-border bg-background px-3 py-2 sm:px-4">
+    <div className="avc-scroll glass overflow-x-auto border-b border-cyan-200/10 px-3 py-2 sm:px-4">
       <div className="flex gap-2">
         {SECTIONS.map(({ id, label, icon: Icon }) => {
           const activeBtn = isActive(id)

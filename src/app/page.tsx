@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { avcApi, getElectronBridge } from '@/lib/avc/api'
+import { AquariumBackground } from '@/components/avc/aquarium-background'
 import { AuthDialog } from '@/components/avc/auth-dialog'
 import { AiSetupDialog } from '@/components/avc/ai-setup-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
@@ -138,30 +139,35 @@ export default function Page() {
   return (
     <div
       className={cn(
-        'flex h-screen flex-col overflow-hidden bg-background text-foreground selection:bg-sky-400/40',
+        'relative flex h-screen flex-col overflow-hidden text-foreground selection:bg-sky-400/40',
         couchMode ? 'text-[17px] lg:text-[21px]' : 'text-sm',
       )}
     >
-      <HeaderBar />
-      <QuickSections />
-      <TabsBar />
+      {/* Подводный мир позади интерфейса: волны и свет видны СКВОЗЬ панели */}
+      <AquariumBackground />
 
-      <div className="flex min-h-0 flex-1">
-        <main
-          id="avc-content"
-          className="avc-scroll min-w-0 flex-1 overflow-y-auto p-3 sm:p-4"
-          tabIndex={-1}
-          aria-label="Содержимое вкладки"
-        >
-          {activeTab && <TabContent key={activeTab.id} tab={activeTab} />}
-        </main>
-        {!couchMode && <HistoryPanel />}
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+        <HeaderBar />
+        <QuickSections />
+        <TabsBar />
+
+        <div className="flex min-h-0 flex-1">
+          <main
+            id="avc-content"
+            className="avc-scroll min-w-0 flex-1 overflow-y-auto p-3 sm:p-4"
+            tabIndex={-1}
+            aria-label="Содержимое вкладки"
+          >
+            {activeTab && <TabContent key={activeTab.id} tab={activeTab} />}
+          </main>
+          {!couchMode && <HistoryPanel />}
+        </div>
+
+        <footer className="glass mt-auto flex flex-col gap-2 border-t border-cyan-200/10 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
+          <VoicePanel voice={voice} />
+          <MiniPlayer />
+        </footer>
       </div>
-
-      <footer className="mt-auto flex flex-col gap-2 border-t border-border bg-background/95 px-3 py-2.5 backdrop-blur sm:flex-row sm:items-center sm:gap-4 sm:px-4">
-        <VoicePanel voice={voice} />
-        <MiniPlayer />
-      </footer>
 
       {/* Диалоги и панели */}
       <PendingOptionsDialog />

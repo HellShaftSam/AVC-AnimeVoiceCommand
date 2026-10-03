@@ -149,8 +149,8 @@ export function HeaderBar() {
   const loggedIn = account.state === 'loggedIn' && user !== null
 
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-border bg-background/95 px-3 py-2 sm:px-4">
-      <h1 className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg">
+    <header className="glass flex items-center justify-between gap-3 border-b border-cyan-200/10 px-3 py-2 sm:px-4">
+      <h1 className="avc-title-glow flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg">
         <Mic className="h-5 w-5 shrink-0 text-sky-400" aria-hidden />
         <span className="truncate">
           Anime <span className="text-sky-400">Voice</span> Controller

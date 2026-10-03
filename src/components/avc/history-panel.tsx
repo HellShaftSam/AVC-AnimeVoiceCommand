@@ -67,7 +67,7 @@ export function HistoryPanel() {
   return (
     <aside
       aria-label="История команд"
-      className="hidden w-72 shrink-0 flex-col border-l border-border bg-background lg:flex"
+      className="glass hidden w-72 shrink-0 flex-col border-l border-cyan-200/10 lg:flex"
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <h2 className="text-sm font-semibold text-foreground">История команд</h2>

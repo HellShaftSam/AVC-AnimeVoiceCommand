@@ -850,3 +850,18 @@ Work Log:
 - releases/VERSION.txt + README обновлены; коммит efcb36a запушен
 - РЕЛИЗ v1.1.0 создан (201), EXE залит (201, ~32с); верификация анонимным скачиванием: sha256 совпал байт-в-байт; releases/latest = v1.1.0
 - CI на windows-latest: сборка коммита 274cfeb (тема+все фиксы) — SUCCESS на реальном Windows (rcedit/NSIS/сборка Next/Electron — весь пайплайн подтверждён)
+
+---
+Task ID: aquarium-theme-1
+Agent: Z.ai Code (main)
+Task: Аквариумная тема — «подводный мир» сквозь интерфейс (референс: светящиеся циановые волны на глубокой воде)
+
+Work Log:
+- Новый компонент components/avc/aquarium-background.tsx: fixed inset-0 z-0, pointer-events-none, aria-hidden; 6 слоёв — градиент глубины (свет у «поверхности» → бездна), 4 каустических свечения (radial + blur(70px) + mix-blend screen, дрейф 46-64s), 3 световых луча (god rays, sway 17-29s), 4 светящиеся волны (SVG-синусоиды viewBox 2880, бесшовный translateX(-50%) дрейф 24-57s, у «поверхности» — светящийся гребень), 13 пузырьков (детерминированный массив без Math.random → нет hydration-мисматчей, чистый CSS rise 13-28s), виньетка; вся анимация transform/opacity (compositor-friendly)
+- globals.css: --card/--popover стали полупрозрачными (#10223AD9 / #142B46F2) — ВСЕ карточки и меню автоматически превратились в «подводное стекло»; класс .glass (градиент + backdrop-blur 16px) для каркаса; keyframes aq-drift-1/2/3, aq-ray-sway, aq-wave, aq-bubble-rise; @media prefers-reduced-motion отключает всю анимацию воды; .avc-title-glow (свечение заголовка как света в воде)
+- Каркас: page.tsx — корень без bg-background, AquariumBackground первым ребёнком, контент обёрнут в relative z-10, футер glass + border-cyan-200/10; header-bar — glass + свечение заголовка; tabs-bar, quick-sections, history-panel — glass; layout.tsx: viewport themeColor #f59e0b (старый amber) → #07111f
+- Усиление после первого прогона: каустика +30% (alpha 0.14-0.22 → 0.18-0.30), волны ярче (0.16→0.20 поверхность, гребень 0.32→0.42), без потери контраста текста
+- ВЕРИФИКАЦИЯ (agent-browser): lint 0 ошибок; dev.log без ошибок (все API 200); анимация доказана сравнением двух кадров с интервалом 6с (байты различаются — волны движутся); скриншоты aquarium-1920 / aq-v2-home / aq-v2-catalog / aq-mobile (390px, без горизонтального overflow) / aq-settings (диалог поверх воды читаем — solid bg); вкладка «Каталог» — постеры плывут по воде, карточки-стекло
+
+Stage Summary:
+- Интерфейс теперь «аквариум»: волны и свет плывут СКВОЗЬ шапку, панели и карточки (полупрозрачные токены + backdrop-blur), пузырьки поднимаются со дна, лучи света покачиваются; текст и диалоги остались читаемыми; reduced-motion уважается; перф — только transform/opacity

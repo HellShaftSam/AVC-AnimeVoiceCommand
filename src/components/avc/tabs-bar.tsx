@@ -17,7 +17,7 @@ export function TabsBar() {
     <div
       role="tablist"
       aria-label="Вкладки"
-      className="avc-scroll flex items-end gap-1 overflow-x-auto border-b border-border bg-background px-2 sm:px-3"
+      className="avc-scroll glass flex items-end gap-1 overflow-x-auto border-b border-cyan-200/10 px-2 sm:px-3"
     >
       {tabs.map((tab, i) => {
         const isActive = tab.id === activeTabId
