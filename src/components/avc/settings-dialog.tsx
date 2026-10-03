@@ -30,6 +30,7 @@ import {
 } from '@/lib/voice/audio-utils'
 import { DEFAULT_VOICE_ALIASES } from '@/lib/voice/provider-resolver'
 import { Button } from '@/components/ui/button'
+import { ModelsManagerCard } from '@/components/avc/models-manager-card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Dialog,
@@ -882,6 +883,11 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
 
   return (
     <div className="space-y-3">
+      {/* Фаза 5 аудита: каталог AI-моделей, безопасная миграция, список моделей */}
+      <ModelsManagerCard />
+
+      <Separator className="bg-zinc-800" />
+
       <section>
         <SectionTitle>Локальный AI</SectionTitle>
         <SettingRow label="Профиль производительности" hint="Максимальная отзывчивость — минимум задержек (§19)">

@@ -76,6 +76,7 @@ class VoicePipeline extends EventEmitter {
     return {
       enabled: this.enabled,
       profile: this.profile,
+      modelsDir: this.modelsDir,
       models: st.components,
       freeDisk: st.freeDisk,
       voices: st.voice,

@@ -71,12 +71,32 @@ export interface AiStatusSnapshot {
   profile: string
   worker?: 'ok' | 'failed'
   reason?: string
+  modelsDir?: string
   models: AiComponentStatus[]
   voices: Array<{ id: string; name: string; default: boolean }>
   ready: { stt: boolean; llm: boolean; tts: boolean }
   stt: { state: string; profile: string; error: string | null; lastFinalMs: number | null; utterances: number }
   llm: { state: string; error: string | null; lastRouteMs: number | null; routes: number }
   tts: { state: string; error: string | null; voice: string; lastSynthMs: number | null; cacheHits: number }
+}
+
+/** Конфиг каталога моделей (фаза 5 аудита) */
+export interface AiModelsDirConfig {
+  currentDir: string
+  configured: string | null
+  defaultDir: string
+  usedBytes: number | null
+  workerReady: boolean
+}
+
+export interface AiModelsDirSetResult {
+  ok: boolean
+  migrated?: boolean
+  dir?: string
+  copiedFiles?: number
+  copiedBytes?: number
+  message?: string
+  error?: string
 }
 
 export interface AiHardwareInfo {
@@ -144,6 +164,14 @@ export interface AvcElectronBridge {
     onSttFinal(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommandType?: string | null }) => void): () => void
     onModelProgress(cb: (p: AiModelProgress) => void): () => void
     onServicesStatus(cb: (p: Record<string, string>) => void): () => void
+    /** Каталог AI-моделей: текущий путь + конфиг (фаза 5 аудита) */
+    getModelsDirConfig?(): Promise<AiModelsDirConfig>
+    /** Системный диалог выбора папки (null = отмена) */
+    pickModelsDir?(): Promise<string | null>
+    /** Безопасная смена каталога: копирование → сверка → конфиг → рестарт воркера */
+    setModelsDir?(dir: string): Promise<AiModelsDirSetResult>
+    /** Открыть каталог моделей в проводнике */
+    openModelsDir?(): Promise<{ ok: boolean; error: string | null }>
   }
 }
 

@@ -138,5 +138,22 @@ contextBridge.exposeInMainWorld('avcElectron', {
       ipcRenderer.on('avc:ai:services-status', handler)
       return () => ipcRenderer.removeListener('avc:ai:services-status', handler)
     },
+
+    // --- Каталог AI-моделей (фаза 5 аудита): выбор/миграция/открытие ---
+
+    /** Текущий каталог моделей + конфиг (не-секретные пути) */
+    getModelsDirConfig: () => ipcRenderer.invoke('avc:ai:models:get-config'),
+
+    /** Системный диалог выбора папки (возвращает абсолютный путь или null) */
+    pickModelsDir: () => ipcRenderer.invoke('avc:ai:models:pick-dir'),
+
+    /**
+     * Безопасная смена каталога: валидация → место → копирование → сверка →
+     * конфиг → рестарт AI-воркера. Старый каталог не удаляется.
+     */
+    setModelsDir: (dir) => ipcRenderer.invoke('avc:ai:models:set-dir', { dir }),
+
+    /** Открыть каталог моделей в системном проводнике */
+    openModelsDir: () => ipcRenderer.invoke('avc:ai:models:open-dir'),
   },
 })

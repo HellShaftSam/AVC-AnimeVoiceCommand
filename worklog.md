@@ -804,3 +804,15 @@ Work Log:
 - Поэтапная инициализация AI: voice-pipeline.initializeCoreThenDeferred() — STT сразу (голос готов ASAP), TTS/LLM — фон через 8с + on-demand догрузка в llmRoute/ttsSpeak; ai-worker.cjs переключён на новый вход
 - ВЕРИФИКАЦИЯ на реальных моделях (Linux, xvfb): ai-selftest EXIT=0 (workerStarted, stt/tts/llm ready, TTS→STT→early Pause, 4 partials); телеметрия показала: STT готов +2.2с, TTS+LLM догрузились +20с фоном; полный pipeline-selftest 7/7 PASS (вкл. LLM-фолбэк 5.3с и запрет опасных ранних команд)
 - Честное ограничение: числовые замеры холодного/тёплого старта portable EXE на Windows — blocked by environment; доминирующая стоимость — распаковка ~385МБ в %TEMP% при каждом запуске (поведение portable-таргета), методика замера приложена в финальном отчёте
+
+---
+Task ID: postrelease-fix-4
+Agent: Z.ai Code (main)
+Task: Приоритет 4 — AI-модели: выбор папки, миграция, менеджер (фаза 5)
+
+Work Log:
+- main.cjs: конфиг каталога userData/models-dir.json; resolveModelsDir() (конфиг → dev → userData/ai-models); IPC avc:ai:models:{get-config,pick-dir,set-dir,open-dir}; безопасная миграция (mkdir+пробная запись → свободное место statfs → рекурсивное копирование → сверка файлов/байтов → конфиг → рестарт AI-воркера); старая папка НЕ удаляется, при ошибке конфиг не меняется; startAiWorker научен перезапуску (kill+fork)
+- preload: getModelsDirConfig/pickModelsDir/setModelsDir/openModelsDir; voice-pipeline: modelsDir в статусе
+- UI: components/avc/models-manager-card.tsx — «AI-модели и хранилище» в Настройки → AI (только EXE; в web честно скрыта): путь+место, смена папки, открытие в проводнике, возврат по умолчанию, список моделей (назначение/версия/размер/обязательность/статус)
+- ТИПЫ: api.ts AiModelsDirConfig/AiModelsDirSetResult + опциональные методы моста (обратная совместимость старых сборок)
+- ВЕРИФИКАЦИЯ: lint 0; node --check main/preload/pipeline; браузер: web → карточка скрыта; инжект мок-моста → карточка рендерится (каталог, 4 модели с бейджами, кнопки), клик «Изменить папку…» проходит без ошибок; полная интеграция миграции — в EXE на Windows (blocked by environment)

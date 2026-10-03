@@ -14,7 +14,7 @@
  *   electron . --auth-selftest — диагностический прогон (JSON-отчёт в stdout,
  *                                секции 9/20/24), окно UI не открывается
  */
-const { app, BrowserWindow, ipcMain, session, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, session, shell, dialog } = require('electron')
 const { spawn, fork: childFork } = require('child_process')
 const childProcess = { fork: childFork }
 const http = require('http')
@@ -310,28 +310,74 @@ function findSystemNode() {
   return null
 }
 
+/** Конфиг каталога моделей (фаза 5 аудита): userData/models-dir.json */
+function modelsDirConfigPath() {
+  return path.join(app.getPath('userData'), 'models-dir.json')
+}
+
+function readModelsDirConfig() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(modelsDirConfigPath(), 'utf8'))
+    const dir = typeof raw.modelsDir === 'string' ? raw.modelsDir.trim() : ''
+    return dir && path.isAbsolute(dir) ? dir : null
+  } catch {
+    return null
+  }
+}
+
+function writeModelsDirConfig(dir) {
+  fs.writeFileSync(modelsDirConfigPath(), JSON.stringify({ modelsDir: dir }, null, 2))
+}
+
+/** Каталог моделей: конфиг пользователя → dev-models → userData/ai-models */
+function resolveModelsDir() {
+  const configured = readModelsDirConfig()
+  if (configured) return configured
+  const devModels = path.join(app.getAppPath(), 'models')
+  if (fs.existsSync(path.join(devModels, 'stt'))) return devModels
+  return path.join(app.getPath('userData'), 'ai-models')
+}
+
+/** Размер каталога в байтах и число файлов (для проверки миграции) */
+function dirStats(dir) {
+  let bytes = 0
+  let files = 0
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else {
+        bytes += fs.statSync(p).size
+        files++
+      }
+    }
+  }
+  walk(dir)
+  return { bytes, files }
+}
+
 function startAiWorker() {
   try {
-    const devModels = path.join(app.getAppPath(), 'models')
-    const modelsDir = fs.existsSync(path.join(devModels, 'stt'))
-      ? devModels
-      : path.join(app.getPath('userData'), 'ai-models')
+    // Фаза 5 (аудит №4): каталог моделей можно переопределить пользователем
+    // (Настройки → AI-модели → Изменить папку); конфиг living в userData.
+    const modelsDir = resolveModelsDir()
+    const workerScript = app.isPackaged
+      ? path.join(process.resourcesPath, 'ai', 'ai-worker.cjs')
+      : path.join(__dirname, 'ai', 'ai-worker.cjs')
+    if (aiWorker) {
+      // перезапуск (миграция моделей): гасим старый воркер и ждём его выхода
+      try { aiWorker.kill() } catch { /* уже мёртв */ }
+      aiWorker = null
+    }
     // Нативный sherpa-onnx возвращает Float32Array через napi external arraybuffer —
-    // Electron запрещает их В ЛЮБЫХ своих процессах (main/renderer/utility/run-as-node).
-    // Поэтому AI-воркер работает на ЧИСТОМ Node:
-    //   packaged — рантайм из resources/runtime-node (кладёт electron-builder/CI);
-    //   dev — системный node из PATH.
-    // Спека §112 соблюдена: пользователю ничего ставить не надо, рантайм в комплекте.
+    // Electron запрещает их В ЛЮБЫХ своих процессах, поэтому AI-воркер работает
+    // на ЧИСТОМ Node: packaged — resources/runtime-node, dev — системный node.
     const nodeExe = findSystemNode()
     if (!nodeExe) {
       aiWorkerFailed = 'Node-рантайм для AI-воркера не найден (ожидался resources/runtime-node или node в PATH)'
       log(`[AI] ${aiWorkerFailed}`)
       return
     }
-    // packaged: воркер и его node_modules — реальные файлы в resources/ai (не asar)
-    const workerScript = app.isPackaged
-      ? path.join(process.resourcesPath, 'ai', 'ai-worker.cjs')
-      : path.join(__dirname, 'ai', 'ai-worker.cjs')
     aiWorker = childFork(workerScript, [], {
       execPath: nodeExe,
       env: { ...process.env, AVC_MODELS_DIR: modelsDir },
@@ -414,6 +460,108 @@ function setupAiIpc() {
     return aiWorkerRequest('feed', { samples })
   })
   ipcMain.handle('avc:ai:stt-flush', () => aiWorkerRequest('flush'))
+
+  // --- Фаза 5 (аудит №4): каталог AI-моделей — выбор, миграция, открытие ---
+
+  ipcMain.handle('avc:ai:models:get-config', () => {
+    const current = resolveModelsDir()
+    let usedBytes = null
+    try {
+      if (fs.existsSync(current)) usedBytes = dirStats(current).bytes
+    } catch { /* каталог мог быть пуст/недоступен */ }
+    return {
+      currentDir: current,
+      configured: readModelsDirConfig(),
+      defaultDir: path.join(app.getPath('userData'), 'ai-models'),
+      usedBytes,
+      workerReady: !!aiWorker,
+    }
+  })
+
+  ipcMain.handle('avc:ai:models:pick-dir', async () => {
+    const res = await dialog.showOpenDialog({
+      title: 'Папка для AI-моделей AVC-Anime',
+      buttonLabel: 'Выбрать папку',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: resolveModelsDir(),
+    })
+    if (res.canceled || !res.filePaths?.[0]) return null
+    return res.filePaths[0]
+  })
+
+  ipcMain.handle('avc:ai:models:open-dir', async () => {
+    const dir = resolveModelsDir()
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const err = await shell.openPath(dir)
+    return { ok: !err, error: err || null }
+  })
+
+  /**
+   * Безопасная смена каталога моделей (фаза 5.4):
+   * валидация → свободное место → копирование → сверка → конфиг → рестарт воркера.
+   * Старый каталог НЕ удаляется; при ошибке конфиг не меняется (откат = ничего не делаем).
+   */
+  ipcMain.handle('avc:ai:models:set-dir', async (_e, args) => {
+    const target = String(args?.dir || '').trim()
+    if (!target || !path.isAbsolute(target)) {
+      return { ok: false, error: 'Нужен абсолютный путь к папке' }
+    }
+    const source = resolveModelsDir()
+    if (path.resolve(target) === path.resolve(source)) {
+      return { ok: true, migrated: false, dir: target, message: 'Каталог не изменился' }
+    }
+    try {
+      fs.mkdirSync(target, { recursive: true })
+      // пробная запись: права доступа (сетевые/съёмные диски, юникод-пути)
+      const probe = path.join(target, `.avc-write-test-${Date.now()}`)
+      fs.writeFileSync(probe, 'ok')
+      fs.rmSync(probe, { force: true })
+
+      const srcExists = fs.existsSync(source)
+      const srcStats = srcExists ? dirStats(source) : { bytes: 0, files: 0 }
+      if (srcStats.files > 0) {
+        // свободное место на целевом диске
+        try {
+          const stfs = await fs.promises.statfs(target)
+          const free = stfs.bavail * stfs.bsize
+          if (free < srcStats.bytes * 1.05) {
+            return {
+              ok: false,
+              error: `Недостаточно места: доступно ${Math.floor(free / 1048576)} МБ, нужно ${Math.ceil(srcStats.bytes / 1048576)} МБ`,
+            }
+          }
+        } catch { /* statfs недоступен — проверим сверкой после копирования */ }
+        log(`[Models] Миграция моделей: ${source} → ${target} (${srcStats.files} файлов)`)
+        await fs.promises.cp(source, target, { recursive: true, force: false, errorOnExist: false })
+        // сверка: количество файлов и суммарный размер должны совпасть
+        const dstStats = dirStats(target)
+        if (dstStats.files < srcStats.files || dstStats.bytes < srcStats.bytes) {
+          return {
+            ok: false,
+            error: `Сверка после копирования не сошлась: было ${srcStats.files} файлов/${srcStats.bytes} байт, стало ${dstStats.files}/${dstStats.bytes}. Конфиг не изменён, старый каталог сохранён.`,
+          }
+        }
+      }
+      writeModelsDirConfig(target)
+      // перезапуск воркера с новым каталогом (модели подхватятся с места)
+      startAiWorker()
+      log(`[Models] Каталог моделей переключён: ${target}`)
+      return {
+        ok: true,
+        migrated: srcStats.files > 0,
+        dir: target,
+        copiedFiles: srcStats.files,
+        copiedBytes: srcStats.bytes,
+        message: 'Каталог моделей обновлён',
+      }
+    } catch (err) {
+      log(`[Models] Ошибка миграции: ${err.message}`)
+      return {
+        ok: false,
+        error: `Миграция не удалась: ${err.message}. Конфиг не изменён, старый каталог сохранён.`,
+      }
+    }
+  })
 }
 
 /** Минимальная блокировка рекламных доменов в сессии сайта (не мешает входу) */
