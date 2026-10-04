@@ -64,6 +64,11 @@ class STTService extends EventEmitter {
     this._silenceMsAccum = 0
     this._speechMsTotal = 0
     this._lastEmit = 0
+    // РЕЖИМ РАЦИИ (push-to-talk): пока удерживается кнопка, VAD ОБХОДИТСЯ —
+    // всё аудио считаем речью. УРОК: «STT работает через раз» — короткие фразы
+    // не успевали раскачать VAD (~0.3-0.4 с) до отпускания кнопки, flush
+    // находил _inSpeech=false и молча выбрасывал фразу.
+    this._captureMode = false
   }
 
   get sttDir() {
@@ -184,7 +189,8 @@ class STTService extends EventEmitter {
         return // сбой VAD не роняет процесс
       }
 
-      const isSpeech = this._vad.isDetected() && Date.now() > (this._cooldownUntil || 0)
+      const isSpeech =
+        this._captureMode || (this._vad.isDetected() && Date.now() > (this._cooldownUntil || 0))
       if (isSpeech) {
         if (!this._inSpeech) {
           // старт фразы: отдаём распознавателю предысторию из кольца (§10–§11)
@@ -204,7 +210,7 @@ class STTService extends EventEmitter {
         this._feedStt(chunk)
         this._tailWindows += 1
         const tailMs = this._tailWindows * (win / SAMPLE_RATE_VAD) * 1000
-        if (tailMs >= 250) {
+        if (tailMs >= 250 && !this._captureMode) {
           this._finishUtterance('endpoint')
         }
       } else {
@@ -287,6 +293,32 @@ class STTService extends EventEmitter {
     this._ring = []
     try { if (this._sttStream) this._recognizer.reset(this._sttStream) } catch { /* ок */ }
     this._sttStream = null
+  }
+
+  /**
+   * Режим рации: пока on — весь аудио-поток считается речью (VAD обходится),
+   * фраза завершается только по flush() (отпускание кнопки). Делает PTT
+   * детерминированным: что сказал в микрофон при удержании — то и распознаётся.
+   */
+  setCaptureMode(on) {
+    const next = !!on
+    if (next === this._captureMode) return
+    this._captureMode = next
+    if (next && this.isReady() && !this._inSpeech) {
+      // фраза начинается немедленно: предыстория из кольца + живой поток
+      this._inSpeech = true
+      this._utteranceStart = Date.now()
+      this._sttStream = this._recognizer.createStream()
+      this._emittedFinalForUtterance = false
+      this._tailWindows = 0
+      const ring = this._ring || []
+      for (const rc of ring) this._feedStt(rc)
+      this._ring = []
+    }
+    if (!next && this._inSpeech) {
+      // кнопка отпущена — завершаем тем, что успели захватить
+      this._finishUtterance('flush')
+    }
   }
 
   /** Ручное завершение фразы (push-to-talk отпустили) */

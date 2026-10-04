@@ -1,19 +1,31 @@
 'use client'
 /**
  * AnimeGrid — сетка карточек аниме (секции/поиск) + скелетон загрузки.
+ * Наведение (мышь) → плавающее превью рядом с карточкой: полное название,
+ * рейтинг, жанры, описание — без перехода на страницу (короткие названия
+ * на карточке обрезаются — в превью видно всё).
  */
+import { useRef } from 'react'
 import { Star } from 'lucide-react'
 import { openAnimeCard } from '@/lib/avc/executor'
 import type { AnimeCard } from '@/lib/avc/types'
 import { Skeleton } from '@/components/ui/skeleton'
+import { AnimeHoverPreview, useAnimeHover } from './anime-hover-preview'
 
 export function AnimeGrid({ items }: { items: AnimeCard[] }) {
+  const { hover, onEnter, onLeave } = useAnimeHover()
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const open = (card: AnimeCard) => void openAnimeCard(card, true)
+
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <div ref={gridRef} className="relative">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
       {items.map((card) => (
         <button
           key={`${card.animeId}-${card.slug}`}
-          onClick={() => void openAnimeCard(card, true)}
+          onClick={() => open(card)}
+          onMouseEnter={(e) => onEnter(card, e.currentTarget)}
+          onMouseLeave={onLeave}
           aria-label={`Открыть: ${card.title}`}
           className="group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-xl"
         >
@@ -47,6 +59,8 @@ export function AnimeGrid({ items }: { items: AnimeCard[] }) {
           </div>
         </button>
       ))}
+      </div>
+      <AnimeHoverPreview hover={hover} onOpen={open} onNavigate={open} />
     </div>
   )
 }

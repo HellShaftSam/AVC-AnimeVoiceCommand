@@ -37,15 +37,18 @@ export function HistoryPanel() {
   const bumpHistoryVersion = useAvcStore((s) => s.bumpHistoryVersion)
   const [items, setItems] = useState<HistoryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/history?limit=25')
-      if (!res.ok) throw new Error('fetch failed')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { items?: HistoryItem[] }
       setItems(data.items ?? [])
-    } catch {
+      setError(null)
+    } catch (e) {
       setItems([])
+      setError(e instanceof Error ? e.message : 'История недоступна')
     } finally {
       setLoading(false)
     }
@@ -67,7 +70,7 @@ export function HistoryPanel() {
   return (
     <aside
       aria-label="История команд"
-      className="glass hidden w-72 shrink-0 flex-col border-l border-cyan-200/10 lg:flex"
+      className="glass hidden w-72 shrink-0 flex-col border-l border-cyan-200/10 md:flex"
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <h2 className="text-sm font-semibold text-foreground">История команд</h2>
@@ -84,6 +87,14 @@ export function HistoryPanel() {
       </div>
       <div className="avc-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
         {loading && <p className="p-2 text-xs text-muted-foreground">Загрузка...</p>}
+        {!loading && error && (
+          <div className="p-2 text-xs text-rose-400">
+            История недоступна: {error}
+            <Button variant="ghost" size="sm" className="mt-1 min-h-7 px-2 text-[11px]" onClick={() => void load()}>
+              Повторить
+            </Button>
+          </div>
+        )}
         {!loading && items.length === 0 && (
           <p className="p-2 text-xs text-muted-foreground">Пока нет команд. Скажите что-нибудь!</p>
         )}

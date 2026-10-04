@@ -1035,7 +1035,12 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
             </div>
             <div className="grid grid-cols-1 gap-1.5">
               <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
-                <span className="text-foreground">STT · T-One (распознавание)</span>
+                <span className="text-foreground">
+                  STT · {status.activeModel === 'gigaam-v3-russian' || status.activeModel === 'gigaam-v2-russian'
+                    ? 'GigaAM (точный)'
+                    : 'T-One Streaming (быстрый)'}{' '}
+                  — активная модель: {status.activeModel ?? '—'}
+                </span>
                 <span className="flex items-center gap-2">
                   {status.stt.lastFinalMs != null && <span className="text-muted-foreground">{status.stt.lastFinalMs} мс</span>}
                   {readyBadge(status.ready.stt, status.stt.state, status.stt.error)}

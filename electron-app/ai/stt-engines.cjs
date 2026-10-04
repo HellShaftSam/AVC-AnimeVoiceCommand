@@ -81,6 +81,8 @@ class GigaamOfflineEngine extends EventEmitter {
     this._inSpeech = false
     this._tailWindows = 0
     this._utteranceSamples = [] // Float32 16 кГц текущей фразы (декодируем целиком)
+    // Режим рации: всё аудио без VAD-гейта (см. STTService.setCaptureMode)
+    this._captureMode = false
   }
 
   get modelDir() {
@@ -198,7 +200,8 @@ class GigaamOfflineEngine extends EventEmitter {
       } catch {
         return
       }
-      const isSpeech = this._vad.isDetected() && Date.now() > (this._cooldownUntil || 0)
+      const isSpeech =
+        this._captureMode || (this._vad.isDetected() && Date.now() > (this._cooldownUntil || 0))
       if (isSpeech) {
         if (!this._inSpeech) {
           this._inSpeech = true
@@ -214,7 +217,7 @@ class GigaamOfflineEngine extends EventEmitter {
         this._accumulate(chunk)
         this._tailWindows += 1
         const tailMs = this._tailWindows * (win / SAMPLE_RATE_VAD) * 1000
-        if (tailMs >= 250) this._finishUtterance('endpoint')
+        if (tailMs >= 250 && !this._captureMode) this._finishUtterance('endpoint')
       } else {
         this._ring.push(Int16Array.from(chunk))
         if (this._ring.length > 38) this._ring.shift()
@@ -253,6 +256,21 @@ class GigaamOfflineEngine extends EventEmitter {
     this.metrics.lastFinalMs = Date.now() - this._utteranceStart
     this.metrics.lastEndpointMs = Date.now() - t0
     this.emit('final', { utteranceId: this.utteranceSeq, text, reason, ms: Date.now() - this._utteranceStart })
+  }
+
+  /** Режим рации: включение сразу начинает фразу, выключение — завершает */
+  setCaptureMode(on) {
+    const next = !!on
+    if (next === this._captureMode) return
+    this._captureMode = next
+    if (next && this.isReady() && !this._inSpeech) {
+      this._inSpeech = true
+      this._utteranceStart = Date.now()
+      this._utteranceSamples = []
+      for (const rc of this._ring) this._accumulate(rc)
+      this._ring = []
+    }
+    if (!next && this._inSpeech) this._finishUtterance('flush')
   }
 
   flush() {

@@ -181,6 +181,8 @@ export interface AvcElectronBridge {
     initialize(): Promise<Record<string, string>>
     feedAudio(samples: Int16Array): Promise<boolean>
     flushStt(): Promise<void>
+    /** Режим рации: аудио при удержании PTT без VAD-гейта */
+    setCaptureMode(enabled: boolean): Promise<boolean>
     onSttPartial(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommand?: string | null }) => void): () => void
     onSttFinal(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommandType?: string | null }) => void): () => void
     onModelProgress(cb: (p: AiModelProgress) => void): () => void
@@ -209,6 +211,36 @@ export interface AvcElectronBridge {
     openLogsFolder?(): Promise<{ ok: boolean; error?: string | null }>
     /** Подписка на состояние AI-воркера (запущен/упал + причина) */
     onWorkerState?(cb: (p: { running: boolean; error: string | null }) => void): () => void
+    /** Диагностика владельца: версия/пути/состояние воркера */
+    getAppInfo?(): Promise<{
+      version: string
+      platform: string
+      electron: string | null
+      node: string | null
+      userData: string
+      logsFile: string
+      modelsDir: string
+      workerRunning: boolean
+      workerError: string | null
+      isPackaged: boolean
+    }>
+    /** Хвост лога приложения (без секретов — redact на этапе записи) */
+    readDebugLogs?(lines?: number): Promise<{ lines: string[]; file?: string; error?: string }>
+
+    /** Проверить обновление (GitHub releases vs встроенная версия) */
+    checkUpdate?(): Promise<{
+      current: string
+      latest: string | null
+      available: boolean
+      assetUrl: string | null
+      assetName: string | null
+      releasesUrl: string
+      error?: string
+    }>
+    /** Скачать и установить обновление (подмена EXE + перезапуск) */
+    installUpdate?(assetUrl: string): Promise<{ ok: boolean; error?: string }>
+    /** Прогресс скачивания обновления */
+    onUpdateProgress?(cb: (p: { phase: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; error?: string }) => void): () => void
   }
 }
 

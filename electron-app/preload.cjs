@@ -104,6 +104,8 @@ contextBridge.exposeInMainWorld('avcElectron', {
 
     /** Принудительное завершение текущей фразы (push-to-talk отпустили) */
     flushStt: () => ipcRenderer.invoke('avc:ai:stt-flush'),
+    /** Режим рации: аудио при удержании PTT без VAD-гейта (детерминированный PTT) */
+    setCaptureMode: (enabled) => ipcRenderer.invoke('avc:ai:stt-capture', { enabled }),
 
     /** Частичная транскрипция { utteranceId, text, ms, earlyCommand? } (§11–§12) */
     onSttPartial: (cb) => {
@@ -170,6 +172,22 @@ contextBridge.exposeInMainWorld('avcElectron', {
 
     /** Открыть папку с логами (диагностика без поддержки) */
     openLogsFolder: () => ipcRenderer.invoke('avc:ai:open-logs'),
+
+    /** Диагностика владельца: версия/пути/состояние воркера */
+    getAppInfo: () => ipcRenderer.invoke('avc:debug:appinfo'),
+    /** Хвост лога приложения */
+    readDebugLogs: (lines) => ipcRenderer.invoke('avc:debug:logs', { lines }),
+
+    /** Проверить обновление (GitHub releases/latest vs встроенная версия) */
+    checkUpdate: () => ipcRenderer.invoke('avc:update:check'),
+    /** Скачать и установить обновление (портативная подмена EXE + перезапуск) */
+    installUpdate: (assetUrl) => ipcRenderer.invoke('avc:update:install', { assetUrl }),
+    /** Прогресс скачивания обновления */
+    onUpdateProgress: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('avc:update:progress', handler)
+      return () => ipcRenderer.removeListener('avc:update:progress', handler)
+    },
 
     /** Подписка на состояние AI-воркера (запущен/упал + честная причина) */
     onWorkerState: (cb) => {

@@ -749,7 +749,14 @@ export function useVoice(): VoiceApi {
       !!getElectronBridge()?.ai?.available
     if (exeLocalAvailable) {
       const okLocal = await startLocalSession()
-      if (okLocal) return
+      if (okLocal) {
+        // РЕЖИМ РАЦИИ: пока кнопка удерживается — всё аудио считается речью
+        // (без VAD-гейта). Финал — по отпусканию (stopPushToTalkAndProcess).
+        void getElectronBridge()
+          ?.ai?.setCaptureMode?.(true)
+          .catch(() => undefined)
+        return
+      }
       if (seq !== sessionSeqRef.current) return
       if (settings.sttEngine === 'local') {
         useAvcStore.getState().setVoiceStatus(
@@ -801,7 +808,12 @@ export function useVoice(): VoiceApi {
       localSessionRef.current = null
       teardownAudio()
       const ai = getElectronBridge()?.ai
-      void ai?.flushStt().catch(() => undefined)
+      // снимаем режим рации → движок завершает захваченную фразу,
+      // затем страховочный flush (на случай, если capture не был включён)
+      void ai
+        ?.setCaptureMode?.(false)
+        .then(() => ai.flushStt())
+        .catch(() => ai.flushStt().catch(() => undefined))
       useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
       // 6.6: если финал так и не пришёл (воркер завис) — снимаем зависший статус
       if (localFlushGuardRef.current) clearTimeout(localFlushGuardRef.current)

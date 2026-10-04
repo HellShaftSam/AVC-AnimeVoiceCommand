@@ -82,6 +82,10 @@ const handlers = {
     return true
   },
   flush: () => pipeline.flushAudio(),
+  'set-capture-mode': (args) => {
+    pipeline.setCaptureMode(!!args?.enabled)
+    return true
+  },
 }
 
 if (process.parentPort) {

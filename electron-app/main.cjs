@@ -18,6 +18,7 @@ const { app, BrowserWindow, ipcMain, session, shell, dialog } = require('electro
 const { spawn, fork: childFork } = require('child_process')
 const childProcess = { fork: childFork }
 const http = require('http')
+const https = require('https')
 const path = require('path')
 const fs = require('fs')
 const { performance } = require('perf_hooks')
@@ -762,6 +763,8 @@ function setupAiIpc() {
     return aiWorkerRequest('feed', { samples })
   })
   ipcMain.handle('avc:ai:stt-flush', () => aiWorkerRequest('flush'))
+  // Режим рации: пока кнопка PTT удерживается — аудио без VAD-гейта
+  ipcMain.handle('avc:ai:stt-capture', (_e, args) => aiWorkerRequest('set-capture-mode', { enabled: !!args?.enabled }))
 
   // --- Фаза 5 (аудит №4): каталог AI-моделей — выбор, миграция, открытие ---
 
@@ -783,6 +786,39 @@ function setupAiIpc() {
   })
 
   /** Ручной перезапуск AI-воркера (кнопка в Настройках → AI) */
+  /** Диагностика для владельца (открывается из шапки): версия/пути/состояние воркера */
+  ipcMain.handle('avc:debug:appinfo', () => ({
+    version: app.getVersion(),
+    platform: `${process.platform} ${process.arch}`,
+    electron: process.versions.electron || null,
+    node: process.versions.node || null,
+    userData: app.getPath('userData'),
+    logsFile: path.join(app.getPath('userData'), 'logs', 'avc.log'),
+    modelsDir: resolveModelsDir(),
+    workerRunning: !!aiWorker,
+    workerError: aiWorkerFailed,
+    isPackaged: app.isPackaged,
+  }))
+
+  /** Хвост лога приложения (лог пишется с redact-секретов на этапе записи) */
+  ipcMain.handle('avc:debug:logs', (_e, args) => {
+    const lines = Math.min(400, Math.max(50, Number(args?.lines) || 200))
+    try {
+      const file = path.join(app.getPath('userData'), 'logs', 'avc.log')
+      if (!fs.existsSync(file)) return { lines: [], file }
+      const stat = fs.statSync(file)
+      const start = Math.max(0, stat.size - 512 * 1024)
+      const fd = fs.openSync(file, 'r')
+      const buf = Buffer.alloc(stat.size - start)
+      fs.readSync(fd, buf, 0, buf.length, start)
+      fs.closeSync(fd)
+      const all = buf.toString('utf8').split('\n').filter((l) => l.trim() !== '')
+      return { lines: all.slice(-lines), file }
+    } catch (e) {
+      return { lines: [], error: e.message }
+    }
+  })
+
   ipcMain.handle('avc:ai:restart-worker', async () => {
     log('[AI] Перезапуск AI-воркера по запросу пользователя')
     startAiWorker(0)
@@ -797,6 +833,136 @@ function setupAiIpc() {
   })
 
   /** Открыть папку с логами (диагностика «что происходит» без поддержки) */
+  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ (портативное сам-обновление) --------------------
+  // Проверка: GitHub releases/latest vs встроенная версия (extraMetadata CI).
+  // Установка: скачать новый EXE в %TEMP% → cmd-скрипт (detached) ждёт выхода,
+  // снимает дерево процессов, подменяет файл и перезапускает приложение.
+  const UPDATE_REPO = 'HellShaftSam/AVC-AnimeVoiceCommand'
+
+  const httpsGetJson = (url, redirects = 0) =>
+    new Promise((resolve, reject) => {
+      if (redirects > 5) return reject(new Error('too many redirects'))
+      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater', Accept: 'application/vnd.github+json' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume()
+          return httpsGetJson(new URL(res.headers.location, url).toString(), redirects + 1).then(resolve, reject)
+        }
+        let raw = ''
+        res.on('data', (c) => (raw += c))
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(raw) }) } catch (e) { reject(e) }
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(15000, () => req.destroy(new Error('timeout')))
+    })
+
+  const parseVersion = (s) => {
+    const m = String(s || '').match(/1\.0\.(\d+)/)
+    return m ? parseInt(m[1], 10) : null
+  }
+
+  ipcMain.handle('avc:update:check', async () => {
+    const current = app.getVersion()
+    try {
+      const { status, body } = await httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)
+      if (status !== 200) return { current, available: false, error: `GitHub API: HTTP ${status}` }
+      const latest = String(body.tag_name || '')
+      const asset = (body.assets || []).find((a) => /\.exe$/i.test(a.name)) || null
+      const latestN = parseVersion(latest)
+      const currentN = parseVersion(current)
+      return {
+        current,
+        latest: latest || null,
+        available: latestN !== null && currentN !== null ? latestN > currentN : false,
+        assetUrl: asset ? asset.browser_download_url : null,
+        assetName: asset ? asset.name : null,
+        releasesUrl: `https://github.com/${UPDATE_REPO}/releases/latest`,
+      }
+    } catch (e) {
+      return { current, available: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('avc:update:install', async (_e, args) => {
+    const assetUrl = String(args?.assetUrl || '')
+    if (!/^https:\/\/github\.com\//.test(assetUrl)) {
+      return { ok: false, error: 'Некорректный адрес обновления' }
+    }
+    const send = (payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('avc:update:progress', payload)
+      }
+    }
+    try {
+      const tmpDir = path.join(app.getPath('temp'), 'avc-update')
+      fs.mkdirSync(tmpDir, { recursive: true })
+      const newPath = path.join(tmpDir, 'AVC-Anime-new.exe')
+
+      // скачивание с прогрессом (redirects GitHub → objects.githubusercontent)
+      await new Promise((resolve, reject) => {
+        const get = (url, redirects) => {
+          if (redirects > 6) return reject(new Error('Слишком много перенаправлений'))
+          const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater' } }, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              res.resume()
+              return get(new URL(res.headers.location, url).toString(), redirects + 1)
+            }
+            if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+            const total = Number(res.headers['content-length'] || 0)
+            let received = 0
+            const file = fs.openSync(newPath, 'w')
+            res.on('data', (chunk) => {
+              received += chunk.length
+              fs.writeSync(file, chunk)
+              send({
+                phase: 'downloading',
+                percent: total ? Math.min(99, Math.round((received / total) * 100)) : null,
+                receivedBytes: received,
+                totalBytes: total,
+              })
+            })
+            res.on('end', () => {
+              fs.closeSync(file)
+              resolve()
+            })
+            res.on('error', (e) => {
+              try { fs.closeSync(file) } catch { /* ок */ }
+              reject(e)
+            })
+          })
+          req.on('error', reject)
+          req.setTimeout(60000, () => req.destroy(new Error('Таймаут скачивания обновления')))
+        }
+        get(assetUrl, 0)
+      })
+
+      // cmd-скрипт: ждём выход → снимаем дерево → подмена → перезапуск
+      const exePath = app.getPath('exe')
+      const mainPid = process.pid
+      const scriptPath = path.join(tmpDir, 'update-avc.cmd')
+      const script = [
+        '@echo off',
+        'timeout /t 3 /nobreak >nul',
+        `taskkill /f /pid ${mainPid} /T >nul 2>&1`,
+        `move /y "${newPath}" "${exePath}" >nul 2>&1`,
+        `start "" "${exePath}"`,
+        'del "%~f0" >nul 2>&1',
+      ].join('\r\n')
+      fs.writeFileSync(scriptPath, script, 'utf8')
+
+      send({ phase: 'restarting' })
+      const child = spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore' })
+      child.unref()
+      // выходим — скрипт дождётся, подменит EXE и вернёт приложение
+      setTimeout(() => app.quit(), 300)
+      return { ok: true }
+    } catch (e) {
+      send({ phase: 'error', error: e.message })
+      return { ok: false, error: e.message }
+    }
+  })
+
   ipcMain.handle('avc:ai:open-logs', async () => {
     const dir = path.join(app.getPath('userData'), 'logs')
     try {
@@ -1036,14 +1202,40 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+/**
+ * УРОК РЕЛИЗА 1.0.13 («в диспетчере задач сидит очень много процессов»):
+ * kill() на Windows убивает только сам процесс, а не его дерево — дочерние
+ * процессы Next-сервера и AI-воркера переживали закрытие приложения.
+ * taskkill /T /F снимает всё дерево гарантированно.
+ */
+function killProcessTree(child) {
+  if (!child || !child.pid) return
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', detached: true }).unref()
+    } else {
+      try { process.kill(-child.pid, 'SIGTERM') } catch { child.kill('SIGTERM') }
+    }
+  } catch { /* уже мёртв */ }
+}
+
 app.on('before-quit', () => {
   app.isQuitting = true // воркер умирает по нашей команде — без автоперезапуска и уведомлений
   if (authService) authService.shutdown()
   if (aiWorker) {
-    try { aiWorker.kill() } catch { /* ок */ }
+    killProcessTree(aiWorker)
     aiWorker = null
   }
-  if (nextProcess && !nextProcess.killed) nextProcess.kill()
+  if (nextProcess) {
+    killProcessTree(nextProcess)
+    nextProcess = null
+  }
+})
+
+// страховка: если что-то пережило before-quit — добиваем на will-quit
+app.on('will-quit', () => {
+  if (aiWorker) killProcessTree(aiWorker)
+  if (nextProcess) killProcessTree(nextProcess)
 })
 
 // Защита единственного экземпляра.

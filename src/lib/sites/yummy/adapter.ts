@@ -22,6 +22,34 @@ import {
   VideoEntry,
   VideoSkips,
 } from '@/lib/avc/types'
+
+const NAMED_ENTITIES: Record<string, string> = {
+  mdash: '—', ndash: '–', hellip: '…', laquo: '«', raquo: '»',
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’', nbsp: ' ',
+  amp: '&', quot: '"', apos: "'", lt: '<', gt: '>',
+  copy: '©', reg: '®', trade: '™', times: '×', middot: '·', bull: '•',
+  shy: '\u00AD', zwnj: '\u200C', euro: '€', deg: '°', plusmn: '±',
+}
+
+export function decodeHtmlEntities(input: string): string {
+  const raw = String(input ?? '')
+  if (!raw.includes('&')) return raw
+  return raw
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => {
+      const code = parseInt(hex, 16)
+      return Number.isFinite(code) && code > 0 && code < 0x10ffff ? String.fromCodePoint(code) : ''
+    })
+    .replace(/&#(\d+);?/g, (_, dec) => {
+      const code = parseInt(dec, 10)
+      return Number.isFinite(code) && code > 0 && code < 0x10ffff ? String.fromCodePoint(code) : ''
+    })
+    .replace(/&([a-z]+);?/gi, (m, name) => {
+      const map = NAMED_ENTITIES[name.toLowerCase()]
+      return map ?? m
+    })
+}
+
+
 import { IAnimeSiteAdapter, SiteDiagnostics } from '../types'
 import {
   demoDetails,
@@ -150,7 +178,7 @@ function parseCards(html: string): AnimeCard[] {
     const id = parseInt(m[1], 10)
     const block = m[2]
     const slug = block.match(SELECTORS.cardSlug)?.[1]
-    const title = block.match(SELECTORS.cardTitle)?.[1]?.trim()
+    const title = decodeHtmlEntities(block.match(SELECTORS.cardTitle)?.[1]?.trim() ?? '')
     if (!slug || !title || seen.has(slug)) continue
     seen.add(slug)
     const posterRaw = block.match(SELECTORS.cardPoster)?.[1] ?? null
@@ -499,7 +527,7 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
     return {
       animeId: d.anime_id,
       slug: d.anime_url,
-      title: d.title,
+      title: decodeHtmlEntities(d.title),
       poster: d.poster?.medium
         ? d.poster.medium.startsWith('//')
           ? `https:${d.poster.medium}`
@@ -509,8 +537,8 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       rating: d.rating?.average ?? null,
       status: d.anime_status?.title ?? null,
       type: d.type?.shortname ?? null,
-      description: d.description ?? null,
-      genres: (d.genres ?? []).map((g) => g.title),
+      description: d.description != null ? decodeHtmlEntities(d.description) : null,
+      genres: (d.genres ?? []).map((g) => decodeHtmlEntities(g.title)),
       studios: (d.studios ?? []).map((s) => s.title),
       episodesAired: d.episodes?.aired ?? 0,
       episodesTotal: d.episodes?.count ?? null,
@@ -540,3 +568,5 @@ export function getAdapter(baseUrl?: string): YummyAnimeAdapter {
   if (!defaultAdapter) defaultAdapter = new YummyAnimeAdapter()
   return defaultAdapter
 }
+
+// entity decode: site titles (mdash без точки с запятой)

@@ -305,6 +305,13 @@ class VoicePipeline extends EventEmitter {
     this.stt.flush()
   }
 
+  /** Режим рации (push-to-talk): аудио без VAD-гейта, финал по flushAudio */
+  setCaptureMode(on) {
+    try {
+      this.stt.setCaptureMode && this.stt.setCaptureMode(!!on)
+    } catch { /* движок без поддержки — работаем как раньше */ }
+  }
+
   shutdown() {
     try {
       this.stt.shutdown()

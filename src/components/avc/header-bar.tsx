@@ -26,6 +26,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { accountLogout, checkAccount, refreshAccount } from '@/lib/avc/executor'
 import { siteProfileUrl } from '@/lib/avc/site-urls'
+import { getElectronBridge } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ToastAction } from '@/components/ui/toast'
+import { DevConsole, DevGate, isDevUnlocked } from './dev-console'
 
 /** Цвет точки статуса сессии */
 function statusDotClass(state: string): string {
@@ -67,13 +69,54 @@ export function HeaderBar() {
   const settingsOpen = useAvcStore((s) => s.settingsOpen)
   const account = useAvcStore((s) => s.yummyAccount)
   const [loggingOut, setLoggingOut] = useState(false)
-  const [exeBusy, setExeBusy] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [devGateOpen, setDevGateOpen] = useState(false)
+  const [devConsoleOpen, setDevConsoleOpen] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
 
-  /** Скачать EXE одной кнопкой: резолвим последний релиз → прямая ссылка */
-  const downloadExe = async () => {
-    if (exeBusy) return
-    setExeBusy(true)
+  /**
+   * ОбНОВЛЕНИЕ одной кнопкой: EXE — проверить GitHub releases против своей
+   * версии и, если новее, скачать и подменить себя с перезапуском; в браузере
+   * (превью) — честный fallback: скачать свежий EXE со страницы релизов.
+   */
+  const runUpdate = async () => {
+    if (updateBusy) return
+    const aiBridge = getElectronBridge()
+    const bridge = aiBridge as unknown as {
+      checkUpdate?: () => Promise<{
+        current: string
+        latest: string | null
+        available: boolean
+        assetUrl: string | null
+        assetName: string | null
+        releasesUrl: string
+        error?: string
+      }>
+      installUpdate?: (url: string) => Promise<{ ok: boolean; error?: string }>
+    }
+    setUpdateBusy(true)
     try {
+      if (bridge?.checkUpdate && bridge?.installUpdate) {
+        const info = await bridge.checkUpdate()
+        if (info.error) {
+          toast({ variant: 'destructive', description: `Обновление: ${info.error}` })
+          return
+        }
+        if (!info.available) {
+          toast({ description: `У вас последняя версия (${info.current})` })
+          return
+        }
+        toast({ description: `Доступна ${info.latest} — скачиваю… приложение перезапустится само` })
+        bridge.onUpdateProgress?.((p) => {
+          if (p.phase === 'downloading' && p.percent != null) {
+            setUpdateProgress(p.percent)
+          }
+        })
+        const res = await bridge.installUpdate(info.assetUrl ?? '')
+        if (!res.ok) toast({ variant: 'destructive', description: `Не удалось обновиться: ${res.error ?? 'ошибка'}` })
+        return
+      }
+      // web-режим: просто скачать последний EXE
       const res = await fetch('/api/download-exe', { cache: 'no-store' })
       const info = (await res.json()) as {
         ok: boolean
@@ -84,9 +127,6 @@ export function HeaderBar() {
       }
       if (info.ok && info.downloadUrl) {
         toast({ description: `Скачивание началось: ${info.assetName ?? 'AVC-Anime.exe'}` })
-        // Программный клик по <a download> — не блокируется popup-blocker'ом
-        // (в отличие от window.open после await); GitHub отдаёт ассет с
-        // Content-Disposition: attachment — страница не покидается.
         const a = document.createElement('a')
         a.href = info.downloadUrl
         a.rel = 'noopener'
@@ -95,8 +135,6 @@ export function HeaderBar() {
         a.click()
         a.remove()
       } else {
-        // Честная причина + кликабельное действие прямо в toast (жест пользователя
-        // — popup-blocker не мешает): страница релизов репозитория
         toast({
           variant: 'destructive',
           description: info.reason ?? 'EXE не найден',
@@ -111,9 +149,10 @@ export function HeaderBar() {
         })
       }
     } catch {
-      toast({ variant: 'destructive', description: 'Не удалось получить ссылку на EXE' })
+      toast({ variant: 'destructive', description: 'Не удалось проверить обновления' })
     } finally {
-      setExeBusy(false)
+      setUpdateBusy(false)
+      setUpdateProgress(null)
     }
   }
 
@@ -268,7 +307,10 @@ export function HeaderBar() {
             aria-label="Отладочная панель"
             title="Отладка"
             className={cn('h-11 w-11', debugOpen && 'text-sky-400')}
-            onClick={() => setDebugOpen(true)}
+            onClick={() => {
+              if (isDevUnlocked()) setDevConsoleOpen(true)
+              else setDevGateOpen(true)
+            }}
           >
             <Bug className="h-5 w-5" />
           </Button>
@@ -293,32 +335,32 @@ export function HeaderBar() {
         >
           <Settings className="h-5 w-5" />
         </Button>
-        {/* Скачать EXE-сборку одной кнопкой (GitHub Releases, всегда последняя) */}
+        {/* Обновление: EXE проверяет релизы и обновляет себя; web — скачать EXE */}
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Скачать EXE для Windows"
-          title="Скачать EXE для Windows (последний релиз)"
+          aria-label="Обновление приложения"
+          title={updateProgress != null ? `Скачивание обновления… ${updateProgress}%` : 'Обновление приложения'}
           className="h-11 w-11"
-          disabled={exeBusy}
-          onClick={() => void downloadExe()}
+          disabled={updateBusy}
+          onClick={() => void runUpdate()}
         >
-          {exeBusy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <PackageOpen className="h-5 w-5" />}
-        </Button>
-        {/* Скачать исходники проекта (zip без секретов/мусора) */}
-        <Button
-          variant="ghost"
-          size="icon"
-          asChild
-          aria-label="Скачать исходники проекта (zip)"
-          title="Скачать исходники проекта (zip)"
-          className="h-11 w-11"
-        >
-          <a href="/api/download-source" download>
-            <Download className="h-5 w-5" />
-          </a>
+          {updateBusy ? (
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          ) : updateProgress != null ? (
+            <span className="text-[10px] font-bold tabular-nums text-sky-300">{updateProgress}%</span>
+          ) : (
+            <RefreshCw className="h-5 w-5" />
+          )}
         </Button>
       </nav>
+
+      {/* Панель разработчика: доступ только по секретному коду */}
+      <DevGate open={devGateOpen} onClose={() => setDevGateOpen(false)} onUnlocked={() => {
+        setDevGateOpen(false)
+        setDevConsoleOpen(true)
+      }} />
+      <DevConsole open={devConsoleOpen} onClose={() => setDevConsoleOpen(false)} />
     </header>
   )
 }
