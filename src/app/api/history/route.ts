@@ -6,12 +6,16 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const limit = Math.min(200, parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10) || 50)
   try {
+    // Синхронизация схемы БД (single-flight): в упакованном EXE instrumentation
+    // может не вызваться — тогда старая БД без новых колонок давала 500 (issue #2)
+    await ensureSqliteSchema()
     const items = await db.commandHistoryEntry.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -29,6 +33,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureSqliteSchema()
     const b = await req.json()
     const item = await db.commandHistoryEntry.create({
       data: {
@@ -56,6 +61,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
+  await ensureSqliteSchema()
   await db.commandHistoryEntry.deleteMany({})
   return NextResponse.json({ ok: true })
 }

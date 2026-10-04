@@ -12,6 +12,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
   const animeIdRaw = url.searchParams.get('animeId')
   const animeId = animeIdRaw !== null && /^\d+$/.test(animeIdRaw) ? parseInt(animeIdRaw, 10) : null
   try {
+    await ensureSqliteSchema()
     const rows = await db.skipMark.findMany({
       where: { accountKey, ...(animeId !== null ? { animeId } : {}) },
       orderBy: { updatedAt: 'desc' },
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    await ensureSqliteSchema()
     const existing = await db.skipMark.findUnique({
       where: {
         accountKey_animeId_dubbing_type: { accountKey, animeId, dubbing, type },
@@ -118,6 +121,7 @@ export async function DELETE(request: Request) {
   const type = url.searchParams.get('type')
   const dubbing = url.searchParams.get('dubbing') ?? ''
   try {
+    await ensureSqliteSchema()
     if (animeIdRaw !== null && /^\d+$/.test(animeIdRaw) && type && TYPES.has(type)) {
       await db.skipMark.deleteMany({
         where: { accountKey, animeId: parseInt(animeIdRaw, 10), type, dubbing },

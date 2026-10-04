@@ -19,6 +19,7 @@
  */
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 import type { WatchProgressItem, WatchProgressResult } from '@/lib/avc/types'
 
 export const runtime = 'nodejs'
@@ -62,6 +63,7 @@ export async function GET(request: Request) {
     return NextResponse.json(res, { status: 400 })
   }
   try {
+    await ensureSqliteSchema()
     const rows = await db.watchProgressEntry.findMany({
       where: { accountKey },
       orderBy: { updatedAt: 'desc' },
@@ -113,6 +115,7 @@ export async function POST(request: Request) {
     typeof body.dubbing === 'string' && body.dubbing.trim() !== '' ? body.dubbing.trim() : null
 
   try {
+    await ensureSqliteSchema()
     const row = await db.watchProgressEntry.upsert({
       where: { accountKey_animeId: { accountKey, animeId } },
       create: { accountKey, animeId, slug, title, poster, episode, episodesTotal, dubbing },
@@ -139,6 +142,7 @@ export async function DELETE(request: Request) {
   }
   const animeIdRaw = url.searchParams.get('animeId')
   try {
+    await ensureSqliteSchema()
     if (animeIdRaw !== null) {
       const animeId = parseInt(animeIdRaw, 10)
       if (!Number.isFinite(animeId)) {

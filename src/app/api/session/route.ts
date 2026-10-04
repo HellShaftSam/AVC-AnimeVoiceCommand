@@ -5,11 +5,13 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 import { BrowserTab } from '@/lib/avc/types'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  await ensureSqliteSchema()
   const rows = await db.tabSession.findMany({ orderBy: { position: 'asc' } })
   const tabs: BrowserTab[] = rows.map((r) => {
     let payload: Record<string, unknown> = {}
@@ -39,6 +41,7 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(tabs)) {
       return NextResponse.json({ error: 'tabs обязателен' }, { status: 400 })
     }
+    await ensureSqliteSchema()
     await db.tabSession.deleteMany({})
     if (tabs.length > 0) {
       await db.tabSession.createMany({
@@ -61,6 +64,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
+  await ensureSqliteSchema()
   await db.tabSession.deleteMany({})
   return NextResponse.json({ ok: true })
 }

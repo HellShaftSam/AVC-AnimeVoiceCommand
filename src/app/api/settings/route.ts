@@ -5,11 +5,14 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 import { AppSettings, DEFAULT_SETTINGS } from '@/lib/avc/types'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  // Синхронизация схемы БД (single-flight) — защита от рассинхрона в EXE (issue #2)
+  await ensureSqliteSchema()
   const rows = await db.appSetting.findMany()
   const settings: AppSettings = { ...DEFAULT_SETTINGS }
   const mutable = settings as unknown as Record<string, unknown>
@@ -26,6 +29,7 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    await ensureSqliteSchema()
     const patch = (await req.json()) as Partial<AppSettings>
     const updates = Object.entries(patch).filter(([key]) => key in DEFAULT_SETTINGS)
     for (const [key, value] of updates) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureSqliteSchema } from '@/lib/db-ensure-schema'
 
 export const runtime = 'nodejs'
 
@@ -17,6 +18,7 @@ function isTargetType(v: unknown): v is TargetType {
 
 /** GET /api/aliases → {aliases} */
 export async function GET() {
+  await ensureSqliteSchema()
   const aliases = await db.voiceAlias.findMany({
     orderBy: { createdAt: 'desc' },
     select: { id: true, targetType: true, targetName: true, alias: true },
@@ -62,6 +64,7 @@ export async function POST(req: NextRequest) {
   const targetNorm = targetName.trim()
 
   // Уже есть — просто возвращаем существующую (не ошибка)
+  await ensureSqliteSchema()
   const existing = await db.voiceAlias.findUnique({
     where: {
       targetType_targetName_alias: {
@@ -90,6 +93,7 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id обязателен' }, { status: 400 })
 
+  await ensureSqliteSchema()
   await db.voiceAlias.deleteMany({ where: { id } })
   return NextResponse.json({ ok: true })
 }
