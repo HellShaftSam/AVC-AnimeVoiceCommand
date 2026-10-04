@@ -902,3 +902,23 @@ Work Log:
 
 Stage Summary:
 - Пуш подтверждён байт-в-байт по GitHub API; latest-сборка EXE на GitHub содержит фикс «невидимых» действий профиля (toast + авто-открытие диалога входа при истёкшей сессии) и аквариумную тему
+
+---
+Task ID: exe-startup-fix-1
+Agent: Z.ai Code (main)
+Task: EXE «висит в процессах, ничего не происходит» — диагностика по реальному EXE v1.0.8 и исправление запуска
+
+Work Log:
+- ДИАГНОСТИКА НА РЕАЛЬНОМ АРТЕФАКТЕ: скачал релиз v1.0.8 (370MB), распаковал (7za из 7zip-bin), проинспектировал: server.js/.prisma/ai-pack/runtime-node на месте; запустил standalone server.js на Linux (подмена движка Prisma на linux) — Ready, HTTP 200 → сам сервер жив
+- НАЙДЕНО #1 (главное раздувание/медленный старт): в app.asar попали node_modules ЦЕЛИКОМ (node-llama-cpp+sherpa из dependencies electron-app/package.json, electron-builder добавляет их автоматически) → 46MB asar + 653MB asar.unpacked = ДУБЛЬ ai-pack; portable NSIS при КАЖДОМ запуске делает RMDir/r + распаковку 1.3GB во %TEMP% без единого окна (ExecWait, потом финальный RMDir) → минуты тишины при запуске
+- ФИКС #1: electron-builder.json files → "!node_modules/**" (+splash-файлы) — main-процесс требует только electron и локальные .cjs (проверено grep require); распаковка уменьшится с ~1339MB до ~640MB (~2x быстрее старт каждый раз)
+- НАЙДЕНО #2 (молчаливая смерть): окно создавалось ТОЛЬКО после готовности Next-сервера; waitForServer таймаут 30с; исключение в whenReady → unhandledRejection → процесс жив, окон нет, логов нет; stdout сервера глотался
+- ФИКС #2 (main.cjs): splash-окно сразу при whenReady (этапы: Инициализация → AI → Сервер (таймер) → Интерфейс; кнопка «Открыть папку с логами»); boot() под try/catch → окно фатальной ошибки (message + хвост avc.log + Перезапустить/Логи/Выйти); uncaughtException/unhandledRejection → reportFatal (окно ошибки, пока нет mainWindow); waitForServer 90с + onTick в splash; stdout/stderr сервера в лог ([Next]/[Next:err]); смерть сервера до готовности → немедленное окно ошибки (не ждём таймаут); loadURL ×3 retry; mainWindow show:false → show по ready-to-show
+- ФИКС #3: ранний лог-буфер (до app.ready логи копились и дописываются в файл — раньше терялись, в portable консоли нет); single-instance: молчаливый app.quit() заменён на dialog.showErrorBox «AVC-Anime уже запущен» (частый сценарий: зависший прошлый экземпляр держит lock); second-instance фокусирует splash, если главного окна ещё нет
+- ФИКС #4: package.json build → next build --webpack (CI собирал Turbopack — не проверенная на Windows конфигурация; проверенно-рабочие v1.0.0/v1.1.0 были webpack)
+- НОВЫЕ ФАЙЛЫ: electron-app/splash.html (splash+fatal, CSP, reduced-motion, без внешних ресурсов), electron-app/splash-preload.cjs (3 действия: openLogs/relaunch/quit)
+- ВЕРИФИКАЦИЯ: node --check main/preload/splash-preload/auth OK; lint 0; splash.html проверен в браузере (splash-режим с этапами, fatal-режим с ошибкой и логом — скриншоты tool-results/splash-*.png); полный сценарий запуска EXE — в CI на Windows (следующая сборка), содержимое нового EXE проверю распаковкой
+
+Stage Summary:
+- Устранены обе причины «висит в процессах»: (1) EXE худеет ~в 2 раза → распаковка быстрее; (2) ЛЮБОЙ сбой старта теперь ВИДЕН — splash с первой секунды, окно ошибки с хвостом лога при любом исключении; «уже запущен» больше не молчит
+- Сборка EXE возвращена на проверенный webpack-бандлер

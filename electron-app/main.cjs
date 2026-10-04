@@ -65,6 +65,10 @@ try {
 
 const LOG_MAX_BYTES = 512 * 1024
 let logStream = null
+// Ранний буфер: до app ready писать некуда (portable EXE не имеет консоли) —
+// копим и дописываем в файл сразу после ready, чтобы не терять ошибки старта
+const EARLY_LOG_LINES = []
+let fileLogEnabled = false
 
 function logFile() {
   try {
@@ -87,8 +91,20 @@ function logFile() {
 function log(line) {
   const stamped = `[${new Date().toISOString()}] ${line}`
   console.log(stamped)
-  const stream = app.isReady() ? logFile() : null
+  if (!fileLogEnabled) {
+    EARLY_LOG_LINES.push(stamped)
+    if (EARLY_LOG_LINES.length > 1500) EARLY_LOG_LINES.shift()
+    return
+  }
+  const stream = logFile()
   if (stream) stream.write(`${stamped}\n`)
+}
+
+function flushEarlyLogs() {
+  fileLogEnabled = true
+  const stream = logFile()
+  if (stream && EARLY_LOG_LINES.length) stream.write(`${EARLY_LOG_LINES.join('\n')}\n`)
+  EARLY_LOG_LINES.length = 0
 }
 
 /** Редактирование секретов из любых диагностических строк (секция 15) */
@@ -98,7 +114,8 @@ function redact(text) {
     .replace(/PHPSESSID=[^;\s"']+/gi, 'PHPSESSID=[REDACTED]')
 }
 
-process.on('uncaughtException', (err) => log(`[Main] Uncaught exception: ${redact(err.stack || err.message)}`))
+process.on('uncaughtException', (err) => reportFatal(err, 'uncaughtException'))
+process.on('unhandledRejection', (reason) => reportFatal(reason, 'unhandledRejection'))
 
 // --- режим самопроверки ---------------------------------------------------------
 
@@ -128,8 +145,9 @@ function findFreePort(start) {
   })
 }
 
-function waitForServer(url, timeoutMs = 30000) {
+function waitForServer(url, timeoutMs = 90000, onTick) {
   const started = Date.now()
+  let lastTick = 0
   return new Promise((resolve, reject) => {
     const probe = () => {
       const req = http.get(url, (res) => {
@@ -144,7 +162,13 @@ function waitForServer(url, timeoutMs = 30000) {
       })
     }
     const retry = () => {
-      if (Date.now() - started > timeoutMs) return reject(new Error('Next server did not start'))
+      if (Date.now() - started > timeoutMs) {
+        return reject(new Error(`Локальный сервер интерфейса не ответил за ${Math.round(timeoutMs / 1000)} с (подробности в логе [Next] выше)`))
+      }
+      if (onTick && Date.now() - lastTick > 5000) {
+        lastTick = Date.now()
+        onTick(Math.round((Date.now() - started) / 1000))
+      }
       setTimeout(probe, 300)
     }
     probe()
@@ -189,10 +213,30 @@ async function startNextServer() {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  nextProcess.stdout.on('data', () => {})
-  nextProcess.stderr.on('data', (d) => log(`[Next] ${redact(String(d))}`))
+  nextProcess.stdout.on('data', (d) => {
+    const s = String(d).trim()
+    if (s) log(`[Next] ${redact(s.slice(0, 400))}`)
+  })
+  nextProcess.stderr.on('data', (d) => {
+    const s = String(d).trim()
+    if (s) log(`[Next:err] ${redact(s.slice(0, 400))}`)
+  })
   const url = `http://127.0.0.1:${port}`
-  await waitForServer(url)
+  // Если серверный процесс умер ДО готовности — падаем сразу с понятной причиной,
+  // а не ждём таймаут «в тишине»
+  let serverReady = false
+  nextProcess.once('exit', (code, signal) => {
+    if (!serverReady) {
+      const why = code !== null ? `код ${code}` : `сигнал ${signal}`
+      log(`[Main] Next server exited before ready (${why})`)
+      setSplashStage(`Сервер интерфейса неожиданно завершился (${why}) — смотрите окно ошибки`)
+      fatalPromise = Promise.resolve(showFatalError(new Error(`Сервер интерфейса завершился до готовности (${why}). Подробности в логе ([Next]/[Next:err] строки выше).`)))
+    }
+  })
+  await waitForServer(url, 90000, (sec) => {
+    setSplashStage(`Запуск локального сервера… ${sec} с (первый запуск может занять дольше)`)
+  })
+  serverReady = true
   return url
 }
 
@@ -200,6 +244,146 @@ async function startNextServer() {
 
 let mainWindow = null
 let authService = null
+
+// --- окно запуска (splash) и окно ошибки запуска --------------------------------
+// Проблема, которую они решают: до готовности Next-сервера у приложения НЕ БЫЛО ни
+// одного окна — при долгой распаковке portable EXE (минуты) или сбое старта
+// пользователь видел «висит в процессах и ничего не происходит».
+
+let splashWindow = null
+let fatalWindow = null
+let fatalPromise = null
+
+function createSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) return
+  try {
+    splashWindow = new BrowserWindow({
+      width: 470,
+      height: 250,
+      frame: false,
+      resizable: false,
+      maximizable: false,
+      minimizable: true,
+      fullscreenable: false,
+      show: false,
+      center: true,
+      alwaysOnTop: true,
+      skipTaskbar: false,
+      backgroundColor: '#07111F',
+      title: 'AVC-Anime',
+      webPreferences: {
+        preload: path.join(__dirname, 'splash-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+    splashWindow.once('ready-to-show', () => {
+      try { splashWindow.show() } catch { /* окно могли закрыть */ }
+    })
+    splashWindow.on('closed', () => { splashWindow = null })
+    splashWindow.loadFile(path.join(__dirname, 'splash.html')).catch(() => { /* не критично */ })
+    log('[Splash] окно запуска показано')
+  } catch (e) {
+    log(`[Splash] не удалось показать окно запуска: ${e.message}`)
+    splashWindow = null
+  }
+}
+
+function setSplashStage(text) {
+  const win = splashWindow && !splashWindow.isDestroyed() ? splashWindow : null
+  if (!win) return
+  win.webContents.executeJavaScript(`window.__stage(${JSON.stringify(String(text || ''))})`).catch(() => { /* окно закрыли */ })
+}
+
+function closeSplash() {
+  try {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy()
+  } catch { /* уже закрыто */ }
+  splashWindow = null
+}
+
+/** Последние n строк журнала — для окна ошибки */
+function readLogTail(n = 80) {
+  try {
+    const file = path.join(app.getPath('userData'), 'logs', 'avc.log')
+    const raw = fs.readFileSync(file, 'utf8')
+    return raw.split('\n').slice(-n).join('\n')
+  } catch {
+    return '(лог ещё не создан)'
+  }
+}
+
+/** Окно фатальной ошибки запуска: сообщение + хвост лога + перезапуск/выход */
+async function showFatalError(err) {
+  if (SELFTEST || AI_SELFTEST) return
+  closeSplash()
+  if (fatalWindow && !fatalWindow.isDestroyed()) return
+  const message = String((err && (err.stack || err.message)) || err || 'Неизвестная ошибка').slice(0, 3000)
+  log(`[Boot] FATAL: ${redact(message)}`)
+  try {
+    fatalWindow = new BrowserWindow({
+      width: 780,
+      height: 620,
+      title: 'AVC-Anime — ошибка запуска',
+      backgroundColor: '#0b1626',
+      resizable: true,
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, 'splash-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+    fatalWindow.on('closed', () => {
+      fatalWindow = null
+      // Окно ошибки закрыли без перезапуска — если главного окна нет, завершаем приложение
+      if (!mainWindow || mainWindow.isDestroyed()) app.exit(1)
+    })
+    await fatalWindow.loadFile(path.join(__dirname, 'splash.html'), { search: 'mode=fatal' })
+    fatalWindow.webContents
+      .executeJavaScript(`window.__fatal(${JSON.stringify({ message, logTail: readLogTail(80) })})`)
+      .catch(() => { /* окно закрыли до загрузки */ })
+  } catch (e) {
+    // Последний рубеж — нативный диалог, чтобы приложение НИКОГДА не висело молча
+    log(`[Boot] не удалось показать окно ошибки: ${e.message}`)
+    try { dialog.showErrorBox('AVC-Anime — ошибка запуска', message) } catch { /* ignore */ }
+    app.exit(1)
+  }
+}
+
+/**
+ * Единый обработчик фатальных ошибок (uncaughtException/unhandledRejection).
+ * Пока интерфейс не открыт — ЛЮБАЯ ошибка старта показывается пользователю,
+ * чтобы приложение никогда не «висело в процессах молча».
+ */
+function reportFatal(err, origin) {
+  const text = redact(String((err && (err.stack || err.message)) || err || 'unknown'))
+  try { log(`[Main] ${origin}: ${text}`) } catch { /* слишком рано даже для лога */ }
+  if (SELFTEST || AI_SELFTEST) return
+  if (mainWindow && !mainWindow.isDestroyed()) return // рабочее приложение — не пугаем пользователя
+  if (fatalPromise) return
+  fatalPromise = showFatalError(new Error(`${origin}\n\n${text}`)).catch(() => { /* уже залогировано */ })
+}
+
+function setupSplashIpc() {
+  ipcMain.on('avc:splash:open-logs', async () => {
+    try {
+      const dir = path.join(app.getPath('userData'), 'logs')
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      const err = await shell.openPath(dir)
+      if (err) log(`[Splash] открыть папку логов не удалось: ${err}`)
+    } catch (e) {
+      log(`[Splash] открыть папку логов не удалось: ${e.message}`)
+    }
+  })
+  ipcMain.on('avc:splash:quit', () => app.exit(1))
+  ipcMain.on('avc:splash:relaunch', () => {
+    try { app.relaunch() } catch { /* не получилось — просто выходим */ }
+    app.exit(0)
+  })
+}
 
 async function createMainWindow(url) {
   mainWindow = new BrowserWindow({
@@ -209,7 +393,8 @@ async function createMainWindow(url) {
     minHeight: 600,
     title: 'AVC-Anime',
     autoHideMenuBar: true,
-    backgroundColor: '#09090b',
+    show: false,
+    backgroundColor: '#07111F',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -227,7 +412,31 @@ async function createMainWindow(url) {
     return { action: 'deny' }
   })
 
-  await mainWindow.loadURL(url)
+  // Загрузка с повторами: transient-сбои старта сервера не должны убивать запуск
+  let lastErr = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await mainWindow.loadURL(url)
+      lastErr = null
+      break
+    } catch (e) {
+      lastErr = e
+      log(`[Main] loadURL попытка ${attempt} не удалась: ${e.message}`)
+      if (attempt < 3) {
+        setSplashStage(`Подключение к интерфейсу… (попытка ${attempt + 1})`)
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+    }
+  }
+  if (lastErr) {
+    try { mainWindow.destroy() } catch { /* уже закрыто */ }
+    mainWindow = null
+    throw lastErr
+  }
+  mainWindow.once('ready-to-show', () => {
+    try { mainWindow.show() } catch { /* окно могли закрыть */ }
+  })
+  closeSplash()
   markStartup('ui-loaded')
   mainWindow.webContents.once('did-finish-load', () => {
     markStartup('ui-usable')
@@ -591,7 +800,60 @@ async function runSelftest() {
   app.exit(report.network === 'ONLINE' ? 0 : 2)
 }
 
+/**
+ * Основная последовательность запуска. ЛЮБОЕ исключение здесь больше не «умирает
+ * молча»: whenReady оборачивает вызов в try/catch и показывает окно ошибки.
+ */
+async function boot() {
+  setupAdShield()
+
+  setSplashStage('Инициализация сессии сайта…')
+  authService = new AuthenticationService({
+    log,
+    userDataDir: app.getPath('userData'),
+    onStatus: (msg) => {
+      // Статусы входа (капча/ошибка/успех) — в UI приложения как toast-сообщения
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('avc:auth-status', msg)
+      }
+    },
+  })
+
+  authService.subscribe((snap) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('avc:account-changed', snap)
+    }
+  })
+
+  markStartup('auth-service-ready')
+
+  setupIpc(authService)
+
+  // Локальный AI-слой: utilityProcess запускается сразу, IPC ставится до окна (§49):
+  // модели могут отсутствовать — детерминированный голос остаётся рабочим (§0/§129)
+  setupAiIpc()
+  setSplashStage('Запуск голосового AI-слоя…')
+  startAiWorker()
+
+  setSplashStage('Запуск локального сервера…')
+  const url = await startNextServer()
+  markStartup('next-server-ready')
+
+  setSplashStage('Открытие интерфейса…')
+  await createMainWindow(url)
+  markStartup('window-created')
+  log(`[Main] UI ready at ${url}`)
+
+  // Фоновая сверка состояния аккаунта при старте (одна проверка, без поллинга)
+  void authService.verify().catch(() => undefined)
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) void createMainWindow(url)
+  })
+}
+
 app.whenReady().then(async () => {
+  flushEarlyLogs() // дальше логи сразу пишутся в файл
   markStartup('app-ready')
   log('[Auth] Initializing YummyAnime session (persistent partition)')
 
@@ -678,46 +940,17 @@ app.whenReady().then(async () => {
     return
   }
 
-  setupAdShield()
-
-  authService = new AuthenticationService({
-    log,
-    userDataDir: app.getPath('userData'),
-    onStatus: (msg) => {
-      // Статусы входа (капча/ошибка/успех) — в UI приложения как toast-сообщения
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('avc:auth-status', msg)
-      }
-    },
-  })
-
-  authService.subscribe((snap) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('avc:account-changed', snap)
-    }
-  })
-
-  markStartup('auth-service-ready')
-
-  setupIpc(authService)
-
-  // Локальный AI-слой: utilityProcess запускается сразу, IPC ставится до окна (§49):
-  // модели могут отсутствовать — детерминированный голос остаётся рабочим (§0/§129)
-  setupAiIpc()
-  startAiWorker()
-
-  const url = await startNextServer()
-  markStartup('next-server-ready')
-  await createMainWindow(url)
-  markStartup('window-created')
-  log(`[Main] UI ready at ${url}`)
-
-  // Фоновая сверка состояния аккаунта при старте (одна проверка, без поллинга)
-  void authService.verify().catch(() => undefined)
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createMainWindow(url)
-  })
+  // Обычный запуск: сначала окно запуска (обратная связь с первой секунды),
+  // затем вся последовательность старта под watchdog'ом — ЛЮБОЕ исключение
+  // показывается в окне ошибки, приложение никогда не «висит молча».
+  setupSplashIpc()
+  createSplashWindow()
+  setSplashStage('Инициализация…')
+  try {
+    await boot()
+  } catch (e) {
+    await showFatalError(e)
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -733,15 +966,28 @@ app.on('before-quit', () => {
   if (nextProcess && !nextProcess.killed) nextProcess.kill()
 })
 
-// Защита единственного экземпляра
+// Защита единственного экземпляра.
+// ВАЖНО: молчаливый app.quit() выглядел для пользователя как «EXE не запускается» —
+// теперь второй экземпляр ЧЕСТНО сообщает о первом (возможно зависшем) экземпляре.
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
-  app.quit()
+  try {
+    dialog.showErrorBox(
+      'AVC-Anime уже запущен',
+      'Приложение уже работает — возможно, его окно сейчас скрыто, либо предыдущий '
+        + 'экземпляр завершился некорректно.\n\n'
+        + 'Если окна нет: закройте AVC-Anime.exe в Диспетчере задач (Ctrl+Shift+Esc → '
+        + 'вкладка «Подробности») и запустите приложение заново.',
+    )
+  } catch { /* ignore */ }
+  app.exit(0)
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : splashWindow
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
     }
   })
 }
