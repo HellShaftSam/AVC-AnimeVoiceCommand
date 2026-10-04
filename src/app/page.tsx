@@ -18,6 +18,7 @@ import { HistoryPanel } from '@/components/avc/history-panel'
 import { Hotkeys } from '@/components/avc/hotkeys'
 import { LibraryPanel } from '@/components/avc/library-panel'
 import { MiniPlayer } from '@/components/avc/mini-player'
+import { MockPlayerHarness } from '@/components/avc/mock-player-harness'
 import { PendingOptionsDialog } from '@/components/avc/pending-options-dialog'
 import { QuickSections } from '@/components/avc/quick-sections'
 import { SessionRestoreDialog } from '@/components/avc/session-restore-dialog'
@@ -135,6 +136,20 @@ export default function Page() {
     }, 1000)
     return () => clearTimeout(t)
   }, [tabs, activeTabId, sessionResolved])
+
+  // ДИАГНОСТИЧЕСКИЙ стенд автопропуска: /?mockplayer=1 (см. mock-player-harness.tsx).
+  // Включается ТОЛЬКО в клиентском эффекте: SSR и первый клиентский рендер обязаны
+  // совпасть (иначе hydration mismatch), стенд подменяет шелл сразу после монтирования.
+  const [isMockHarness, setIsMockHarness] = useState(false)
+  useEffect(() => {
+    // отложенно (не синхронно в теле эффекта — правило react-hooks/set-state-in-effect):
+    // SSR и первый клиентский рендер совпадают, стенд включается сразу после монтирования
+    const id = window.setTimeout(() => {
+      if (window.location.search.includes('mockplayer')) setIsMockHarness(true)
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [])
+  if (isMockHarness) return <MockPlayerHarness />
 
   return (
     <div

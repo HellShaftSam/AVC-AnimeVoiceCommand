@@ -415,8 +415,16 @@ export interface AppSettings {
   micDeviceId: string
   /** Жёсткий кап длительности фразы, мс (4000..30000; жалоба «обрезает на 15 с») */
   maxUtteranceMs: number
-  /** Автопропуск опенинга/эндинга по skips из /videos */
+  /** Автопропуск опенинга/эндинга по skips из /videos (точные тайминги сайта) */
   autoSkipIntros: boolean
+  /** Ручной автопропуск опенинга: первые N секунд серии (когда таймингов сайта нет) */
+  autoSkipOpening: boolean
+  /** Длительность опенинга для ручного пропуска, сек (слайдер у плеера) */
+  autoSkipOpeningSec: number
+  /** Ручной автопропуск эндинга: последние N секунд серии */
+  autoSkipEnding: boolean
+  /** Сколько секунд до конца считать эндингом, сек (слайдер у плеера) */
+  autoSkipEndingSec: number
   // --- Локальный AI-слой (спецификация §4–§134; работает только в EXE) --------
   /** Профиль производительности STT/LLM/TTS (§19, §96) */
   aiProfile: AiProfile
@@ -449,6 +457,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   micDeviceId: '',
   maxUtteranceMs: 12000,
   autoSkipIntros: false,
+  // Автопропуск по слайдерам — как на других сайтах: работает сразу, без таймингов
+  // сайта; защита от коротких видео — в player.tsx (серию короче OP+4 мин не трогаем)
+  autoSkipOpening: true,
+  autoSkipOpeningSec: 85,
+  autoSkipEnding: true,
+  autoSkipEndingSec: 30,
   aiProfile: 'max_responsiveness',
   aiLocalTts: true,
   aiVoice: 'irina',

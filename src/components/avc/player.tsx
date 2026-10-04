@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { toast } from '@/hooks/use-toast'
 import { executeCommand } from '@/lib/avc/executor'
+import { AutoSkipControls } from '@/components/avc/auto-skip-panel'
 import {
   hasStickyActivation,
   parsePlayerEvent,
@@ -131,32 +132,61 @@ export function Player() {
   }
 
   /**
-   * АВТОПРОПУСК опенинга/эндинга по skips из /api/anime/{id}/videos
-   * (формат сегмента проверен живым API: {time,length} в секундах).
-   * Срабатывает ОДИН раз на серию по каждому сегменту.
+   * АВТОПРОПУСК опенинга/эндинга — два источника (приоритет у точных таймингов сайта):
+   *  1. skips из /api/anime/{id}/videos (settings.autoSkipIntros; формат {time,length}
+   *     проверен живым API) — если включены и есть у серии;
+   *  2. РУЧНЫЕ СЛАЙДЕРЫ у плеера (settings.autoSkipOpening/autoSkipOpeningSec —
+   *     «первые N секунд», autoSkipEnding/autoSkipEndingSec — «последние N секунд») —
+   *     работают на ЛЮБОЙ серии, даже без таймингов сайта (как на других сайтах).
+   * Защита от ложных срабатываний: серия короче (порог + 4 мин) не трогается,
+   * срабатывание — ОДИН раз на серию по каждому сегменту.
    */
   const handleAutoSkip = (t: number): void => {
     const st = useAvcStore.getState()
-    if (!st.settings.autoSkipIntros) return
-    const skips = st.playback.currentSkips
     const url = st.playerIframeUrl
-    if (!skips || !url) return
-    if (skips.opening && skippedOpeningRef.current !== url) {
-      const end = skips.opening.time + skips.opening.length
-      if (t >= skips.opening.time && t < end - 1) {
+    if (!url) return
+    const dur = st.playback.duration
+    const apiSkips = st.settings.autoSkipIntros ? st.playback.currentSkips : null
+    const MANUAL_MARGIN = 240 // сек: не трогаем видео короче порога + 4 мин
+
+    // --- ОПЕНИНГ ---
+    if (skippedOpeningRef.current !== url) {
+      let target: number | null = null
+      if (apiSkips?.opening) {
+        const end = apiSkips.opening.time + apiSkips.opening.length
+        if (t >= apiSkips.opening.time && t < end - 1) target = end
+      } else if (st.settings.autoSkipOpening) {
+        const sec = st.settings.autoSkipOpeningSec
+        if (sec >= 5 && (dur === 0 || dur >= sec + MANUAL_MARGIN) && t >= 0.8 && t < sec - 0.5) {
+          target = sec
+        }
+      }
+      if (target !== null) {
         skippedOpeningRef.current = url
-        sendPlayerCommand({ key: 'player_seek', value: end })
-        st.patchPlayback({ currentTime: end })
+        sendPlayerCommand({ key: 'player_seek', value: target })
+        st.patchPlayback({ currentTime: target })
         toast({ description: 'Опенинг пропущен' })
-        return
       }
     }
-    if (skips.ending && skippedEndingRef.current !== url) {
-      const end = skips.ending.time + skips.ending.length
-      if (t >= skips.ending.time && t < end - 1) {
+
+    // --- ЭНДИНГ ---
+    if (skippedEndingRef.current !== url) {
+      let target: number | null = null
+      if (apiSkips?.ending) {
+        const end = apiSkips.ending.time + apiSkips.ending.length
+        if (t >= apiSkips.ending.time && t < end - 1) target = end
+      } else if (st.settings.autoSkipEnding && dur > 0) {
+        const sec = st.settings.autoSkipEndingSec
+        // добиваем до самого конца (останется ~0.5с — плеер сам пришлёт video_ended,
+        // что честно включает автопереход/концовку как при обычном досмотре)
+        if (sec >= 5 && dur >= sec + MANUAL_MARGIN && t >= dur - sec && t < dur - 0.75) {
+          target = dur - 0.5
+        }
+      }
+      if (target !== null) {
         skippedEndingRef.current = url
-        sendPlayerCommand({ key: 'player_seek', value: end })
-        st.patchPlayback({ currentTime: end })
+        sendPlayerCommand({ key: 'player_seek', value: target })
+        st.patchPlayback({ currentTime: target })
         toast({ description: 'Эндинг пропущен' })
       }
     }
@@ -497,6 +527,7 @@ export function Player() {
         </div>
 
         <div className="flex-1" />
+        <AutoSkipControls />
         <Button
           variant="ghost"
           size="icon"
