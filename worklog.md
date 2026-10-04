@@ -1087,3 +1087,16 @@ Stage Summary:
 - Авто-обновление: версии сверяются ДВАЖДЫ в main, SHA-256 до установки, двухфазная подмена без самоубийства дерева, полный UI-конвейер, верификация версии после рестарта маркером
 - Библиотека аккаунта в EXE читается из постоянной сессии main (сервер авторитетен, кеш инвалидируется действиями)
 - Реальный EXE-прогон на Windows остаётся за CI-сборкой и владельцем — в отчёте честно BLOCKED
+
+---
+Task ID: production-audit-v1.0.18-followup
+Agent: Z.ai Code (main)
+Task: CI-проверка релиза v1.0.17: SHA256SUMS.txt отсутствует в assets — причина и повторный релиз.
+
+Work Log:
+- run #17 (head 11d6aa3) SUCCESS, но в релизе только EXE. В логах job'а шаг «Generate SHA256SUMS.txt» ОТСУТСТВУЕТ, а `files: electron-app/dist/*.exe` — старый
+- КОРЕНЬ: настоящий workflow — .github/workflows/build-exe.yml; docs/ci/build-exe.yml — УСТАРЕВШАЯ копия (GitHub выполняет только .github/workflows/). Правки были внесены в копию
+- ФИКС: (1) в .github/workflows/build-exe.yml добавлен шаг Generate SHA256SUMS.txt (pwsh, Get-FileHash, sha256sum-формат «hash␣␣name») + в artifact upload + в release files/body; (2) docs/ci/build-exe.yml заменён на указатель с уроком (защита от дрейфа копий); (3) даты в аудит-доках скорректированы (2026-10-04)
+
+Stage Summary:
+- Пуш триггерит run #18 → v1.0.18 с SHA256SUMS.txt; после успеха — скачивание EXE+сумм и локальная сверка хэша (полная проверка цепочки целостности обновлятора)
