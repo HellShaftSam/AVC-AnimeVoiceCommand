@@ -927,6 +927,7 @@ function VoiceAliasesSettings() {
 function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) => void }) {
   const settings = useAvcStore((s) => s.settings)
   const [status, setStatus] = useState<AiStatusSnapshot | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
   const [hardware, setHardware] = useState<AiHardwareInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const isExe = typeof window !== 'undefined' && !!getElectronBridge()?.ai?.available
@@ -936,9 +937,11 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
     if (!ai?.available) return
     try {
       setStatus(await ai.getStatus())
+      setStatusError(null)
       setHardware(await ai.getHardware())
-    } catch {
+    } catch (e) {
       setStatus(null)
+      setStatusError(e instanceof Error ? e.message : 'AI-воркер недоступен')
     }
   }, [])
 
@@ -970,6 +973,11 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
 
   return (
     <div className="space-y-3">
+      {/* УРОК РЕЛИЗА 1.0.12: состояние AI-воркера и причина его падения — всегда
+          видны. Пользователь больше не смотрит на вечный спиннер, не понимая,
+          зависло приложение или работает */}
+      <AiWorkerStatusCard status={status} onRestart={refresh} />
+
       {/* Фаза 5 аудита: каталог AI-моделей, безопасная миграция, список моделей */}
       <ModelsManagerCard />
 
@@ -1038,6 +1046,13 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
               <p className="text-[11px] leading-relaxed text-rose-400">{status.stt.error}</p>
             )}
           </div>
+        ) : statusError ? (
+          <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-2.5 text-xs text-rose-300">
+            ✗ Статус AI недоступен: {statusError}
+            <Button variant="outline" size="sm" className="ml-2 min-h-7 border-border px-2 text-[11px]" onClick={() => void refresh()} disabled={busy}>
+              Повторить
+            </Button>
+          </div>
         ) : (
           <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Загружаю статус AI…
@@ -1103,13 +1118,16 @@ function SttCatalogCard({
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [benchBusy, setBenchBusy] = useState(false)
   const [progressNote, setProgressNote] = useState<string | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
 
   const refreshCatalog = useCallback(async () => {
     if (!ai?.catalog) return
     try {
       setCatalog(await ai.catalog())
-    } catch {
+      setCatalogError(null)
+    } catch (e) {
       setCatalog(null)
+      setCatalogError(e instanceof Error ? e.message : 'Каталог моделей недоступен')
     }
   }, [ai])
 
@@ -1180,7 +1198,14 @@ function SttCatalogCard({
   return (
     <section>
       <SectionTitle>Модели распознавания (STT)</SectionTitle>
-      {!catalog ? (
+      {catalogError ? (
+        <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-2.5 text-xs text-rose-300">
+          ✗ Каталог моделей недоступен: {catalogError}
+          <Button variant="outline" size="sm" className="ml-2 min-h-7 border-border px-2 text-[11px]" onClick={() => void refreshCatalog()}>
+            Повторить
+          </Button>
+        </div>
+      ) : !catalog ? (
         <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Загружаю каталог моделей…
         </div>
@@ -1308,6 +1333,102 @@ function SttCatalogCard({
           </p>
         )}
       </div>
+    </section>
+  )
+}
+
+/**
+ * AiWorkerStatusCard — честный статус AI-воркера (УРОК РЕЛИЗА 1.0.12:
+ * «я не вижу что происходит в приложении, оно зависло или работает»).
+ * Живой ответ: воркер запущен/упал + ПРИЧИНА + кнопки перезапуска и логов.
+ * Обновляется в реальном времени через onWorkerState.
+ */
+function AiWorkerStatusCard({
+  status,
+  onRestart,
+}: {
+  status: AiStatusSnapshot | null
+  onRestart: () => void
+}) {
+  const ai = getElectronBridge()?.ai
+  const [workerState, setWorkerState] = useState<{ running: boolean; error: string | null } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!ai?.onWorkerState) return
+    const off = ai.onWorkerState((p) => setWorkerState(p))
+    return () => off()
+  }, [ai])
+
+  if (!ai?.restartWorker) return null // web-режим — карточка не нужна
+
+  const running = workerState ? workerState.running : status?.worker === 'ok'
+  const error = workerState?.error ?? status?.workerError ?? (status?.worker === 'failed' ? status.reason ?? null : null)
+
+  const restart = async () => {
+    setBusy(true)
+    try {
+      const res = await ai.restartWorker!()
+      if (res.ok) toast({ description: 'AI-воркер перезапущен' })
+      else toast({ description: `Не удалось запустить воркер: ${res.error ?? 'причина неизвестна'}`, variant: 'destructive' })
+      onRestart()
+    } catch (e) {
+      toast({ description: e instanceof Error ? e.message : 'Ошибка перезапуска', variant: 'destructive' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section
+      className={cn(
+        'rounded-lg border p-3',
+        running ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/40 bg-rose-500/5',
+      )}
+      aria-live="polite"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+          {running ? (
+            <>
+              <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
+              Голосовой AI-воркер работает
+            </>
+          ) : (
+            <>
+              <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden />
+              Голосовой AI-воркер не запущен
+            </>
+          )}
+        </span>
+        <div className="flex gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-8 border-border px-2 text-[11px]"
+            disabled={busy}
+            onClick={() => void restart()}
+          >
+            {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : null}
+            Перезапустить
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-8 px-2 text-[11px] text-muted-foreground"
+            onClick={() => void ai.openLogsFolder?.().catch(() => undefined)}
+          >
+            Открыть папку с логами
+          </Button>
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {running
+          ? `Движок: ${status?.engine === 'gigaam-offline' ? 'GigaAM (точный, офлайн)' : 'T-One Streaming (быстрый)'} · модель: ${status?.activeModel ?? '—'} · распознавание ${status?.ready.stt ? 'ГОТОВО' : 'не готово (модели не установлены?)'}`
+          : error
+            ? `Причина: ${error} — голосовые команды не работают; текстовые продолжают. Перезапустите воркер; если не помогает — откройте логи и посмотрите последнюю ошибку.`
+            : 'Состояние уточняется…'}
+      </p>
     </section>
   )
 }

@@ -507,8 +507,7 @@ const AI_EVENT_CHANNELS = {
   'stt-final': 'avc:ai:stt-final',
   'services-status': 'avc:ai:services-status',
   'model-progress': 'avc:ai:model-progress',
-  'tts-speak-file': 'avc:ai:tts-speak-file',
-  'tts-cancel': 'avc:ai:tts-cancel',
+  'worker-state': 'avc:ai:worker-state',
 }
 
 let aiWorker = null
@@ -610,26 +609,33 @@ function dirStats(dir) {
   return { bytes, files }
 }
 
-function startAiWorker() {
+/**
+ * Запуск AI-воркера с РЕТРАМИ и ЧЕСТНОЙ причиной отказа в UI.
+ * УРОК РЕЛИЗА 1.0.12: на машинах пользователей форк мог временно падать
+ * (антивирус блокирует свеже-распакованный node.exe на первые секунды) —
+ * без ретраев и видимой причины пользователь видел «зависшее» приложение.
+ */
+function startAiWorker(retry = 0) {
   try {
-    // Фаза 5 (аудит №4): каталог моделей можно переопределить пользователем
-    // (Настройки → AI-модели → Изменить папку); конфиг living в userData.
     const modelsDir = resolveModelsDir()
     const workerScript = app.isPackaged
       ? path.join(process.resourcesPath, 'ai', 'ai-worker.cjs')
       : path.join(__dirname, 'ai', 'ai-worker.cjs')
     if (aiWorker) {
-      // перезапуск (миграция моделей): гасим старый воркер и ждём его выхода
       try { aiWorker.kill() } catch { /* уже мёртв */ }
       aiWorker = null
     }
-    // Нативный sherpa-onnx возвращает Float32Array через napi external arraybuffer —
-    // Electron запрещает их В ЛЮБЫХ своих процессах, поэтому AI-воркер работает
-    // на ЧИСТОМ Node: packaged — resources/runtime-node, dev — системный node.
     const nodeExe = findSystemNode()
     if (!nodeExe) {
       aiWorkerFailed = 'Node-рантайм для AI-воркера не найден (ожидался resources/runtime-node или node в PATH)'
       log(`[AI] ${aiWorkerFailed}`)
+      notifyWorkerState()
+      return
+    }
+    if (!fs.existsSync(workerScript)) {
+      aiWorkerFailed = `Скрипт воркера не найден: ${workerScript}`
+      log(`[AI] ${aiWorkerFailed}`)
+      notifyWorkerState()
       return
     }
     aiWorker = childFork(workerScript, [], {
@@ -637,14 +643,12 @@ function startAiWorker() {
       env: {
         ...process.env,
         AVC_MODELS_DIR: modelsDir,
-        // активная модель STT (каталог моделей): движок выбирается по модели
         AVC_STT_MODEL: readModelsDirConfig().sttModel || 't-one-russian',
       },
-      // stdout/stderr воркера — в pipe: логи нативных моделей не смешиваются с выводом main
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      // structured clone: Int16Array аудио доезжает до воркера как типизированный массив
       serialization: 'advanced',
     })
+    aiWorkerFailed = null
     aiWorker.stdout && aiWorker.stdout.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
     aiWorker.stderr && aiWorker.stderr.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
     aiWorker.on('message', (msg) => {
@@ -665,20 +669,44 @@ function startAiWorker() {
         else pending.reject(new Error(msg.error || 'ошибка AI-воркера'))
       }
     })
-    aiWorker.on('exit', () => {
+    aiWorker.on('exit', (code) => {
       aiWorker = null
-      // честно отклоняем зависшие запросы
       for (const [id, p] of aiWorkerPending) {
         clearTimeout(p.timer)
         p.reject(new Error('AI-воркер завершился'))
         aiWorkerPending.delete(id)
       }
+      // воркер не должен умирать сам: если умер без нашей команды — причина в UI/лог
+      if (!app.isQuitting) {
+        aiWorkerFailed = `AI-воркер завершился сам (код ${code ?? '?'}) — смотрите логи`
+        log(`[AI] ${aiWorkerFailed}`)
+        notifyWorkerState()
+        // одна автопопытка поднять воркер снова (транзиентный сбой нативного модуля)
+        if (retry < 2) {
+          setTimeout(() => {
+            log(`[AI] Автоперезапуск AI-воркера (попытка ${retry + 2}/3)…`)
+            startAiWorker(retry + 1)
+          }, 2000 * (retry + 1))
+        }
+      }
     })
-    log('[AI] Node-процесс воркера запущен (изолированный нативный AI, §130)')
+    log(`[AI] AI-воркер запущен (попытка ${retry + 1}): models=${modelsDir}`)
     markStartup('ai-worker-spawned')
+    notifyWorkerState()
   } catch (e) {
     aiWorkerFailed = e.message
     log(`[AI] Не удалось запустить AI-воркер (AI недоступен): ${e.message}`)
+    notifyWorkerState()
+  }
+}
+
+/** Сообщить рендереру состояние воркера (честная причина — Настройки → AI) */
+function notifyWorkerState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(AI_EVENT_CHANNELS['worker-state'], {
+      running: !!aiWorker,
+      error: aiWorkerFailed,
+    })
   }
 }
 
@@ -687,9 +715,11 @@ function setupAiIpc() {
   ipcMain.handle('avc:ai:status', async () => {
     try {
       const st = await aiWorkerRequest('status')
-      return { ...st, worker: 'ok' }
+      return { ...st, worker: 'ok', workerError: null }
     } catch (e) {
-      return { enabled: false, worker: 'failed', reason: e.message, ready: { stt: false } }
+      // УРОК РЕЛИЗА 1.0.12: причина отказа воркера обязана дойти до UI —
+      // пользователь имеет право знать, ПОЧЕМУ голос не работает
+      return { enabled: false, worker: 'failed', reason: e.message, workerError: aiWorkerFailed || e.message, ready: { stt: false } }
     }
   })
   ipcMain.handle('avc:ai:hardware', async () => {
@@ -743,10 +773,38 @@ function setupAiIpc() {
     } catch { /* каталог мог быть пуст/недоступен */ }
     return {
       currentDir: current,
-      configured: readModelsDirConfig(),
+      // строка|null — как ожидает UI (не объект конфига)
+      configured: readModelsDirConfig().modelsDir,
       defaultDir: path.join(app.getPath('userData'), 'ai-models'),
       usedBytes,
       workerReady: !!aiWorker,
+      workerError: aiWorkerFailed,
+    }
+  })
+
+  /** Ручной перезапуск AI-воркера (кнопка в Настройках → AI) */
+  ipcMain.handle('avc:ai:restart-worker', async () => {
+    log('[AI] Перезапуск AI-воркера по запросу пользователя')
+    startAiWorker(0)
+    // дать воркеру секунду на поднятие, затем честный статус
+    await new Promise((r) => setTimeout(r, 1000))
+    try {
+      const st = await aiWorkerRequest('status', { __timeoutMs: 15000 })
+      return { ok: true, running: true, ready: st.ready, activeModel: st.activeModel }
+    } catch (e) {
+      return { ok: !!aiWorker, running: !!aiWorker, error: aiWorkerFailed || e.message }
+    }
+  })
+
+  /** Открыть папку с логами (диагностика «что происходит» без поддержки) */
+  ipcMain.handle('avc:ai:open-logs', async () => {
+    const dir = path.join(app.getPath('userData'), 'logs')
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      const err = await shell.openPath(dir)
+      return { ok: !err, error: err || null }
+    } catch (e) {
+      return { ok: false, error: e.message }
     }
   })
 
@@ -979,6 +1037,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  app.isQuitting = true // воркер умирает по нашей команде — без автоперезапуска и уведомлений
   if (authService) authService.shutdown()
   if (aiWorker) {
     try { aiWorker.kill() } catch { /* ок */ }

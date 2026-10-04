@@ -160,7 +160,11 @@ export function ModelsManagerCard() {
       <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
         {models.length === 0 && (
           <p className="text-xs text-muted-foreground">
-            {busy ? 'Загружаю…' : 'AI-воркер не запущен — список моделей недоступен'}
+            {busy
+              ? 'Загружаю…'
+              : config?.workerError
+                ? `AI-воркер не запущен: ${config.workerError} — перезапустите его в карточке выше`
+                : 'AI-воркер не запущен — список моделей недоступен (перезапустите в карточке выше)'}
           </p>
         )}
         {models.map((m) => (

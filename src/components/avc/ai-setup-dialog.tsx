@@ -37,14 +37,24 @@ export function AiSetupDialog() {
   const [progress, setProgress] = useState<Record<string, AiModelProgress>>({})
   const [error, setError] = useState<string | null>(null)
   const [installingKeys, setInstallingKeys] = useState<string[]>([])
+  const [modelsDir, setModelsDir] = useState<string | null>(null)
   const dismissedRef = useRef(false)
 
   const refreshStatus = useCallback(async () => {
     const ai = getElectronBridge()?.ai
     if (!ai?.available) return null
-    const st = await ai.getStatus()
-    setStatus(st)
-    return st
+    try {
+      const st = await ai.getStatus()
+      setStatus(st)
+      return st
+    } catch (e) {
+      // воркер мёртв — честная ошибка в мастере вместо молчаливого игнора
+      const msg = e instanceof Error ? e.message : 'AI-воркер недоступен'
+      setStatus(null)
+      setError(`AI-воркер не отвечает: ${msg}. Откройте Настройки → AI и перезапустите голосовой воркер.`)
+      setPhase('error')
+      return null
+    }
   }, [])
 
   useEffect(() => {
@@ -54,11 +64,17 @@ export function AiSetupDialog() {
     let cancelled = false
     void (async () => {
       const st = await refreshStatus()
-      if (cancelled || !st) return
-      const missing = st.models.filter((m) => !m.installed)
+      if (cancelled) return
+      if (!st) {
+        // воркер не отвечает — мастер открывается с честной ошибкой и советом
+        setOpen(true)
+        return
+      }
+      void ai.getModelsDirConfig?.().then((cfg) => !cancelled && cfg && setModelsDir(cfg.currentDir)).catch(() => undefined)
+      const missing = (st.models ?? []).filter((m) => !m.installed)
       if (missing.length > 0 && !localStorage.getItem(DISMISS_KEY)) {
         setPhase('ready')
-        setSelected(Object.fromEntries(st.models.map((m) => [m.key, true])))
+        setSelected(Object.fromEntries((st.models ?? []).map((m) => [m.key, true])))
         setOpen(true)
         void ai.getHardware().then((hw) => !cancelled && setHardware(hw))
       }
@@ -127,12 +143,19 @@ export function AiSetupDialog() {
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg" aria-describedby="ai-setup-desc">
         <DialogHeader>
-          <DialogTitle>AVC-Anime AI Setup</DialogTitle>
+          <DialogTitle>Настройка голоса (офлайн-STT)</DialogTitle>
           <DialogDescription id="ai-setup-desc">
-            Локальный голосовой AI: распознавание речи, семантический роутер команд и озвучка ответов
-            работают полностью офлайн. Модели скачиваются один раз и проверяются по SHA-256.
+            Русское распознавание речи работает полностью офлайн: модель скачивается один раз,
+            проверяется по SHA-256 и живёт в выбранной вами папке. Аудио никуда не отправляется.
           </DialogDescription>
         </DialogHeader>
+
+        {modelsDir && (
+          <div className="rounded-md border bg-muted/40 p-2 text-[11px] text-muted-foreground">
+            Папка установки моделей: <span className="break-all font-medium text-foreground">{modelsDir}</span>
+            {' '}— сменить можно в Настройки → AI (модели переносятся автоматически).
+          </div>
+        )}
 
         {hardware && (
           <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">

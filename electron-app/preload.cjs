@@ -164,5 +164,18 @@ contextBridge.exposeInMainWorld('avcElectron', {
 
     /** Проверить установленную модель (файлы/маркер) */
     verifyComponent: (key) => ipcRenderer.invoke('avc:ai:verify-component', { key }),
+
+    /** Ручной перезапуск AI-воркера (кнопка в Настройках → AI) */
+    restartWorker: () => ipcRenderer.invoke('avc:ai:restart-worker'),
+
+    /** Открыть папку с логами (диагностика без поддержки) */
+    openLogsFolder: () => ipcRenderer.invoke('avc:ai:open-logs'),
+
+    /** Подписка на состояние AI-воркера (запущен/упал + честная причина) */
+    onWorkerState: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('avc:ai:worker-state', handler)
+      return () => ipcRenderer.removeListener('avc:ai:worker-state', handler)
+    },
   },
 })

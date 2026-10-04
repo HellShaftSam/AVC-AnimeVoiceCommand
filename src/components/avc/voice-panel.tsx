@@ -3,7 +3,7 @@
  * VoicePanel — нижняя левая панель: кнопка микрофона (push-to-talk),
  * статус голоса, режим микрофона, тестовый ввод команд, последний результат.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Mic, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { executeText } from '@/lib/avc/executor'
+import { getElectronBridge } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import type { VoiceApi } from '@/lib/avc/use-voice'
 import { cn } from '@/lib/utils'
@@ -37,6 +38,10 @@ function statusLine(status: string, message: string): string {
 
 export function VoicePanel({ voice }: { voice: VoiceApi }) {
   const voiceStatus = useAvcStore((s) => s.voiceStatus)
+  // УРОК РЕЛИЗА 1.0.12: пользователь должен ВИДЕТЬ, готов ли локальный STT,
+  // ещё ДО нажатия микрофона — иначе «оно зависло или работает не понятно»
+  const [localStt, setLocalStt] = useState<{ ready: boolean; error: string | null; engine?: string } | null>(null)
+  const isExe = typeof window !== 'undefined' && !!getElectronBridge()?.ai?.available
   const voiceMessage = useAvcStore((s) => s.voiceMessage)
   const voiceMode = useAvcStore((s) => s.settings.voiceMode)
   const lastExecuted = useAvcStore((s) => s.lastExecuted)
@@ -52,6 +57,35 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   const interim = listening && voice.interimText.trim() ? voice.interimText.trim() : null
   const engineLabel =
     voice.engineName === 'local' ? 'Локально (офлайн)' : voice.engineName === 'browser' ? 'Браузер' : 'Сервер'
+
+  useEffect(() => {
+    if (!isExe) return
+    const ai = getElectronBridge()?.ai
+    let cancelled = false
+    const probe = () => {
+      void ai
+        ?.getStatus()
+        .then((st) => {
+          if (cancelled) return
+          setLocalStt({
+            ready: !!st.ready?.stt,
+            error: st.workerError ?? (st.ready?.stt ? null : (st.stt?.error ?? 'модели не установлены')),
+            engine: st.engine,
+          })
+        })
+        .catch(() => {
+          if (!cancelled) setLocalStt({ ready: false, error: 'AI-воркер недоступен' })
+        })
+    }
+    probe()
+    const off = ai?.onWorkerState?.(() => setTimeout(probe, 400))
+    const timer = setInterval(probe, 20000)
+    return () => {
+      cancelled = true
+      off?.()
+      clearInterval(timer)
+    }
+  }, [isExe])
 
   const micHandlers = pushToTalk
     ? {
@@ -132,6 +166,16 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             >
               {engineLabel}
             </span>
+            {isExe && localStt && !localStt.ready && (
+              <span className="text-[10px] leading-tight text-rose-400" role="status">
+                Локальный STT не готов: {localStt.error} — Настройки → AI
+              </span>
+            )}
+            {isExe && localStt?.ready && (
+              <span className="text-[10px] leading-tight text-emerald-400" role="status">
+                Локальный STT готов ({localStt.engine === 'gigaam-offline' ? 'GigaAM' : 'T-One'})
+              </span>
+            )}
           </div>
           {interim && (
             <div className="truncate text-xs italic text-muted-foreground" aria-live="polite">

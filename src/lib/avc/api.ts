@@ -98,6 +98,8 @@ export interface AiStatusSnapshot {
   profile: string
   worker?: 'ok' | 'failed'
   reason?: string
+  /** Причина падения/незапуска AI-воркера (пусто — воркер жив) */
+  workerError?: string | null
   modelsDir?: string
   models: AiComponentStatus[]
   activeModel?: string
@@ -114,6 +116,8 @@ export interface AiModelsDirConfig {
   defaultDir: string
   usedBytes: number | null
   workerReady: boolean
+  /** Честная причина, почему воркер не запущен (для UI, а не молчаливый спиннер) */
+  workerError?: string | null
 }
 
 export interface AiModelsDirSetResult {
@@ -199,6 +203,12 @@ export interface AvcElectronBridge {
     removeComponent?(key: string): Promise<{ ok: boolean; message?: string }>
     /** Проверить установленную модель */
     verifyComponent?(key: string): Promise<{ ok: boolean; message?: string }>
+    /** Ручной перезапуск AI-воркера */
+    restartWorker?(): Promise<{ ok: boolean; running?: boolean; error?: string; ready?: { stt: boolean } }>
+    /** Открыть папку с логами */
+    openLogsFolder?(): Promise<{ ok: boolean; error?: string | null }>
+    /** Подписка на состояние AI-воркера (запущен/упал + причина) */
+    onWorkerState?(cb: (p: { running: boolean; error: string | null }) => void): () => void
   }
 }
 
