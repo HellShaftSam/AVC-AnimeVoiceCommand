@@ -922,3 +922,21 @@ Work Log:
 Stage Summary:
 - Устранены обе причины «висит в процессах»: (1) EXE худеет ~в 2 раза → распаковка быстрее; (2) ЛЮБОЙ сбой старта теперь ВИДЕН — splash с первой секунды, окно ошибки с хвостом лога при любом исключении; «уже запущен» больше не молчит
 - Сборка EXE возвращена на проверенный webpack-бандлер
+
+---
+Task ID: exe-startup-fix-2
+Agent: Z.ai Code (main)
+Task: Верификация новой сборки v1.0.9 (фикс запуска)
+
+Work Log:
+- CI run 37163853973 (sha 9d9ac79) на windows-latest — SUCCESS за 6 мин
+- Релиз v1.0.9 опубликован, AVC-Anime-Portable-1.0.9.exe = 150 808 242 байт (было 370MB) — минус 60%
+- Распаковка EXE: 490MB вместо 1339MB (в 2.7 раза меньше → распаковка portable при каждом запуске ускоряется пропорционально)
+- app.asar = 123KB (было 46MB + 653MB unpacked-дубль); в asar ТОЛЬКО нужное: main.cjs/preload.cjs/splash.html/splash-preload.cjs/auth/package.json; node_modules в asar — 0
+- main.cjs из asar — новый (createSplashWindow/showFatalError/reportFatal/setupSplashIpc подтверждены)
+- Структура: next-app (server.js + query_engine-windows.dll.node), ai (ai-worker + sherpa-onnx-win-x64), runtime-node/node.exe, db — всё на месте
+- SMOKE: server.js из распакованного v1.0.9 запущен на Linux (с linux-движком Prisma) — Ready, HTTP 200
+- Splash/fatal-окна проверены в браузере ранее (tool-results/splash-*.png)
+
+Stage Summary:
+- v1.0.9 = latest на GitHub Releases: в 2.5 раза меньший EXE, быстрая распаковка, обратная связь с первой секунды (splash), гарантированное окно ошибки при любом сбое старта, диалог при «уже запущен»
