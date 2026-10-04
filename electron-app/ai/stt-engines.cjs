@@ -31,6 +31,26 @@ const { STTService, PROFILES, SAMPLE_RATE_VAD } = require('./stt-service.cjs')
 
 const SAMPLE_RATE_GIGAAM = 16000
 
+/** Модель по умолчанию (релиз 1.0.15): GigaAM v3 точная — «Наруто 20 серия» вместо «уратуту нараратутто» на T-One 8 кГц */
+const DEFAULT_STT_MODEL = 'gigaam-v3-russian'
+
+/**
+ * Разрешить активную модель: если файлы предпочитаемой отсутствуют —
+ * честный fallback по цепочке (gigaam-v3 → t-one → gigaam-v2 → любой установленный).
+ * Гарантирует, что после смены дефолта приложение с одной установленной T-One
+ * продолжает работать, а после установки GigaAM — сразу на нём.
+ */
+function resolveSttModelId(modelsDir, preferred) {
+  const chain = [preferred, DEFAULT_STT_MODEL, 't-one-russian', 'gigaam-v2-russian'].filter(
+    (id, i, a) => id && a.indexOf(id) === i,
+  )
+  for (const id of chain) {
+    if (sttModelFilesPresent(modelsDir, id)) return id
+  }
+  // ничего не установлено — возвращаем предпочитаемый (ошибка будет честной при initialize)
+  return preferred || DEFAULT_STT_MODEL
+}
+
 function lazySherpa() {
   try {
     // eslint-disable-next-line global-require
@@ -217,7 +237,7 @@ class GigaamOfflineEngine extends EventEmitter {
         this._accumulate(chunk)
         this._tailWindows += 1
         const tailMs = this._tailWindows * (win / SAMPLE_RATE_VAD) * 1000
-        if (tailMs >= 250 && !this._captureMode) this._finishUtterance('endpoint')
+        if (tailMs >= 200 && !this._captureMode) this._finishUtterance('endpoint')
       } else {
         this._ring.push(Int16Array.from(chunk))
         if (this._ring.length > 38) this._ring.shift()
@@ -238,7 +258,7 @@ class GigaamOfflineEngine extends EventEmitter {
     this._utteranceSamples = []
     this._inSpeech = false
     this._tailWindows = 0
-    this._cooldownUntil = Date.now() + 350
+    this._cooldownUntil = Date.now() + 250
     if (samples.length < SAMPLE_RATE_GIGAAM * 0.3) return // короче 300 мс — мусор
     const t0 = Date.now()
     let text = ''
@@ -367,8 +387,8 @@ function engineForModel(modelId) {
  * стриминговый T-One (безопасный дефолт, он же профиль ru-fast).
  */
 function createSttEngine(opts = {}) {
-  const modelId = opts.modelId || 't-one-russian'
-  const engineSpec = engineForModel(modelId) || ENGINES['t-one-streaming']
+  const modelId = opts.modelId || DEFAULT_STT_MODEL
+  const engineSpec = engineForModel(modelId) || engineForModel(DEFAULT_STT_MODEL) || ENGINES['t-one-streaming']
   const engine = engineSpec.create({ ...opts, engineId: engineSpec.id })
   engine.capabilities = engineSpec.capabilities
   return engine
@@ -380,6 +400,8 @@ module.exports = {
   createSttEngine,
   engineForModel,
   sttModelFilesPresent,
+  resolveSttModelId,
+  DEFAULT_STT_MODEL,
   PROFILES,
   SAMPLE_RATE_GIGAAM,
   SAMPLE_RATE_VAD,

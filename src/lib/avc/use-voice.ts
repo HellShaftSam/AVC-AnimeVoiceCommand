@@ -598,7 +598,9 @@ export function useVoice(): VoiceApi {
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       const ctx = new Ctor({ sampleRate: 16000 })
       const source = ctx.createMediaStreamSource(stream)
-      const processor = ctx.createScriptProcessor(4096, 1, 1)
+      // 2048 сэмплов = 128 мс на чанк (релиз 1.0.15, было 4096/256 мс): финал
+      // после конца речи приходит в среднем на ~64 мс раньше, IPC-трафик всё ещё копеечный
+      const processor = ctx.createScriptProcessor(2048, 1, 1)
       source.connect(processor)
       // анализатор для индикатора уровня
       const analyser = ctx.createAnalyser()
@@ -608,9 +610,14 @@ export function useVoice(): VoiceApi {
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0)
         const int16 = new Int16Array(input.length)
+        const gain = settings.micGain || 1
         for (let i = 0; i < input.length; i++) {
-          const v = Math.max(-1, Math.min(1, input[i] * (settings.micGain || 1)))
-          int16[i] = Math.round(v * 32767)
+          // МЯГКИЙ ЛИМИТЕР вместо жёсткого clamp: при micGain > 1 громкий микрофон
+          // раньше упирался в ±1 и превращался в прямоугольный сигнал (гармоники →
+          // мусор в распознавании). Ниже 0.7 сигнал прозрачен, выше — плавно сжимается.
+          const a = Math.abs(input[i] * gain)
+          const limited = a <= 0.7 ? input[i] * gain : Math.sign(input[i]) * (0.7 + 0.3 * (1 - Math.exp(-(a - 0.7) / 0.3)))
+          int16[i] = Math.round(limited * 32767)
         }
         void ai.feedAudio(int16).catch((err) => {
           // воркер умер/завис — не молчим: честная ошибка и останов сессии (фаза 6.6)

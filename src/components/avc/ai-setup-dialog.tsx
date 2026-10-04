@@ -74,9 +74,23 @@ export function AiSetupDialog() {
       const missing = (st.models ?? []).filter((m) => !m.installed)
       if (missing.length > 0 && !localStorage.getItem(DISMISS_KEY)) {
         setPhase('ready')
-        setSelected(Object.fromEntries((st.models ?? []).map((m) => [m.key, true])))
+        // железо нужно ДО предвыбора: слабый ПК получает стриминговую T-One,
+        // обычный — точную GigaAM v3 (модель по умолчанию, релиз 1.0.15)
+        let hw: AiHardwareInfo | null = null
+        try {
+          hw = await ai.getHardware()
+          if (!cancelled) setHardware(hw)
+        } catch { /* нет данных — считаем ПК обычным */ }
+        const weak = hw ? hw.ramBytes < 6 * 1024 * 1024 * 1024 || hw.cpuCount <= 2 : false
+        const pre: Record<string, boolean> = {}
+        for (const m of st.models ?? []) {
+          if (m.key === 'vad' || m.key.startsWith('vad:')) pre[m.key] = true // VAD обязателен всегда
+          else if (m.key === 'stt:gigaam-v3-russian') pre[m.key] = !weak // по умолчанию: точная модель
+          else if (m.key === 'stt:t-one-russian') pre[m.key] = weak // слабый ПК: стриминговая
+          else pre[m.key] = false // остальные — по желанию
+        }
+        setSelected(pre)
         setOpen(true)
-        void ai.getHardware().then((hw) => !cancelled && setHardware(hw))
       }
     })()
     return () => {
@@ -147,6 +161,8 @@ export function AiSetupDialog() {
           <DialogDescription id="ai-setup-desc">
             Русское распознавание речи работает полностью офлайн: модель скачивается один раз,
             проверяется по SHA-256 и живёт в выбранной вами папке. Аудио никуда не отправляется.
+            По умолчанию — точная модель GigaAM v3 (лучше распознаёт названия, числа и команды);
+            для слабых ПК выбирайте стриминговую T-One.
           </DialogDescription>
         </DialogHeader>
 
@@ -207,6 +223,9 @@ export function AiSetupDialog() {
                     <div className="flex items-center justify-between gap-2">
                       <label htmlFor={`ai-${m.key}`} className="truncate text-sm font-medium">
                         {m.name}
+                        {(m as { defaultModel?: boolean }).defaultModel ? (
+                          <span className="ml-1.5 rounded bg-emerald-900 px-1 py-0.5 text-[10px] font-medium text-emerald-300">по умолчанию</span>
+                        ) : null}
                       </label>
                       <span className="shrink-0 text-xs text-muted-foreground">{m.sizeHuman}</span>
                     </div>

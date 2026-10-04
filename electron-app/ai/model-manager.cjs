@@ -136,6 +136,7 @@ class AIModelManager extends EventEmitter {
       profile: m.profile || null,
       recommendedFor: m.recommendedFor || null,
       required: !!m.required,
+      defaultModel: !!m.default,
     }
   }
 
@@ -217,6 +218,7 @@ class AIModelManager extends EventEmitter {
         installed,
         damaged,
         required: !!m.required,
+        defaultModel: !!m.default,
       }
     })
   }
@@ -237,6 +239,7 @@ class AIModelManager extends EventEmitter {
       sizeBytes: s.sizeBytes,
       installed: this.isInstalled(s.key, s.id),
       required: !!s.required,
+      defaultModel: !!s.defaultModel,
       dir: s.dir,
     }))
   }
@@ -343,18 +346,37 @@ class AIModelManager extends EventEmitter {
   /**
    * Скачать с перебором зеркал (spec.mirrors): основной URL, затем зеркала.
    * Повторяются только ошибки, при которых зеркало имеет смысл (404/5xx/сеть/TLS).
+   * Каждая попытка URL повторяется до 3 раз (transient-сбои сети/CDN): .part
+   * сохраняется, продолжение идёт с места обрыва через HTTP Range (§57).
    */
   async _downloadWithMirrors(spec, controller, opts) {
     const urls = [spec.url, ...(spec.mirrors || [])].filter(Boolean)
+    const ATTEMPTS_PER_URL = 3
     let lastErr = null
     for (let i = 0; i < urls.length; i++) {
-      try {
-        return await this._download({ ...spec, url: urls[i] }, controller, opts)
-      } catch (e) {
-        lastErr = e
-        const retryable = ['HTTP_404', 'HTTP_5xx', 'NETWORK', 'TLS', 'TIMEOUT'].includes(e.kind)
-        if (!retryable || i === urls.length - 1) throw e
-        this.emit('progress', { key: spec.key, id: spec.id, phase: 'mirror-fallback', message: `Источник недоступен (${e.kind}) — пробую зеркало` })
+      for (let attempt = 1; attempt <= ATTEMPTS_PER_URL; attempt++) {
+        try {
+          return await this._download({ ...spec, url: urls[i] }, controller, opts)
+        } catch (e) {
+          lastErr = e
+          if (e.kind === 'ABORTED' || e.kind === 'CHECKSUM') throw e // бессмысленно повторять
+          const retryable = ['HTTP_404', 'HTTP_5xx', 'NETWORK', 'TLS', 'TIMEOUT', 'SIZE'].includes(e.kind)
+          if (!retryable) throw e
+          if (attempt < ATTEMPTS_PER_URL) {
+            const waitMs = 1500 * attempt
+            this.emit('progress', {
+              key: spec.key, id: spec.id, phase: 'retrying',
+              message: `Сбой загрузки (${e.kind}) — повторяю ${attempt + 1}/${ATTEMPTS_PER_URL} через ${Math.round(waitMs / 1000)} с (продолжение с места обрыва)`,
+              attempt, attempts: ATTEMPTS_PER_URL,
+            })
+            await new Promise((r) => setTimeout(r, waitMs))
+          } else if (i < urls.length - 1) {
+            this.emit('progress', { key: spec.key, id: spec.id, phase: 'mirror-fallback', message: `Источник недоступен (${e.kind}) — пробую зеркало` })
+            break // следующее зеркало
+          } else {
+            throw e
+          }
+        }
       }
     }
     throw lastErr

@@ -64,7 +64,18 @@ SttEngineRegistry: ENGINES + createSttEngine({ modelId }) + engineForModel(model
 | `t-one-streaming` | `t-one-russian` (ru-fast) | 8 кГц | да (120 мс троттл) | слабые ПК, минимум задержки |
 | `gigaam-offline` | `gigaam-v3-russian`, `gigaam-v2-russian` (ru-accurate) | 16 кГц | нет (декод после VAD) | точность, ПК с 6+ ГБ RAM |
 
-## Каталог моделей (models-manifest.json, версия 3)
+**Модель по умолчанию (релиз 1.0.15): `gigaam-v3-russian`** — точное распознавание
+названий/чисел («Наруто двадцать серия» вместо «уратуту нараратутто» на T-One
+8 кГц). Если файлов модели по умолчанию нет, `resolveSttModelId()` честно
+падает на установленную (T-One), а UI показывает, что запрошенная модель не
+установлена. Явный выбор пользователя (кнопка «Сделать активной») сохраняется
+в `models-dir.json` с флагом `sttModelChosen` и уважается всегда.
+
+Задержка финала после конца речи (релиз 1.0.15): Silero `minSilenceDuration`
+0.25 с (max_responsiveness) + хвост 200 мс в пайплайне + кулдаун 250 мс + чанки
+микрофона 128 мс → финал ≈ 0.5 с после последнего звука.
+
+## Каталог моделей (models-manifest.json, версия 4)
 
 Модель = запись JSON (`models[]`): `id, name, profile, engine, lang, version,
 dir, url, mirrors[], archive, expectedFiles[], sizeBytes, sha256, acceptRanges,

@@ -65,6 +65,8 @@ export interface AiComponentStatus {
   sizeBytes: number | null
   sizeHuman: string
   installed: boolean
+  /** Модель по умолчанию (релиз 1.0.15 — GigaAM v3) */
+  defaultModel?: boolean
 }
 
 export interface AiBenchmarkResult {
@@ -91,6 +93,8 @@ export interface AiCatalogModel {
   installed: boolean
   damaged: boolean
   required: boolean
+  /** Модель по умолчанию (активируется автоматически после установки) */
+  defaultModel?: boolean
 }
 
 export interface AiStatusSnapshot {
@@ -103,6 +107,10 @@ export interface AiStatusSnapshot {
   modelsDir?: string
   models: AiComponentStatus[]
   activeModel?: string
+  /** Модель, запрошенная конфигом (может отличаться от активной при fallback) */
+  requestedModel?: string
+  /** true — активная модель отличается от запрошенной (у запрошенной нет файлов) */
+  modelFallback?: boolean
   engine?: string
   benchmark?: AiBenchmarkResult | null
   ready: { stt: boolean }
@@ -147,6 +155,9 @@ export interface AiModelProgress {
   percent?: number
   receivedBytes?: number
   totalBytes?: number
+  speedBps?: number
+  /** Сообщение о повторе/зеркале (phase 'retrying'/'mirror-fallback') */
+  message?: string
   error?: string
   kind?: string
 }

@@ -25,11 +25,14 @@ const { EventEmitter } = require('events')
 const SAMPLE_RATE_STT = 8000 // T-One: 8 кГц (спецификация §5)
 const SAMPLE_RATE_VAD = 16000 // Silero VAD: 16 кГц
 
-/** Профили производительности (§19) */
+/** Профили производительности (§19).
+ *  Релиз 1.0.15 — быстрее финал после конца речи (жалоба: «много времени проходит,
+ *  и только потом распознаёт»): minSilence (Silero: конец речи) 0.35→0.25 с,
+ *  хвост тишины в пайплайне 250→200 мс, кулдаун 350→250 мс. */
 const PROFILES = {
-  max_responsiveness: { numThreads: 1, minSilence: 0.35, threshold: 0.5, minSpeech: 0.2 },
-  balanced: { numThreads: 2, minSilence: 0.55, threshold: 0.5, minSpeech: 0.25 },
-  quality: { numThreads: 3, minSilence: 0.8, threshold: 0.45, minSpeech: 0.3 },
+  max_responsiveness: { numThreads: 1, minSilence: 0.25, threshold: 0.5, minSpeech: 0.15 },
+  balanced: { numThreads: 2, minSilence: 0.4, threshold: 0.5, minSpeech: 0.2 },
+  quality: { numThreads: 3, minSilence: 0.6, threshold: 0.45, minSpeech: 0.25 },
 }
 
 function lazySherpa() {
@@ -210,7 +213,7 @@ class STTService extends EventEmitter {
         this._feedStt(chunk)
         this._tailWindows += 1
         const tailMs = this._tailWindows * (win / SAMPLE_RATE_VAD) * 1000
-        if (tailMs >= 250 && !this._captureMode) {
+        if (tailMs >= 200 && !this._captureMode) {
           this._finishUtterance('endpoint')
         }
       } else {
@@ -289,7 +292,7 @@ class STTService extends EventEmitter {
     this._tailWindows = 0
     // кулдаун после финала: VAD может мигнуть на реверб-хвосте —
     // не начинаем новую фразу и чистим кольцо предыстории (§14)
-    this._cooldownUntil = Date.now() + 350
+    this._cooldownUntil = Date.now() + 250
     this._ring = []
     try { if (this._sttStream) this._recognizer.reset(this._sttStream) } catch { /* ок */ }
     this._sttStream = null

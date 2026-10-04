@@ -561,11 +561,19 @@ function modelsDirConfigPath() {
   return path.join(app.getPath('userData'), 'models-dir.json')
 }
 
+/** Релиз 1.0.15: модель по умолчанию — GigaAM v3 (точная). Значения sttModel,
+ *  записанные СТАРЫМ дефолтом (t-one-russian) без явного выбора пользователя
+ *  (sttModelChosen), считаются остатком старого дефолта и НЕ блокируют новый. */
+const STT_MODEL_DEFAULT = 'gigaam-v3-russian'
+
 function readModelsDirConfig() {
   try {
     const raw = JSON.parse(fs.readFileSync(modelsDirConfigPath(), 'utf8'))
     const dir = typeof raw.modelsDir === 'string' ? raw.modelsDir.trim() : ''
-    const sttModel = typeof raw.sttModel === 'string' && /^[a-z0-9-]{1,64}$/i.test(raw.sttModel) ? raw.sttModel : null
+    let sttModel = typeof raw.sttModel === 'string' && /^[a-z0-9-]{1,64}$/i.test(raw.sttModel) ? raw.sttModel : null
+    const chosen = raw.sttModelChosen === true
+    // миграция старого дефолта: t-one-russian без явного выбора → новый дефолт
+    if (sttModel === 't-one-russian' && !chosen) sttModel = null
     return {
       modelsDir: dir && path.isAbsolute(dir) ? dir : null,
       sttModel,
@@ -575,11 +583,24 @@ function readModelsDirConfig() {
   }
 }
 
-function writeModelsDirConfig(dir, sttModel) {
+function writeModelsDirConfig(dir, sttModel, sttModelChosen) {
   const prev = readModelsDirConfig()
+  const prevRaw = (() => {
+    try { return JSON.parse(fs.readFileSync(modelsDirConfigPath(), 'utf8')) } catch { return {} }
+  })()
   fs.writeFileSync(
     modelsDirConfigPath(),
-    JSON.stringify({ modelsDir: dir ?? prev.modelsDir, sttModel: sttModel ?? prev.sttModel }, null, 2),
+    JSON.stringify(
+      {
+        modelsDir: dir ?? prev.modelsDir,
+        sttModel: sttModel ?? prev.sttModel,
+        // явный выбор пользователя (кнопка «Сделать активной») — уважается всегда;
+        // миграция старого дефолта сбрасывает только «остатки» без флага
+        sttModelChosen: sttModelChosen === true ? true : prevRaw.sttModelChosen === true,
+      },
+      null,
+      2,
+    ),
   )
 }
 
@@ -644,7 +665,7 @@ function startAiWorker(retry = 0) {
       env: {
         ...process.env,
         AVC_MODELS_DIR: modelsDir,
-        AVC_STT_MODEL: readModelsDirConfig().sttModel || 't-one-russian',
+        AVC_STT_MODEL: readModelsDirConfig().sttModel || STT_MODEL_DEFAULT,
       },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       serialization: 'advanced',
@@ -750,8 +771,9 @@ function setupAiIpc() {
     if (!/^[a-z0-9-]{1,64}$/i.test(modelId)) return { ok: false, message: 'Некорректный id модели' }
     const res = await aiWorkerRequest('set-stt-model', { modelId, __timeoutMs: 600000 })
     if (res?.ok) {
-      // активная модель сохраняется — переживает перезапуск приложения
-      try { writeModelsDirConfig(null, modelId) } catch { /* не критично */ }
+      // активная модель сохраняется как ЯВНЫЙ выбор пользователя — переживает
+      // перезапуск приложения и смены дефолта в будущих релизах
+      try { writeModelsDirConfig(null, modelId, true) } catch { /* не критично */ }
     }
     return res
   })

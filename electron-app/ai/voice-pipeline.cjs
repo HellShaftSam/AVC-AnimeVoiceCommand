@@ -24,7 +24,7 @@ const fs = require('fs')
 const path = require('path')
 const { EventEmitter } = require('events')
 const { AIModelManager } = require('./model-manager.cjs')
-const { createSttEngine, engineForModel, sttModelFilesPresent } = require('./stt-engines.cjs')
+const { createSttEngine, engineForModel, sttModelFilesPresent, resolveSttModelId, DEFAULT_STT_MODEL } = require('./stt-engines.cjs')
 
 /** Честная причина недоступности убранных слоёв (для UI/диагностики) */
 const REMOVED_REASON = 'Убрано из релиза (решение владельца, 1.0.12)'
@@ -52,8 +52,12 @@ class VoicePipeline extends EventEmitter {
     this.modelsDir = opts.modelsDir || path.join(__dirname, '..', 'models')
     this.profile = opts.profile || 'max_responsiveness'
     this.enabled = opts.enabled !== false // §0/§129: AI — модульное расширение, можно отключить
-    /** Активная модель STT (каталог моделей); движок выбирается по модели */
-    this.activeModelId = opts.modelId || 't-one-russian'
+    /** Активная модель STT (каталог моделей); движок выбирается по модели.
+     *  Релиз 1.0.15: по умолчанию GigaAM v3 (точная). Если её файлов нет —
+     *  честный fallback на установленную (T-One), чтобы приложение работало сразу. */
+    this.activeModelId = resolveSttModelId(this.modelsDir, opts.modelId || DEFAULT_STT_MODEL)
+    /** Модель, запрошенная конфигом (до fallback) — для честного статуса в UI */
+    this.requestedModelId = opts.modelId || DEFAULT_STT_MODEL
 
     this.manager = new AIModelManager({ baseDir: this.modelsDir })
     this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId: this.activeModelId })
@@ -89,6 +93,8 @@ class VoicePipeline extends EventEmitter {
       models: st.components,
       freeDisk: st.freeDisk,
       activeModel: this.activeModelId,
+      requestedModel: this.requestedModelId,
+      modelFallback: this.activeModelId !== this.requestedModelId,
       engine: engineForModel(this.activeModelId)?.id || 't-one-streaming',
       benchmark: this.benchmarkResult || null,
       stt: this.stt.getMetrics(),
@@ -132,9 +138,20 @@ class VoicePipeline extends EventEmitter {
       try {
         const r = await this.manager.install(key, opts)
         results.push({ key, ok: true, skipped: !!r.skipped })
-        // установили активную модель — инициализируем движок сразу
-        if (key === `stt:${this.activeModelId}` || key === 'stt') {
+        // установили компонент STT — инициализируем движок сразу
+        if (key === 'stt') {
           await this.initializeServices()
+        } else if (key.startsWith('stt:')) {
+          const installedId = key.slice(4)
+          if (installedId === this.activeModelId) {
+            // установили уже активную модель (или её файлы) — инициализируем
+            await this.initializeServices()
+          } else if (this.requestedModelId === installedId && this.activeModelId !== installedId) {
+            // активная модель была fallback'ом (запрошенной не было) — теперь
+            // желаемая установлена: переключаемся на неё сразу
+            const sw = await this.setSttModel(installedId)
+            if (!sw.ok) results.push({ key, ok: false, kind: 'SWITCH_FAILED', message: sw.message })
+          }
         }
       } catch (e) {
         results.push({ key, ok: false, kind: e.kind || 'ERROR', message: e.message })

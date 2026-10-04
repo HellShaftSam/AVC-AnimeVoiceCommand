@@ -1,9 +1,9 @@
 {
   "$schema": "./ai-manifest-schema.md",
-  "version": 3,
+  "version": 4,
   "generatedAt": "2026-10-04",
   "generatedBy": "scripts/validate-ai-assets.mjs (значения сняты с реальных загрузок/HEAD-проверок, не выдуманы)",
-  "releaseNote": "v3 (STT-переписка): каталог моделей с профилями ru-fast/ru-accurate. LLM и TTS УБРАНЫ из релиза по решению владельца. sha256: null означает «контрольная сумма фиксируется при первой установке и сверяется при всех последующих» — так честно для новых моделей, чей архив ещё не скачан при сборке.",
+  "releaseNote": "v4: GigaAM v3 — модель ПО УМОЛЧАНИЮ (точность: «Наруто 20 серия» вместо «уратуту нараратутто» на T-One 8 кГц). sha256 обоих GigaAM сняты с реальных архивов и проверены при сборке. Полные expectedFiles (encoder/decoder/joiner). T-One — необязательный запасной для слабых ПК.",
   "storage": {
     "dirName": "ai-models",
     "layout": {
@@ -39,7 +39,7 @@
       "engine": "t-one-streaming",
       "lang": "ru",
       "version": "2025-09-08",
-      "required": true,
+      "required": false,
       "runtime": "sherpa-onnx OnlineRecognizer (нативный, Windows x64 + Linux x64)",
       "description": "Стриминговое русское распознавание (CTC, 8 кГц) + живые partial-результаты. Минимальная задержка — рекомендуется для слабых ПК.",
       "dir": "stt/t-one-russian",
@@ -68,23 +68,27 @@
     {
       "key": "stt",
       "id": "gigaam-v3-russian",
-      "name": "GigaAM v3 Russian RNNT int8 (ru-accurate)",
+      "name": "GigaAM v3 Russian RNNT int8 (ru-accurate) — по умолчанию",
       "profile": "ru-accurate",
       "engine": "gigaam-offline",
       "lang": "ru",
       "version": "2025-12-16",
       "required": false,
+      "default": true,
       "runtime": "sherpa-onnx OfflineRecognizer transducer (нативный, Windows x64 + Linux x64)",
-      "description": "Лучшая точность для русского (Sber GigaAM v3, RNNT, int8, 16 кГц). Декодирование фразы целиком после VAD — без живых partial-результатов.",
+      "description": "Лучшая точность для русского (Sber GigaAM v3, RNNT, int8, 16 кГц) — распознаёт «Наруто двадцать серия», названия и числа. Модель ПО УМОЛЧАНИЮ. Декодирование фразы целиком после VAD — без живых partial-результатов.",
       "dir": "stt/gigaam-v3-russian",
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-transducer-giga-am-v3-russian-2025-12-16.tar.bz2",
       "mirrors": [],
       "archive": "tar.bz2",
       "expectedFiles": [
-        "tokens.txt"
+        "tokens.txt",
+        "encoder.int8.onnx",
+        "decoder.onnx",
+        "joiner.onnx"
       ],
       "sizeBytes": 167388020,
-      "sha256": null,
+      "sha256": "20a439491904b839f35eb8efaa3d99cbfaaad0c6dcba22d06ff218bb0056772d",
       "acceptRanges": true,
       "license": "MIT (GigaAM v3, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
       "minRamBytes": 6442450944,
@@ -94,7 +98,8 @@
         "httpStatus": 200,
         "redirects": 1,
         "contentLengthMatch": true,
-        "acceptRanges": true
+        "acceptRanges": true,
+        "sha256VerifiedByDownload": true
       }
     },
     {
@@ -113,10 +118,11 @@
       "mirrors": [],
       "archive": "tar.bz2",
       "expectedFiles": [
-        "tokens.txt"
+        "tokens.txt",
+        "model.int8.onnx"
       ],
       "sizeBytes": 166917722,
-      "sha256": null,
+      "sha256": "777be8717d8aaf04861823671290f7687f7579fd9ac63a2124955573f920caf5",
       "acceptRanges": true,
       "license": "MIT (GigaAM v2, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
       "minRamBytes": 6442450944,

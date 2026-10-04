@@ -1040,6 +1040,9 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
                     ? 'GigaAM (точный)'
                     : 'T-One Streaming (быстрый)'}{' '}
                   — активная модель: {status.activeModel ?? '—'}
+                  {status.modelFallback && status.requestedModel && (
+                    <span className="text-amber-400"> · модель {status.requestedModel} не установлена — работает эта, скачайте её в каталоге ниже</span>
+                  )}
                 </span>
                 <span className="flex items-center gap-2">
                   {status.stt.lastFinalMs != null && <span className="text-muted-foreground">{status.stt.lastFinalMs} мс</span>}
@@ -1111,6 +1114,13 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
  * бенчмарк «Проверить скорость на этом ПК» (RTF + рекомендация профиля).
  * Только EXE (в браузере моста нет — блок честно скрыт).
  */
+/** МБ/с формат для прогресса загрузки моделей */
+function fmtMb(bytes?: number): string {
+  if (bytes == null || Number.isNaN(bytes)) return '?'
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
+  return `${Math.max(0, Math.round(bytes / 1024))} КБ`
+}
+
 function SttCatalogCard({
   onStatusChanged,
   status,
@@ -1122,7 +1132,18 @@ function SttCatalogCard({
   const [catalog, setCatalog] = useState<AiCatalogModel[] | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [benchBusy, setBenchBusy] = useState(false)
-  const [progressNote, setProgressNote] = useState<string | null>(null)
+  /** Живой прогресс установки: проценты/скорость/фаза — прямо в строке модели */
+  const [progress, setProgress] = useState<{
+    id: string
+    phase: string
+    percent?: number
+    receivedBytes?: number
+    totalBytes?: number
+    speedBps?: number
+    message?: string
+  } | null>(null)
+  /** Персистентные ошибки установки по id модели (не только toast, который легко пропустить) */
+  const [installErrors, setInstallErrors] = useState<Record<string, string>>({})
   const [catalogError, setCatalogError] = useState<string | null>(null)
 
   const refreshCatalog = useCallback(async () => {
@@ -1142,12 +1163,30 @@ function SttCatalogCard({
     // прогресс скачивания модели каталога (та же шина событий, что у мастера)
     const off = ai.onModelProgress?.((p) => {
       if (p.phase === 'downloading') {
-        setProgressNote(`${p.id}: ${Math.round(p.percent ?? 0)}%`)
-      } else if (p.phase === 'done' || p.phase === 'error' || p.phase === 'removed') {
-        setProgressNote(null)
-        void refreshCatalog()
+        setProgress({
+          id: p.id,
+          phase: p.phase,
+          percent: p.percent,
+          receivedBytes: p.receivedBytes,
+          totalBytes: p.totalBytes,
+          speedBps: p.speedBps,
+        })
+      } else if (p.phase === 'retrying' || p.phase === 'mirror-fallback') {
+        setProgress({ id: p.id, phase: p.phase, message: p.message })
       } else if (p.phase === 'verifying-sha256' || p.phase === 'extracting') {
-        setProgressNote(`${p.id}: ${p.phase === 'extracting' ? 'распаковка' : 'проверка суммы'}`)
+        setProgress({ id: p.id, phase: p.phase })
+      } else if (p.phase === 'error') {
+        setProgress(null)
+        setInstallErrors((prev) => ({ ...prev, [p.id]: p.error || 'Неизвестная ошибка загрузки' }))
+      } else if (p.phase === 'done' || p.phase === 'removed') {
+        setProgress(null)
+        setInstallErrors((prev) => {
+          if (!prev[p.id]) return prev
+          const next = { ...prev }
+          delete next[p.id]
+          return next
+        })
+        void refreshCatalog()
       }
     })
     return () => off?.()
@@ -1156,11 +1195,19 @@ function SttCatalogCard({
   if (!ai?.catalog) return null
 
   const action = async (key: string, kind: 'install' | 'activate' | 'verify' | 'remove') => {
+    const modelId = key.split(':')[1] ?? key
     setBusyKey(key)
+    if (kind === 'install') setInstallErrors((prev) => {
+      if (!prev[modelId]) return prev
+      const next = { ...prev }
+      delete next[modelId]
+      return next
+    })
     try {
       if (kind === 'install') {
         const res = await ai.install!([key])
         const bad = res.find((r) => !r.ok)
+        if (bad) setInstallErrors((prev) => ({ ...prev, [modelId]: bad.message ?? bad.kind ?? 'Ошибка установки' }))
         toast({ description: bad ? `Ошибка установки: ${bad.message ?? bad.kind}` : 'Модель установлена' })
       } else if (kind === 'activate') {
         const res = await ai.setSttModel!(key.split(':')[1] ?? key)
@@ -1176,6 +1223,9 @@ function SttCatalogCard({
       await refreshCatalog()
       onStatusChanged()
     } catch (e) {
+      if (kind === 'install') {
+        setInstallErrors((prev) => ({ ...prev, [modelId]: e instanceof Error ? e.message : String(e) }))
+      }
       toast({ description: e instanceof Error ? e.message : 'Ошибка операции', variant: 'destructive' })
     } finally {
       setBusyKey(null)
@@ -1218,11 +1268,16 @@ function SttCatalogCard({
         <div className="max-h-96 space-y-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
           {catalog.map((m) => {
             const isActive = activeModel === m.id
+            const rowProgress = progress?.id === m.id ? progress : null
+            const rowError = installErrors[m.id]
             return (
               <div key={m.key} className={cn('rounded-lg border border-border bg-card/60 p-2.5 text-xs', isActive && 'border-sky-400/60')}>
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="min-w-0 truncate font-medium text-foreground">{m.name}</span>
                   <span className="flex shrink-0 items-center gap-1.5">
+                    {m.defaultModel && (
+                      <span className="rounded bg-emerald-900 px-1.5 py-0.5 text-[11px] font-medium text-emerald-300">по умолчанию</span>
+                    )}
                     {m.profile === 'ru-fast' && (
                       <span className="rounded bg-sky-950 px-1.5 py-0.5 text-[11px] text-sky-300">быстрая</span>
                     )}
@@ -1295,16 +1350,37 @@ function SttCatalogCard({
                     </Button>
                   )}
                 </div>
+                {/* Живой прогресс установки — прямо в строке модели: %, МБ, скорость */}
+                {rowProgress && (
+                  <div className="mt-2">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={Math.round(rowProgress.percent ?? 0)} aria-valuemin={0} aria-valuemax={100}>
+                      <div
+                        className="h-full rounded-full bg-sky-400 transition-[width] duration-300"
+                        style={{ width: `${Math.min(100, Math.max(2, rowProgress.percent ?? 0))}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-sky-300">
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                      {rowProgress.phase === 'downloading'
+                        ? `${Math.round(rowProgress.percent ?? 0)}% · ${fmtMb(rowProgress.receivedBytes)} из ${fmtMb(rowProgress.totalBytes)}${rowProgress.speedBps ? ` · ${fmtMb(rowProgress.speedBps)}/с` : ''}`
+                        : rowProgress.phase === 'extracting'
+                          ? 'Распаковка архива…'
+                          : rowProgress.phase === 'verifying-sha256'
+                            ? 'Проверка контрольной суммы…'
+                            : rowProgress.message || 'Загрузка…'}
+                    </p>
+                  </div>
+                )}
+                {/* Персистентная ошибка установки — не только toast, который легко пропустить */}
+                {rowError && !rowProgress && (
+                  <div className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/5 p-2 text-[11px] text-rose-300">
+                    ✗ Не удалось установить: {rowError}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
-      )}
-
-      {progressNote && (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-sky-300">
-          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> {progressNote}
-        </p>
       )}
 
       {/* Бенчмарк: RTF и рекомендация профиля под этот ПК */}
@@ -1429,7 +1505,7 @@ function AiWorkerStatusCard({
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {running
-          ? `Движок: ${status?.engine === 'gigaam-offline' ? 'GigaAM (точный, офлайн)' : 'T-One Streaming (быстрый)'} · модель: ${status?.activeModel ?? '—'} · распознавание ${status?.ready.stt ? 'ГОТОВО' : 'не готово (модели не установлены?)'}`
+          ? `Движок: ${status?.engine === 'gigaam-offline' ? 'GigaAM (точный, офлайн)' : 'T-One Streaming (быстрый)'} · модель: ${status?.activeModel ?? '—'} · распознавание ${status?.ready.stt ? 'ГОТОВО' : 'не готово (модели не установлены?)'}${status?.modelFallback ? ' · запрошенная модель не установлена — работает fallback' : ''}`
           : error
             ? `Причина: ${error} — голосовые команды не работают; текстовые продолжают. Перезапустите воркер; если не помогает — откройте логи и посмотрите последнюю ошибку.`
             : 'Состояние уточняется…'}

@@ -11,11 +11,20 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const limit = Math.min(200, parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10) || 50)
-  const items = await db.commandHistoryEntry.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-  })
-  return NextResponse.json({ items })
+  try {
+    const items = await db.commandHistoryEntry.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    return NextResponse.json({ items })
+  } catch (e) {
+    // Честная ошибка вместо generic 500: причина (например, рассинхрон схемы
+    // после обновления EXE) сразу видна в панели истории и в отчётах диагностики
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Ошибка чтения истории', items: [] },
+      { status: 500 },
+    )
+  }
 }
 
 export async function POST(req: NextRequest) {
