@@ -575,6 +575,34 @@ let aiWorkerReqId = 0
 const aiWorkerPending = new Map()
 let aiWorkerFailed = null
 
+/** УРОК 0xC0000409 (GitHub issue #2): воркер умирает нативным фейл-фастом при загрузке
+ *  битой модели. Коды нативных крашей Windows (fail-fast/abort/access-violation) + SIGABRT(134). */
+const NATIVE_CRASH_CODES = new Set([134, 3221225477, 3221226505, 3221225786, 3221226019])
+/** Момент старта воркера — нативный краш при загрузке модели происходит в первые секунды */
+let aiWorkerSpawnAt = 0
+/** Серия нативных крашей подряд (для safe-mode при целостных файлах) */
+let aiWorkerNativeCrashStreak = 0
+/** Информация о карантине модели (для честного UI) */
+let aiWorkerQuarantine = null
+/** Безопасный режим (записан на диск — переживает перезапуск) */
+let aiWorkerSafeMode = null
+
+const { checkModelIntegrity, quarantineModel, listQuarantined } = require('./ai/model-integrity.cjs')
+
+function safeModePath() {
+  return path.join(app.getPath('userData'), 'ai-safe-mode.json')
+}
+function readSafeMode() {
+  try { return JSON.parse(fs.readFileSync(safeModePath(), 'utf8')) } catch { return null }
+}
+function writeSafeMode(rec) {
+  try { fs.writeFileSync(safeModePath(), JSON.stringify(rec, null, 2)) } catch { /* некритично */ }
+}
+function clearSafeMode() {
+  try { fs.unlinkSync(safeModePath()) } catch { /* нет файла */ }
+  aiWorkerSafeMode = null
+}
+
 function aiWorkerRequest(type, args) {
   if (!aiWorker) return Promise.reject(new Error(aiWorkerFailed || 'AI-воркер не запущен'))
   return new Promise((resolve, reject) => {
@@ -699,6 +727,9 @@ function dirStats(dir) {
 function startAiWorker(retry = 0) {
   try {
     const modelsDir = resolveModelsDir()
+    const requestedModel = readModelsDirConfig().sttModel || STT_MODEL_DEFAULT
+    const safeMode = readSafeMode()
+    aiWorkerSafeMode = safeMode
     const workerScript = app.isPackaged
       ? path.join(process.resourcesPath, 'ai', 'ai-worker.cjs')
       : path.join(__dirname, 'ai', 'ai-worker.cjs')
@@ -724,17 +755,25 @@ function startAiWorker(retry = 0) {
       env: {
         ...process.env,
         AVC_MODELS_DIR: modelsDir,
-        AVC_STT_MODEL: readModelsDirConfig().sttModel || STT_MODEL_DEFAULT,
+        AVC_STT_MODEL: requestedModel,
+        // безопасный режим после нативного краша: не выбирать модель-виновника
+        AVC_EXCLUDE_MODEL: (safeMode && safeMode.modelId) || '',
       },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       serialization: 'advanced',
     })
     aiWorkerFailed = null
+    aiWorkerSpawnAt = Date.now()
     aiWorker.stdout && aiWorker.stdout.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
     aiWorker.stderr && aiWorker.stderr.on('data', (d) => log(`[AIWorker] ${String(d).trim().slice(0, 300)}`))
     aiWorker.on('message', (msg) => {
       if (msg && msg.event) {
         if (msg.event === 'services-status') markStartup('ai-worker-services-status')
+        // переустановка модели в карантине снята — честно чистим флаги
+        if (msg.event === 'model-progress' && msg.payload && msg.payload.phase === 'done' && aiWorkerQuarantine && msg.payload.id === aiWorkerQuarantine.modelId) {
+          aiWorkerQuarantine = null
+          clearSafeMode()
+        }
         const channel = AI_EVENT_CHANNELS[msg.event]
         if (channel && mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(channel, msg.payload)
@@ -759,6 +798,41 @@ function startAiWorker(retry = 0) {
       }
       // воркер не должен умирать сам: если умер без нашей команды — причина в UI/лог
       if (!app.isQuitting) {
+        const aliveMs = Date.now() - aiWorkerSpawnAt
+        const nativeCrash = NATIVE_CRASH_CODES.has(Number(code)) || (Number(code) >= 3221225472)
+        // --- УРОК 0xC0000409: диагностика нативного краша вместо глухого ретрая ---
+        if (nativeCrash && aliveMs < 30000) {
+          const integ = checkModelIntegrity(modelsDir, requestedModel)
+          const suspectDir = path.join(modelsDir, 'stt', requestedModel)
+          // файлы на месте, но повреждены (с маркером или без — остатки старых
+          // установок тоже ловим) — КАРАНТИН и авто-fallback на здоровую модель
+          if (!integ.ok && fs.existsSync(suspectDir)) {
+            // файлы на месте, но повреждены — КАРАНТИН и авто-fallback на здоровую модель
+            const q = quarantineModel(modelsDir, requestedModel, integ.problems.join('; '))
+            aiWorkerQuarantine = { modelId: requestedModel, reason: integ.problems.join('; '), to: (q && q.to) || null, at: new Date().toISOString() }
+            clearSafeMode()
+            aiWorkerNativeCrashStreak = 0
+            aiWorkerFailed = `Модель ${requestedModel} повреждена (${integ.problems[0]}) и помещена в карантин. Голос автоматически работает на здоровой модели — переустановите ${requestedModel} в Настройках → AI.`
+            log(`[AI] ${aiWorkerFailed}`)
+            notifyWorkerState()
+            setTimeout(() => startAiWorker(0), 1000)
+            return
+          }
+          // файлы целы, а нативный краш всё равно — считаем серию, на 2-й включаем безопасный режим
+          aiWorkerNativeCrashStreak += 1
+          if (aiWorkerNativeCrashStreak >= 2) {
+            const rec = { modelId: requestedModel, code, at: new Date().toISOString(), reason: 'native-crash-loop при целостных файлах' }
+            writeSafeMode(rec)
+            aiWorkerSafeMode = rec
+            aiWorkerFailed = `Модель ${requestedModel} дважды вызвала нативный краш (код ${code}) при целостных файлах — включён безопасный режим на T-One. Вернуть модель можно переустановкой в Настройках → AI.`
+            log(`[AI] ${aiWorkerFailed}`)
+            notifyWorkerState()
+            setTimeout(() => startAiWorker(0), 1000)
+            return
+          }
+        } else if (!nativeCrash) {
+          aiWorkerNativeCrashStreak = 0
+        }
         aiWorkerFailed = `AI-воркер завершился сам (код ${code ?? '?'}) — смотрите логи`
         log(`[AI] ${aiWorkerFailed}`)
         notifyWorkerState()
@@ -771,7 +845,7 @@ function startAiWorker(retry = 0) {
         }
       }
     })
-    log(`[AI] AI-воркер запущен (попытка ${retry + 1}): models=${modelsDir}`)
+    log(`[AI] AI-воркер запущен (попытка ${retry + 1}): models=${modelsDir}, модель=${requestedModel}${safeMode && safeMode.modelId ? ` (безопасный режим: без ${safeMode.modelId})` : ''}`)
     markStartup('ai-worker-spawned')
     notifyWorkerState()
   } catch (e) {
@@ -787,6 +861,8 @@ function notifyWorkerState() {
     mainWindow.webContents.send(AI_EVENT_CHANNELS['worker-state'], {
       running: !!aiWorker,
       error: aiWorkerFailed,
+      quarantine: aiWorkerQuarantine,
+      safeMode: aiWorkerSafeMode,
     })
   }
 }
@@ -830,6 +906,10 @@ function setupAiIpc() {
     if (!/^[a-z0-9-]{1,64}$/i.test(modelId)) return { ok: false, message: 'Некорректный id модели' }
     const res = await aiWorkerRequest('set-stt-model', { modelId, __timeoutMs: 600000 })
     if (res?.ok) {
+      // явный успешный выбор пользователя снимает безопасный режим/карантин
+      clearSafeMode()
+      aiWorkerQuarantine = null
+      aiWorkerNativeCrashStreak = 0
       // активная модель сохраняется как ЯВНЫЙ выбор пользователя — переживает
       // перезапуск приложения и смены дефолта в будущих релизах
       try { writeModelsDirConfig(null, modelId, true) } catch { /* не критично */ }

@@ -92,9 +92,20 @@ export interface AiCatalogModel {
   sizeHuman: string
   installed: boolean
   damaged: boolean
+  /** Причина повреждения (урок 0xC0000409: честная диагностика вместо краша) */
+  damageReason?: string | null
   required: boolean
   /** Модель по умолчанию (активируется автоматически после установки) */
   defaultModel?: boolean
+}
+
+/** Карантин/безопасный режим после нативного краша модели (GitHub issue #2) */
+export interface AiModelQuarantineInfo {
+  modelId: string
+  reason: string
+  to?: string | null
+  at: string
+  code?: number
 }
 
 export interface AiStatusSnapshot {
@@ -111,6 +122,12 @@ export interface AiStatusSnapshot {
   requestedModel?: string
   /** true — активная модель отличается от запрошенной (у запрошенной нет файлов) */
   modelFallback?: boolean
+  /** Модель-исключение безопасного режима (не выбирается автоматически) */
+  excludeModel?: string | null
+  /** Последний карантин модели (повреждённые файлы) */
+  quarantine?: AiModelQuarantineInfo | null
+  /** Каталоги моделей в карантине */
+  quarantinedDirs?: string[]
   engine?: string
   benchmark?: AiBenchmarkResult | null
   ready: { stt: boolean }
@@ -245,7 +262,7 @@ export interface AvcElectronBridge {
     /** Открыть папку с логами */
     openLogsFolder?(): Promise<{ ok: boolean; error?: string | null }>
     /** Подписка на состояние AI-воркера (запущен/упал + причина) */
-    onWorkerState?(cb: (p: { running: boolean; error: string | null }) => void): () => void
+    onWorkerState?(cb: (p: { running: boolean; error: string | null; quarantine?: AiModelQuarantineInfo | null; safeMode?: AiModelQuarantineInfo | null }) => void): () => void
     /** Диагностика владельца: версия/пути/состояние воркера */
     getAppInfo?(): Promise<{
       version: string

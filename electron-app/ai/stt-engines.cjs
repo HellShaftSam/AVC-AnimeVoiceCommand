@@ -28,6 +28,7 @@ const path = require('path')
 const { EventEmitter } = require('events')
 
 const { STTService, PROFILES, SAMPLE_RATE_VAD } = require('./stt-service.cjs')
+const { checkModelIntegrity, checkVadIntegrity } = require('./model-integrity.cjs')
 
 const SAMPLE_RATE_GIGAAM = 16000
 
@@ -35,19 +36,24 @@ const SAMPLE_RATE_GIGAAM = 16000
 const DEFAULT_STT_MODEL = 'gigaam-v3-russian'
 
 /**
- * Разрешить активную модель: если файлы предпочитаемой отсутствуют —
- * честный fallback по цепочке (gigaam-v3 → t-one → gigaam-v2 → любой установленный).
- * Гарантирует, что после смены дефолта приложение с одной установленной T-One
- * продолжает работать, а после установки GigaAM — сразу на нём.
+ * УРОК ИНЦИДЕНТА v1.0.19 (0xC0000409): файлы есть, но повреждены — грузить их в
+ * sherpa-onnx НЕЛЬЗЯ (нативный краш процесса). Разрешение модели учитывает
+ * целостность, а не только существование файлов.
+ *
+ * @param {string} modelsDir
+ * @param {string} preferred
+ * @param {string|null} exclude модель-исключение (безопасный режим после нативного краша)
  */
-function resolveSttModelId(modelsDir, preferred) {
+function resolveSttModelId(modelsDir, preferred, exclude) {
   const chain = [preferred, DEFAULT_STT_MODEL, 't-one-russian', 'gigaam-v2-russian'].filter(
     (id, i, a) => id && a.indexOf(id) === i,
   )
   for (const id of chain) {
-    if (sttModelFilesPresent(modelsDir, id)) return id
+    if (exclude && id === exclude) continue
+    // здоровая = файлы на месте И целостность пройдена (не битый ONNX)
+    if (sttModelFilesPresent(modelsDir, id) && checkModelIntegrity(modelsDir, id).ok) return id
   }
-  // ничего не установлено — возвращаем предпочитаемый (ошибка будет честной при initialize)
+  // ничего здорового не установлено — возвращаем предпочитаемый (ошибка будет честной при initialize)
   return preferred || DEFAULT_STT_MODEL
 }
 
@@ -126,12 +132,19 @@ class GigaamOfflineEngine extends EventEmitter {
     this.state = 'loading'
     const t0 = Date.now()
     try {
+      // ПРЕД-ПОЛЁТНАЯ проверка целостности (урок 0xC0000409): битый ONNX в sherpa-onnx
+      // вызывает необработанное C++ исключение → мгновенная смерть процесса (try/catch
+      // бессилен). Проверяем чистым Node ДО любого нативного вызова.
+      const integ = checkModelIntegrity(this.modelsDir, this.modelId)
+      if (!integ.ok) {
+        throw new Error(`Файлы модели ${this.modelId} повреждены (${integ.problems[0]}) — удалите и скачайте заново в Настройках → AI`)
+      }
+      const vadInteg = checkVadIntegrity(this.modelsDir)
+      if (!vadInteg.ok) {
+        throw new Error(`Silero VAD повреждён/не установлен (${vadInteg.problems[0]}) — скачайте его в Настройках → AI`)
+      }
       const sherpa = lazySherpa()
       if (!sherpa) throw new Error('Пакет sherpa-onnx-node не установлен (нативный рантайм отсутствует)')
-      if (!fs.existsSync(this.vadFile)) throw new Error('Модель Silero VAD не установлена — скачайте её в Настройках')
-      if (!GigaamOfflineEngine.modelFilesPresent(this.modelsDir, this.modelId)) {
-        throw new Error(`Файлы модели ${this.modelId} не установлены — скачайте модель в Настройках`)
-      }
 
       const profile = PROFILES[this.profileKey]
       this._vad = new sherpa.Vad({

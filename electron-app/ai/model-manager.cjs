@@ -18,6 +18,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { EventEmitter } = require('events')
 const { spawnSync } = require('child_process')
+const { checkModelIntegrity } = require('./model-integrity.cjs')
 
 // --- манифест ------------------------------------------------------------------
 
@@ -195,6 +196,7 @@ class AIModelManager extends EventEmitter {
       const dir = path.join(this.baseDir, m.dir || path.join(m.key, m.id))
       let installed = false
       let damaged = false
+      let damageReason = null
       try {
         // файлы на месте = установлена (маркер добавляет проверку SHA, но файлы
         // важнее: STT-движок инициализируется именно по файлам)
@@ -202,6 +204,16 @@ class AIModelManager extends EventEmitter {
         if (installed && fs.existsSync(this.markerPath(dir))) {
           const data = JSON.parse(fs.readFileSync(this.markerPath(dir), 'utf8'))
           damaged = data.id !== undefined && data.id !== m.id
+        }
+        // УРОК 0xC0000409: «файлы на месте» ≠ «файлы целы». Усечённый/битый ONNX
+        // убивает нативный рантайм — помечаем damaged по тем же правилам, что и
+        // пред-полётная проверка движка (без нативных вызовов).
+        if (installed && m.key === 'stt') {
+          const integ = checkModelIntegrity(this.baseDir, m.id)
+          if (!integ.ok) {
+            damaged = true
+            damageReason = integ.problems[0]
+          }
         }
       } catch { damaged = true }
       return {
@@ -217,6 +229,7 @@ class AIModelManager extends EventEmitter {
         sizeHuman: fmtBytes(m.sizeBytes),
         installed,
         damaged,
+        damageReason,
         required: !!m.required,
         defaultModel: !!m.default,
       }
@@ -322,15 +335,23 @@ class AIModelManager extends EventEmitter {
       const archivePath = await this._downloadWithMirrors(spec, controller, opts)
       const { shaActual } = await this._verifyAndExtract(spec, archivePath)
 
-      // маркер установки — только после успешной верификации (§56)
+      // маркер установки — только после успешной верификации (§56).
+      // files{} — размеры каждого ожидаемого файла: по ним пред-полётная проверка
+      // целостности ловит усечённые/повреждённые файлы БЕЗ нативного рантайма
+      // (урок 0xC0000409, GitHub issue #2).
+      const files = {}
+      for (const f of spec.expectedFiles || []) {
+        try { files[f] = fs.statSync(path.join(spec.dir, f)).size } catch { files[f] = 0 }
+      }
       const marker = {
         id: spec.id,
         name: spec.name,
         url: spec.url,
         sha256: spec.sha256 && spec.sha256 !== 'PENDING_REAL_DOWNLOAD' ? spec.sha256 : shaActual,
         sizeBytes: spec.sizeBytes,
+        files,
         installedAt: new Date().toISOString(),
-        avcVersion: 1,
+        avcVersion: 2,
       }
       fs.writeFileSync(this.markerPath(spec.dir), JSON.stringify(marker, null, 2))
       this.emit('progress', { key: componentKey, id: spec.id, phase: 'done', percent: 100 })
@@ -414,8 +435,13 @@ class AIModelManager extends EventEmitter {
           if (status === 403) return reject(new DownloadError('HTTP_4xx', 'Доступ запрещён (HTTP 403).', 403))
           if (status >= 500) return reject(new DownloadError('HTTP_5xx', `Сервер временно недоступен (HTTP ${status}). Повторите позже.`, status))
           if (status === 416 && rangeStart > 0) {
-            // файл уже скачан полностью — переходим к верификации
+            // сервер отказал в Range за концом файла — .part уже скачан полностью.
+            // УРОК: раньше здесь резолвили archivePath, которого НЕ существует
+            // (есть только .part) → сбивающая с толку ошибка верификации.
             res.resume()
+            if (fs.existsSync(partPath) && !fs.existsSync(archivePath)) {
+              try { fs.renameSync(partPath, archivePath) } catch { /* пусть верификация честно ругнётся */ }
+            }
             return resolve(archivePath)
           }
           if (status !== 200 && status !== 206) return reject(new DownloadError('HTTP_4xx', `Неожиданный HTTP-статус: ${status}`, status))
@@ -542,12 +568,26 @@ class AIModelManager extends EventEmitter {
       return { ok: false, message: 'Не установлена' }
     }
     let total = 0
+    const files = {}
     for (const f of spec.expectedFiles || []) {
       const p = path.join(spec.dir, f)
       if (!fs.existsSync(p)) return { ok: false, message: `Файл отсутствует: ${f}` }
-      total += fs.statSync(p).size
+      files[f] = fs.statSync(p).size
+      total += files[f]
     }
     if (total === 0) return { ok: false, message: 'Установленные файлы пусты' }
+    // сверка с зафиксированными при установке размерами (урок 0xC0000409:
+    // усечённый файл ловим ДО попытки нативной загрузки)
+    try {
+      const marker = JSON.parse(fs.readFileSync(this.markerPath(spec.dir), 'utf8'))
+      if (marker.files && typeof marker.files === 'object') {
+        for (const [f, size] of Object.entries(marker.files)) {
+          if (typeof size === 'number' && size > 0 && files[f] != null && files[f] < size) {
+            return { ok: false, message: `Файл ${f} усечён: ${fmtBytes(files[f])} вместо ${fmtBytes(size)} — переустановите модель` }
+          }
+        }
+      }
+    } catch { /* маркера нет — пропускаем сверку */ }
     return { ok: true, message: `Файлы на месте (${fmtBytes(total)}), маркер цел` }
   }
 

@@ -21,6 +21,7 @@
 const fs = require('fs')
 const path = require('path')
 const { EventEmitter } = require('events')
+const { checkModelIntegrity, checkVadIntegrity } = require('./model-integrity.cjs')
 
 const SAMPLE_RATE_STT = 8000 // T-One: 8 кГц (спецификация §5)
 const SAMPLE_RATE_VAD = 16000 // Silero VAD: 16 кГц
@@ -102,6 +103,17 @@ class STTService extends EventEmitter {
     this.state = 'loading'
     const t0 = Date.now()
     try {
+      // ПРЕД-ПОЛЁТНАЯ проверка целостности (урок 0xC0000409, GitHub issue #2): битый
+      // ONNX в sherpa-onnx → необработанное C++ исключение → мгновенная смерть процесса.
+      // Проверяем чистым Node ДО любого нативного вызова.
+      const integ = checkModelIntegrity(this.modelsDir, 't-one-russian')
+      if (!integ.ok) {
+        throw new Error(`Файлы модели T-One повреждены (${integ.problems[0]}) — удалите и скачайте заново в Настройках → AI`)
+      }
+      const vadInteg = checkVadIntegrity(this.modelsDir)
+      if (!vadInteg.ok) {
+        throw new Error(`Silero VAD повреждён/не установлен (${vadInteg.problems[0]}) — скачайте его в Настройках → AI`)
+      }
       const sherpa = lazySherpa()
       if (!sherpa) throw new Error('Пакет sherpa-onnx-node не установлен (нативный рантайм отсутствует)')
       if (!STTService.modelsPresent(this.modelsDir)) throw new Error('Модели STT/VAD не установлены — запустите AI Setup')

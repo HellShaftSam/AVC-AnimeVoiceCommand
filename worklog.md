@@ -1116,3 +1116,32 @@ Work Log:
 Stage Summary:
 - Пуш 282b63e+этот фикс → run #19 → v1.0.19 = финальный релиз аудита
 - Целостность обновлятора проверена фактически (скачанный EXE ↔ SHA256SUMS.txt)
+
+---
+Task ID: stt-crash-0xc0000409-fix
+Agent: Z.ai Code (main)
+Task: Ремонт STT по отчёту пользователя (GitHub issues #1, #2): краш «Настройки AI», мёртвый STT в EXE v1.0.19; реализация по образцу SkyrimNet (выбор нейросети + живой тест + устойчивость к крашам).
+
+Work Log:
+- Синхронизация песочницы: git pull ff → ff4c3e8 (v1.0.19); восстановлена БД (db/custom.db), dev-сервер поднят
+- Прочитаны issues #1 (v1.0.14: воркер жил, T-One мусор «ннанананнрут») и #2 (v1.0.19: workerRunning=false, «код 3221226505» = 0xC0000409 STATUS_STACK_BUFFER_OVERRUN, 3 попытки подряд)
+- Исследование SkyrimNet (MinLL/SkyrimNet-GamePlugin): локальный Whisper STT + страница «Speech-to-Text Test» + изоляция тяжёлого AI, чтобы краш не убивал хост
+- Скачаны РЕАЛЬНЫЕ модели с k2-fsa (gigaam-v3 167388020B, t-one 128468156B, silero_vad 643854B), SHA-256 всех трёх сверены с манифестом — все OK
+- ВОСПРОИЗВЕДЕНИЕ: усечённый encoder.int8.onnx (50%) → «terminate called after throwing Ort::Exception … Protobuf parsing failed» → exit 134 (SIGABRT) — эквивалент 0xC0000409 на Windows; try/catch бессилен (нативный fail-fast) — механика краша EXE пользователя подтверждена
+- РЕШЕНИЕ (6 файлов):
+  1) electron-app/ai/model-integrity.cjs (НОВЫЙ) — пред-полётная целостность без нативного кода: существование/мин-размеры/ONNX-заголовок/protobuf-обход (ловит ЛЮБОЕ усечение)/сверка с маркером; quarantineModel (переименование .corrupt-*); resolveHealthyModelId
+  2) stt-engines.cjs — integrity-гейт в GigaamOfflineEngine.initialize; resolveSttModelId учитывает целостность + exclude
+  3) stt-service.cjs — integrity-гейт в STTService.initialize (T-One)
+  4) voice-pipeline.cjs — карантин битой запрошенной модели в конструкторе + авто-fallback на здоровую; статус: quarantine/excludeModel/quarantinedDirs; setSttModel отказывает битой
+  5) main.cjs — crash-policy: NATIVE_CRASH_CODES {134, 0xC0000005, 0xC0000409,…}; краш <30с → integrity-проверка → КАРАНТИН + рестарт на здоровой модели; иначе 2 краша → SAFE MODE (ai-safe-mode.json, переживает перезапуск); события worker-state несут quarantine/safeMode; set-stt-model ok снимает карантин; переустановка снимает по model-progress done
+  6) model-manager.cjs — маркер avcVersion 2 с files{имя→байт}; verify() сверяет размеры с маркером; catalogStatus damaged= по той же integrity-логике + damageReason; фикс 416-resume (.part→archive перед верификацией)
+- UI (settings-dialog.tsx + api.ts): баннер карантина/безопасного режима с кнопкой «Переустановить <модель>»; SttLiveTestCard — живой тест распознавания (паттерн SkyrimNet): микрофон 16кГц → ai.feedAudio → partial/final на экране, автостоп 10с, честные ошибки; бейдж «повреждена» с reason
+- tests/ai-selftest.cjs (НОВЫЙ): A GigaAM init+decode, B integrity-гейт (дочерний процесс должен ВЫЖИТЬ с честным отказом), C карантин+fallback, D T-One — итоги PASS/FAIL/SKIP честно
+- Золотой тест: русская TTS-речь «Наруто двадцать серия» (Google TTS ru, 16кГц) через ЖИВОЙ путь feedAudio→VAD→GigaAM → final «наруто двадцать серия» (endpoint, ~0.8с) — PASS; китайский TTS-голос z-ai русскую речь не произносит (сэмпл не речь) — не баг приложения
+- Результаты selftest на реальных моделях: A PASS (load 2.2с, текст Пушкина), B PASS (процесс ЖИВ, раньше SIGABRT), C PASS (карантин+T-One ready), D PASS
+- Превью проверено агент-браузером: главная рендерится, Настройки→AI открывается без краша (веб-режим), тема Navy Blue на месте; lint чист
+
+Stage Summary:
+- Root cause краша: битые файлы GigaAM в ai-models пользователя (наследие старых версий: «installed» = только существование файлов) → нативный fail-fast sherpa-onnx → воркер умирал 3× подряд → STT мёртв
+- Теперь: битая модель НЕ грузится нативно; карантин + авто-fallback на T-One; безопасный режим при повторных крашах; переустановка в 1 клик; живой тест STT в настройках
+- Ключевой урок: усечённый ONNX ловится ТОЛЬКО структурной protobuf-проверкой (min-size пропускает 50% усечение — проверено), а JS try/catch нативный краш не ловит никогда

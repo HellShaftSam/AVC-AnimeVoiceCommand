@@ -988,6 +988,12 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
 
       <Separator className="bg-secondary" />
 
+      {/* Живой тест распознавания (паттерн SkyrimNet «Speech-to-Text Test»):
+          микрофон → AI-воркер → текст — вся цепочка проверяется одним кликом */}
+      <SttLiveTestCard onStatusChanged={refresh} status={status} />
+
+      <Separator className="bg-secondary" />
+
       <section>
         <SectionTitle>Локальный AI</SectionTitle>
         <SettingRow label="Профиль производительности" hint="Максимальная отзывчивость — минимум задержек (§19)">
@@ -1288,7 +1294,12 @@ function SttCatalogCard({
                       <span className="rounded bg-sky-400 px-1.5 py-0.5 text-[11px] font-semibold text-sky-950">АКТИВНА</span>
                     )}
                     {m.damaged ? (
-                      <span className="rounded bg-rose-950 px-1.5 py-0.5 text-[11px] text-rose-400">повреждена</span>
+                      <span
+                        className="rounded bg-rose-950 px-1.5 py-0.5 text-[11px] text-rose-400"
+                        title={m.damageReason || undefined}
+                      >
+                        повреждена
+                      </span>
                     ) : m.installed ? (
                       <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-400">установлена</span>
                     ) : (
@@ -1419,6 +1430,222 @@ function SttCatalogCard({
 }
 
 /**
+ * SttLiveTestCard — живой тест распознавания одним кликом (паттерн SkyrimNet:
+ * страница «Speech-to-Text Test» в настройках). Проверяет ВСЮ цепочку сразу:
+ * микрофон → IPC → Silero VAD → активная STT-модель → текст на экране.
+ * Честные ошибки: нет микрофона/отказ доступа, STT не готов, воркер мёртв.
+ */
+function SttLiveTestCard({
+  status,
+}: {
+  status: AiStatusSnapshot | null
+  onStatusChanged: () => void
+}) {
+  const ai = getElectronBridge()?.ai
+  const [phase, setPhase] = useState<'idle' | 'recording' | 'finishing' | 'done' | 'error'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [partial, setPartial] = useState('')
+  const [finals, setFinals] = useState<{ text: string; ms: number }[]>([])
+  const [level, setLevel] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const sessionRef = useRef<{
+    ctx: AudioContext
+    processor: ScriptProcessorNode
+    source: MediaStreamAudioSourceNode
+    stream: MediaStream
+    mute: GainNode
+    startedAt: number
+    maxTimer: ReturnType<typeof setTimeout>
+    raf: number
+    finals: { text: string; ms: number }[]
+  } | null>(null)
+
+  const teardown = useCallback(() => {
+    const s = sessionRef.current
+    sessionRef.current = null
+    if (!s) return
+    try { clearTimeout(s.maxTimer) } catch { /* ок */ }
+    try { cancelAnimationFrame(s.raf) } catch { /* ок */ }
+    try { s.processor.disconnect() } catch { /* ок */ }
+    try { s.source.disconnect() } catch { /* ок */ }
+    try { s.stream.getTracks().forEach((t) => t.stop()) } catch { /* ок */ }
+    try { void s.ctx.close() } catch { /* ок */ }
+  }, [])
+
+  useEffect(() => () => teardown(), [teardown])
+
+  const start = async () => {
+    if (!ai?.feedAudio || !ai?.onSttFinal) return
+    if (!status?.ready.stt) {
+      setPhase('error')
+      setError('STT не готов — сначала установите и активируйте модель в каталоге выше')
+      return
+    }
+    setError(null)
+    setPartial('')
+    setFinals([])
+    setElapsed(0)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
+      const Ctor: typeof AudioContext =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new Ctor({ sampleRate: 16000 })
+      const source = ctx.createMediaStreamSource(stream)
+      const processor = ctx.createScriptProcessor(2048, 1, 1)
+      source.connect(processor)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 1024
+      source.connect(analyser)
+      const buf = new Uint8Array(analyser.fftSize)
+      const mute = ctx.createGain()
+      mute.gain.value = 0
+      processor.connect(mute)
+      mute.connect(ctx.destination)
+
+      const session = {
+        ctx,
+        processor,
+        source,
+        stream,
+        mute,
+        startedAt: Date.now(),
+        maxTimer: setTimeout(() => void stop(), 10000),
+        raf: 0,
+        finals: [] as { text: string; ms: number }[],
+      }
+      sessionRef.current = session
+      setPhase('recording')
+
+      const gain = useAvcStore.getState().settings.micGain || 1
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0)
+        const int16 = new Int16Array(input.length)
+        for (let i = 0; i < input.length; i++) {
+          const a = Math.abs(input[i] * gain)
+          const limited = a <= 0.7 ? input[i] * gain : Math.sign(input[i]) * (0.7 + 0.3 * (1 - Math.exp(-(a - 0.7) / 0.3)))
+          int16[i] = Math.round(limited * 32767)
+        }
+        void ai.feedAudio!(int16).catch(() => undefined)
+        if (sessionRef.current) {
+          analyser.getByteTimeDomainData(buf)
+          let peak = 0
+          for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128) / 128)
+          setLevel(peak)
+        }
+      }
+      const tick = () => {
+        if (!sessionRef.current) return
+        setElapsed(Math.round((Date.now() - session.startedAt) / 100) / 10)
+        sessionRef.current.raf = requestAnimationFrame(tick)
+      }
+      sessionRef.current.raf = requestAnimationFrame(tick)
+    } catch (e) {
+      setPhase('error')
+      setError(e instanceof Error ? `Микрофон недоступен: ${e.message}` : 'Микрофон недоступен')
+    }
+  }
+
+  const stop = async () => {
+    const ai2 = getElectronBridge()?.ai
+    if (!ai2) return
+    setPhase('finishing')
+    try { await ai2.flushStt?.() } catch { /* ок */ }
+    // дать финалу дойти (событие stt-final приходит асинхронно)
+    setTimeout(() => {
+      teardown()
+      setLevel(0)
+      setPhase('done')
+    }, 700)
+  }
+
+  // подписка на события STT ТОЛЬКО на время теста (у use-voice своя подписка всегда)
+  useEffect(() => {
+    if (phase !== 'recording' && phase !== 'finishing') return
+    const offP = ai?.onSttPartial?.((p) => {
+      if (sessionRef.current) setPartial(p.text || '')
+    })
+    const offF = ai?.onSttFinal?.((p) => {
+      if (!sessionRef.current || !p.text) return
+      setFinals((prev) => {
+        const next = [...prev, { text: p.text, ms: p.ms ?? 0 }]
+        if (sessionRef.current) sessionRef.current.finals = next
+        return next
+      })
+      setPartial('')
+    })
+    return () => {
+      offP?.()
+      offF?.()
+    }
+  }, [ai, phase])
+
+  if (!ai?.feedAudio) return null // web-режим — тест не нужен
+
+  const recording = phase === 'recording'
+  return (
+    <section className="rounded-lg border border-border bg-card/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <SectionTitle>Проверка распознавания голосом</SectionTitle>
+          <p className="text-xs text-muted-foreground">
+            Скажите команду (например, «Наруто двадцать серия») — увидите текст, который распознаёт активная модель.
+          </p>
+        </div>
+        {recording || phase === 'finishing' ? (
+          <Button variant="outline" size="sm" className="min-h-9 border-border px-3 text-xs" onClick={() => void stop()}>
+            {phase === 'finishing' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm bg-rose-500" aria-hidden />}
+            Завершить
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="min-h-9 border-border px-3 text-xs" onClick={() => void start()}>
+            <Mic className="mr-1.5 h-3.5 w-3.5" aria-hidden /> Проверить
+          </Button>
+        )}
+      </div>
+
+      {(recording || phase === 'finishing') && (
+        <div className="mt-2 space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-sky-300">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500" aria-hidden />
+            Слушаю… {elapsed.toFixed(1)} с (автостоп 10 с)
+          </div>
+          {/* уровень микрофона */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary" role="meter" aria-valuenow={Math.round(level * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-75" style={{ width: `${Math.min(100, Math.round(level * 140))}%` }} />
+          </div>
+          {partial && <p className="text-xs text-muted-foreground">{partial}…</p>}
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div className="mt-2 space-y-1">
+          {finals.length === 0 ? (
+            <p className="text-xs text-amber-400">Речь не распознана — проверьте микрофон и уровень сигнала, затем повторите.</p>
+          ) : (
+            finals.map((f, i) => (
+              <p key={i} className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-xs text-emerald-200">
+                «{f.text}» <span className="text-[11px] text-muted-foreground">({f.ms} мс)</span>
+              </p>
+            ))
+          )}
+        </div>
+      )}
+
+      {phase === 'error' && error && (
+        <div className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/5 p-2 text-xs text-rose-300">✗ {error}</div>
+      )}
+    </section>
+  )
+}
+
+/**
  * AiWorkerStatusCard — честный статус AI-воркера (УРОК РЕЛИЗА 1.0.12:
  * «я не вижу что происходит в приложении, оно зависло или работает»).
  * Живой ответ: воркер запущен/упал + ПРИЧИНА + кнопки перезапуска и логов.
@@ -1432,7 +1659,12 @@ function AiWorkerStatusCard({
   onRestart: () => void
 }) {
   const ai = getElectronBridge()?.ai
-  const [workerState, setWorkerState] = useState<{ running: boolean; error: string | null } | null>(null)
+  const [workerState, setWorkerState] = useState<{
+    running: boolean
+    error: string | null
+    quarantine?: { modelId: string; reason: string; to?: string | null; at: string } | null
+    safeMode?: { modelId: string; reason?: string; code?: number; at: string } | null
+  } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -1445,16 +1677,22 @@ function AiWorkerStatusCard({
 
   const running = workerState ? workerState.running : status?.worker === 'ok'
   const error = workerState?.error ?? status?.workerError ?? (status?.worker === 'failed' ? status.reason ?? null : null)
+  // карантин/безопасный режим: из события воркера или из статуса (после перерисовки)
+  const quarantine = workerState?.quarantine ?? status?.quarantine ?? null
+  const safeMode = workerState?.safeMode ?? null
+  const suspectModelId = quarantine?.modelId ?? safeMode?.modelId ?? null
 
-  const restart = async () => {
+  /** Переустановить модель-виновника: скачать заново → перезапустить воркер */
+  const reinstallSuspect = async () => {
+    if (!suspectModelId || !ai.install) return
     setBusy(true)
     try {
-      const res = await ai.restartWorker!()
-      if (res.ok) toast({ description: 'AI-воркер перезапущен' })
-      else toast({ description: `Не удалось запустить воркер: ${res.error ?? 'причина неизвестна'}`, variant: 'destructive' })
+      await ai.install([`stt:${suspectModelId}`])
+      await ai.restartWorker()
+      toast({ description: `Модель ${suspectModelId} переустановлена — воркер перезапущен` })
       onRestart()
     } catch (e) {
-      toast({ description: e instanceof Error ? e.message : 'Ошибка перезапуска', variant: 'destructive' })
+      toast({ description: e instanceof Error ? e.message : 'Не удалось переустановить модель', variant: 'destructive' })
     } finally {
       setBusy(false)
     }
@@ -1468,6 +1706,31 @@ function AiWorkerStatusCard({
       )}
       aria-live="polite"
     >
+      {/* Баннер карантина/безопасного режима (урок 0xC0000409): не просто «воркер
+          умер», а ЧТО случилось с моделью и ЧТО с этим делать — в один клик */}
+      {(quarantine || safeMode) && suspectModelId && (
+        <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">
+          <p className="font-medium text-amber-300">
+            {quarantine ? 'Карантин модели' : 'Безопасный режим'}: {suspectModelId}
+          </p>
+          <p className="mt-1 leading-relaxed text-amber-200/90">
+            {quarantine
+              ? `Файлы модели повреждены (${quarantine.reason}). Модель отключена, голос работает на здоровой модели. Переустановите её, чтобы вернуть точность GigaAM.`
+              : `Модель вызвала повторный нативный краш${safeMode?.code ? ` (код ${safeMode.code})` : ''} при целостных файлах. Работает запасная модель. Если краш повторится — сообщите логи в Issue.`}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2 min-h-8 border-amber-500/40 px-2 text-[11px] text-amber-200"
+            disabled={busy}
+            onClick={() => void reinstallSuspect()}
+          >
+            {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : null}
+            Переустановить {suspectModelId}
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-medium text-foreground">
           {running ? (
@@ -1488,7 +1751,19 @@ function AiWorkerStatusCard({
             size="sm"
             className="min-h-8 border-border px-2 text-[11px]"
             disabled={busy}
-            onClick={() => void restart()}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                const res = await ai.restartWorker!()
+                if (res.ok) toast({ description: 'AI-воркер перезапущен' })
+                else toast({ description: `Не удалось запустить воркер: ${res.error ?? 'причина неизвестна'}`, variant: 'destructive' })
+                onRestart()
+              } catch (e) {
+                toast({ description: e instanceof Error ? e.message : 'Ошибка перезапуска', variant: 'destructive' })
+              } finally {
+                setBusy(false)
+              }
+            }}
           >
             {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : null}
             Перезапустить

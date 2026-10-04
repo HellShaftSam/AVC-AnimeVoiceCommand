@@ -24,6 +24,7 @@ const fs = require('fs')
 const path = require('path')
 const { EventEmitter } = require('events')
 const { AIModelManager } = require('./model-manager.cjs')
+const { checkModelIntegrity, checkVadIntegrity, quarantineModel, listQuarantined } = require('./model-integrity.cjs')
 const { createSttEngine, engineForModel, sttModelFilesPresent, resolveSttModelId, DEFAULT_STT_MODEL } = require('./stt-engines.cjs')
 
 /** Честная причина недоступности убранных слоёв (для UI/диагностики) */
@@ -52,20 +53,55 @@ class VoicePipeline extends EventEmitter {
     this.modelsDir = opts.modelsDir || path.join(__dirname, '..', 'models')
     this.profile = opts.profile || 'max_responsiveness'
     this.enabled = opts.enabled !== false // §0/§129: AI — модульное расширение, можно отключить
+    /** Модель-исключение (безопасный режим после нативного краша): её НЕ выбираем,
+     *  пока пользователь явно не вернёт её (переустановка/активация в Настройках). */
+    this.excludeModelId = opts.excludeModel || process.env.AVC_EXCLUDE_MODEL || null
     /** Активная модель STT (каталог моделей); движок выбирается по модели.
      *  Релиз 1.0.15: по умолчанию GigaAM v3 (точная). Если её файлов нет —
-     *  честный fallback на установленную (T-One), чтобы приложение работало сразу. */
-    this.activeModelId = resolveSttModelId(this.modelsDir, opts.modelId || DEFAULT_STT_MODEL)
+     *  честный fallback на установленную (T-One), чтобы приложение работало сразу.
+     *  Урок 0xC0000409: «установленная» = файлы на месте И целостность пройдена. */
+    this.activeModelId = resolveSttModelId(this.modelsDir, opts.modelId || DEFAULT_STT_MODEL, this.excludeModelId)
     /** Модель, запрошенная конфигом (до fallback) — для честного статуса в UI */
     this.requestedModelId = opts.modelId || DEFAULT_STT_MODEL
 
     this.manager = new AIModelManager({ baseDir: this.modelsDir })
     this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId: this.activeModelId })
 
+    /** Информация о последнем карантине (для честного UI) */
+    this.quarantine = null
+
+    // если ЗАПРОШЕННАЯ модель битая (файлы есть, целостности нет) — карантируем сразу:
+    // иначе она навсегда остаётся невидимым «мине» (повторный краш при переключении)
+    this._quarantineDamaged(this.requestedModelId)
+
     /** исполненные ранние команды (§14): utteranceId → type */
     this._executedEarly = new Map()
     this._lastEarlyText = ''
     this._wireStt()
+  }
+
+  /**
+   * Если файлы модели на месте, но целостность нарушена — карантин (переименование)
+   * + запись в this.quarantine. Возвращает true, если модель была повреждена.
+   * Урок 0xC0000409: битый каталог нельзя оставлять «выглядящим установленным».
+   */
+  _quarantineDamaged(modelId) {
+    try {
+      if (!sttModelFilesPresent(this.modelsDir, modelId)) return false
+      const integ = checkModelIntegrity(this.modelsDir, modelId)
+      if (integ.ok) return false
+      const q = quarantineModel(this.modelsDir, modelId, integ.problems.join('; '))
+      this.quarantine = {
+        modelId,
+        reason: integ.problems.join('; '),
+        to: (q && q.to) || null,
+        at: new Date().toISOString(),
+      }
+      return true
+    } catch {
+      // сбой карантина не должен ронять воркер — честно запишем и продолжим
+      return false
+    }
   }
 
   /** Мостинг событий движка наружу с проверкой ранних команд (§12) */
@@ -95,6 +131,9 @@ class VoicePipeline extends EventEmitter {
       activeModel: this.activeModelId,
       requestedModel: this.requestedModelId,
       modelFallback: this.activeModelId !== this.requestedModelId,
+      excludeModel: this.excludeModelId || null,
+      quarantine: this.quarantine,
+      quarantinedDirs: listQuarantined(this.modelsDir),
       engine: engineForModel(this.activeModelId)?.id || 't-one-streaming',
       benchmark: this.benchmarkResult || null,
       stt: this.stt.getMetrics(),
@@ -136,13 +175,19 @@ class VoicePipeline extends EventEmitter {
     const results = []
     for (const key of wanted) {
       try {
+        // если модель в карантине/под исключением и её ставят заново — снимаем карантин
+        const installedId = key.startsWith('stt:') ? key.slice(4) : null
+        if (installedId && (installedId === this.excludeModelId || installedId === (this.quarantine && this.quarantine.modelId))) {
+          this.excludeModelId = null
+          this.quarantine = null
+          this.requestedModelId = installedId
+        }
         const r = await this.manager.install(key, opts)
         results.push({ key, ok: true, skipped: !!r.skipped })
         // установили компонент STT — инициализируем движок сразу
         if (key === 'stt') {
           await this.initializeServices()
         } else if (key.startsWith('stt:')) {
-          const installedId = key.slice(4)
           if (installedId === this.activeModelId) {
             // установили уже активную модель (или её файлы) — инициализируем
             await this.initializeServices()
@@ -194,9 +239,43 @@ class VoicePipeline extends EventEmitter {
   /**
    * Инициализация STT (единственный оставшийся AI-сервис).
    * UI не блокируется: вызывается фоном после создания окна.
+   *
+   * УРОК 0xC0000409 (GitHub issue #2): повреждённая модель = нативный краш всего
+   * воркера. Здесь: пред-проверка целостности → карантин битой модели → честный
+   * авто-fallback на здоровую, чтобы голос работал даже после битой установки.
    */
   async initializeServices() {
     const out = {}
+
+    // если запрошенная модель битая — карантируем и честно переключаемся на здоровую
+    if (sttModelFilesPresent(this.modelsDir, this.activeModelId)) {
+      const integ = checkModelIntegrity(this.modelsDir, this.activeModelId)
+      if (!integ.ok) {
+        this._quarantineDamaged(this.activeModelId)
+        const healthy = resolveSttModelId(this.modelsDir, null, this.activeModelId)
+        if (healthy && healthy !== this.activeModelId) {
+          this.activeModelId = healthy
+          try { this.stt.shutdown() } catch { /* ок */ }
+          this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId: healthy })
+          this._wireStt()
+        } else {
+          // здоровой альтернативы нет — честная ошибка без нативного вызова
+          if (!sttModelFilesPresent(this.modelsDir, this.activeModelId)) {
+            this.emit('services-status', this.getStatus().ready)
+            return { stt: { state: 'failed', error: `Модель ${this.activeModelId} повреждена и помещена в карантин. Скачайте модель заново в Настройках → AI.` } }
+          }
+        }
+      }
+    }
+
+    // VAD общий для всех движков — тоже не пропускаем битым
+    const vadInteg = checkVadIntegrity(this.modelsDir)
+    if (!vadInteg.ok && sttModelFilesPresent(this.modelsDir, this.activeModelId)) {
+      out.stt = { state: 'failed', error: `Silero VAD повреждён (${vadInteg.problems[0]})` }
+      this.emit('services-status', this.getStatus().ready)
+      return out
+    }
+
     if (sttModelFilesPresent(this.modelsDir, this.activeModelId)) out.stt = await this.stt.initialize()
     this.emit('services-status', this.getStatus().ready)
     return out
@@ -212,11 +291,17 @@ class VoicePipeline extends EventEmitter {
     if (!sttModelFilesPresent(this.modelsDir, modelId)) {
       return { ok: false, message: `Модель ${modelId} не установлена — сначала скачайте её` }
     }
+    // урок 0xC0000409: повреждённую модель НЕ грузим — честный отказ
+    const integ = checkModelIntegrity(this.modelsDir, modelId)
+    if (!integ.ok) {
+      return { ok: false, message: `Модель ${modelId} повреждена (${integ.problems[0]}) — удалите и скачайте заново` }
+    }
     const old = this.stt
     this.activeModelId = modelId
-    // явный выбор пользователя меняет и «запрошенную»: иначе статус показал бы
-    // ложный fallback («модель X не установлена») до перезапуска приложения
+    // явный выбор пользователя снимает безопасный режим и меняет «запрошенную»:
+    // иначе статус показал бы ложный fallback («модель X не установлена») до перезапуска
     this.requestedModelId = modelId
+    this.excludeModelId = null
     this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId })
     this._wireStt()
     try { old.shutdown() } catch { /* ок */ }
