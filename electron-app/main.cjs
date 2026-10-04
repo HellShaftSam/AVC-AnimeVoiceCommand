@@ -23,46 +23,20 @@ const fs = require('fs')
 const { performance } = require('perf_hooks')
 const { AuthenticationService, PARTITION } = require('./auth/authentication-service.cjs')
 
-// --- стартовая телеметрия (фаза 2 аудита: измеряем, а не «кажется быстрее») ---
-// Монотонные метки от загрузки модуля до готового UI и готового AI; JSON-отчёт
-// пишется в userData/logs/startup-report.json (для сравнения сборок до/после).
-const START_T0 = performance.now()
-const STARTUP_MARKS = [{ mark: 'main-module-loaded', ms: 0 }]
-function markStartup(name) {
-  STARTUP_MARKS.push({ mark: name, ms: Math.round(performance.now() - START_T0) })
-  log(`[Startup] ${name}: +${STARTUP_MARKS[STARTUP_MARKS.length - 1].ms} мс`)
-}
-function writeStartupReport(extra = {}) {
-  try {
-    const dir = path.join(app.getPath('userData'), 'logs')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    const report = {
-      version: app.getVersion(),
-      platform: process.platform,
-      electron: process.versions.electron,
-      writtenAt: new Date().toISOString(),
-      totalMs: Math.round(performance.now() - START_T0),
-      marks: STARTUP_MARKS,
-      ...extra,
-    }
-    fs.writeFileSync(path.join(dir, 'startup-report.json'), JSON.stringify(report, null, 2))
-  } catch {
-    /* телеметрия не должна ломать запуск */
-  }
-}
-
-// Локальный AI-слой (спецификация §4–§134) — модульный: при отсутствии пакетов/моделей
-// приложение продолжает работать (§0, §129). Загружаем лениво и честно отражаем статус.
-let VoicePipeline = null
-let voicePipeline = null
-try {
-  VoicePipeline = require('./ai/voice-pipeline.cjs').VoicePipeline
-} catch (e) {
-  log(`[AI] voice-pipeline недоступен: ${e.message}`)
+// --- режимы самопроверки (читаются reportFatal — объявлены ДО обработчиков) -----
+const SELFTEST = process.argv.includes('--auth-selftest')
+const AI_SELFTEST = process.argv.includes('--ai-selftest')
+if (SELFTEST || AI_SELFTEST) {
+  app.disableHardwareAcceleration()
 }
 
 // --- структурированный лог (секция 21): без секретов ---------------------------
-
+// УРОК РЕЛИЗА 1.0.9 («Cannot access 'fileLogEnabled' before initialization»):
+// раньше этот блок стоял НИЖЕ верхнеуровневого try/catch с require AI-пайплайна.
+// В packaged-сборке тот require падал (ai/** лежит в extraResources, а НЕ в
+// app.asar), catch вызывал log(), а переменные лога ещё не были инициализированы
+// → ReferenceError из TDZ убивала запуск ещё до регистрации обработчика ошибок.
+// Правило: лог объявлен ДО любого верхнеуровневого кода, который может его вызвать.
 const LOG_MAX_BYTES = 512 * 1024
 let logStream = null
 // Ранний буфер: до app ready писать некуда (portable EXE не имеет консоли) —
@@ -114,25 +88,59 @@ function redact(text) {
     .replace(/PHPSESSID=[^;\s"']+/gi, 'PHPSESSID=[REDACTED]')
 }
 
+// --- изменяемое состояние приложения -------------------------------------------
+// Инициализируется ДО регистрации обработчиков фатальных ошибок: reportFatal
+// читает mainWindow/fatalPromise — они не должны встречаться в TDZ никогда.
+let nextProcess = null
+let mainWindow = null
+let authService = null
+let splashWindow = null
+let fatalWindow = null
+let fatalPromise = null
+
+// --- фатальные ошибки: обработчики регистрируем как можно раньше ----------------
 process.on('uncaughtException', (err) => reportFatal(err, 'uncaughtException'))
 process.on('unhandledRejection', (reason) => reportFatal(reason, 'unhandledRejection'))
 
-// --- режим самопроверки ---------------------------------------------------------
-
-const SELFTEST = process.argv.includes('--auth-selftest')
-if (SELFTEST) {
-  app.disableHardwareAcceleration()
+// --- стартовая телеметрия (фаза 2 аудита: измеряем, а не «кажется быстрее») ---
+// Монотонные метки от загрузки модуля до готового UI и готового AI; JSON-отчёт
+// пишется в userData/logs/startup-report.json (для сравнения сборок до/после).
+const START_T0 = performance.now()
+const STARTUP_MARKS = [{ mark: 'main-module-loaded', ms: 0 }]
+function markStartup(name) {
+  STARTUP_MARKS.push({ mark: name, ms: Math.round(performance.now() - START_T0) })
+  log(`[Startup] ${name}: +${STARTUP_MARKS[STARTUP_MARKS.length - 1].ms} мс`)
+}
+function writeStartupReport(extra = {}) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const report = {
+      version: app.getVersion(),
+      platform: process.platform,
+      electron: process.versions.electron,
+      writtenAt: new Date().toISOString(),
+      totalMs: Math.round(performance.now() - START_T0),
+      marks: STARTUP_MARKS,
+      ...extra,
+    }
+    fs.writeFileSync(path.join(dir, 'startup-report.json'), JSON.stringify(report, null, 2))
+  } catch {
+    /* телеметрия не должна ломать запуск */
+  }
 }
 
-/** Режим самопроверки AI-слоя в РЕАЛЬНОМ main-процессе (§120, §121) — без UI */
-const AI_SELFTEST = process.argv.includes('--ai-selftest')
-if (AI_SELFTEST) {
-  app.disableHardwareAcceleration()
-}
+// Локальный AI-слой (спецификация §4–§134) живёт В ИЗОЛИРОВАННОМ воркере на чистом
+// Node: startAiWorker() → resources/ai/ai-worker.cjs (packaged) | ai/ai-worker.cjs
+// (dev), IPC-мост — setupAiIpc(). Прямой require('./ai/voice-pipeline.cjs') из main
+// УДАЛЁН: (1) класс VoicePipeline в main нигде не использовался — мёртвый код;
+// (2) в packaged-сборке ai/** НЕ входит в app.asar (electron-builder files), поэтому
+// require падал всегда, а его catch-блок убивал запуск через TDZ-баг лога выше
+// (урок релиза 1.0.9). Модульность сохранена: без моделей/воркера приложение
+// продолжает работать (§0, §129) — статус честно отражается в UI.
 
 // --- Next.js сервер для packaged-сборки -----------------------------------------
-
-let nextProcess = null
+// (nextProcess объявлен вверху модуля — до регистрации обработчиков ошибок)
 
 function findFreePort(start) {
   return new Promise((resolve) => {
@@ -241,18 +249,13 @@ async function startNextServer() {
 }
 
 // --- основная сборка --------------------------------------------------------------
-
-let mainWindow = null
-let authService = null
+// Состояние (mainWindow/authService/splash/fatal) объявлено вверху модуля —
+// до регистрации обработчиков фатальных ошибок (урок релиза 1.0.9, TDZ).
 
 // --- окно запуска (splash) и окно ошибки запуска --------------------------------
 // Проблема, которую они решают: до готовности Next-сервера у приложения НЕ БЫЛО ни
 // одного окна — при долгой распаковке portable EXE (минуты) или сбое старта
 // пользователь видел «висит в процессах и ничего не происходит».
-
-let splashWindow = null
-let fatalWindow = null
-let fatalPromise = null
 
 function createSplashWindow() {
   if (splashWindow && !splashWindow.isDestroyed()) return
