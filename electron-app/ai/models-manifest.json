@@ -1,14 +1,13 @@
 {
   "$schema": "./ai-manifest-schema.md",
-  "version": 1,
+  "version": 2,
   "generatedAt": "2026-10-03",
   "generatedBy": "scripts/validate-ai-assets.mjs (значения сняты с реальных загрузок, не выдуманы)",
+  "releaseNote": "v2 (1.0.12): LLM и TTS УБРАНЫ из релиза по решению владельца — остался только голосовой слой STT+VAD. Убранные компоненты не перечисляются, чтобы UI не предлагал их установку.",
   "storage": {
     "dirName": "ai-models",
     "layout": {
-      "stt": "stt/t-one-russian/",
-      "tts": "tts/{voiceId}/",
-      "llm": "llm/qwen3-0.6b/"
+      "stt": "stt/t-one-russian/"
     }
   },
   "components": {
@@ -38,86 +37,6 @@
         "acceptRanges": true
       }
     },
-    "tts": {
-      "id": "silero-family-ru-vits",
-      "name": "Русский локальный TTS (VITS, среднее качество)",
-      "required": false,
-      "runtime": "sherpa-onnx OfflineTts (тот же нативный рантайм, что и STT)",
-      "honestNote": "Спека называет Silero v5_5_ru. Модель https://models.silero.ai/models/tts/ru/v5_5_ru.pt доступна (145420684 байт, 200 OK), НО это PyTorch-модель (.pt): в Node/Electron без Python и libtorch (~2 ГБ) её выполнить нельзя — а спека запрещает требовать Python/ручные установки (§112). Поэтому используем официальные русские голоса VITS из того же рантайма sherpa-onnx (k2-fsa/sherpa-onnx, tag tts-models) — локальный офлайн-синтез, требования §23–§29 выполняются.",
-      "voices": [
-        {
-          "id": "irina",
-          "name": "Ирина (женский)",
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-irina-medium.tar.bz2",
-          "archive": "tar.bz2",
-          "expectedFiles": [
-            "ru_RU-irina-medium.onnx",
-            "tokens.txt"
-          ],
-          "sizeBytes": 67153308,
-          "sha256": "1fc0f54e5e084fe287c07909f2f6e0ba6d857864cf800e3ab80286a4e8233008",
-          "acceptRanges": true,
-          "default": true
-        },
-        {
-          "id": "ruslan",
-          "name": "Руслан (мужской)",
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-ruslan-medium.tar.bz2",
-          "archive": "tar.bz2",
-          "expectedFiles": [
-            "ru_RU-ruslan-medium.onnx",
-            "tokens.txt"
-          ],
-          "sizeBytes": 67210684,
-          "sha256": "0690b1cad01f86e8db9ba988af24898bdc1af774e23cb2e46b9c730269b6fd83",
-          "acceptRanges": true
-        },
-        {
-          "id": "dmitri",
-          "name": "Дмитрий (мужской)",
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-dmitri-medium.tar.bz2",
-          "archive": "tar.bz2",
-          "expectedFiles": [
-            "ru_RU-dmitri-medium.onnx",
-            "tokens.txt"
-          ],
-          "sizeBytes": 67188551,
-          "sha256": "c86d0803737de13d441923ff3b3f309482fab8d7af3ec85949942809eb9a3660",
-          "acceptRanges": true
-        }
-      ]
-    },
-    "llm": {
-      "id": "qwen3-0.6b",
-      "name": "Qwen3-0.6B (семантический роутер команд)",
-      "quantization": "Q4_K_M",
-      "required": false,
-      "runtime": "llama.cpp (нативный) через node-llama-cpp v3 — прямая нативная интеграция без HTTP-хопа (§130)",
-      "description": "Локальный LLM для семантического разбора неоднозначных команд; строгий JSON по грамматике (§38–§39)",
-      "source": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF",
-      "url": "https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q4_K_M.gguf",
-      "urlNote": "Официальный репозиторий Qwen/Qwen3-0.6B-GGUF УДАЛИЛ Q4_K_M из апстрима (проверено 2026-10-03 через HF API: остался только Q8_0). Используется поддерживаемый репозиторий bartowski (тот же base_model: Qwen/Qwen3-0.6B, Apache-2.0).",
-      "sizeBytes": 484220320,
-      "sha256": "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14",
-      "acceptRanges": true,
-      "alternatives": [
-        {
-          "id": "qwen3-0.6b-q8-official",
-          "name": "Qwen3-0.6B Q8_0 (официальный репозиторий Qwen)",
-          "url": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
-          "sizeBytes": null,
-          "sha256": null,
-          "note": "Не проверен по размеру/SHA — загружается по требованию; официальные апстрим-данные приоритетнее"
-        }
-      ],
-      "verifiedAt": "2026-10-03",
-      "verifiedChecks": {
-        "httpStatus": 200,
-        "redirects": 1,
-        "contentLengthMatch": true,
-        "acceptRanges": true
-      }
-    },
     "vad": {
       "id": "silero-vad",
       "name": "Silero VAD",
@@ -134,13 +53,6 @@
         "httpStatus": 200,
         "contentLengthMatch": true
       }
-    }
-  },
-  "runtimeChecks": {
-    "llamaCpp": {
-      "kind": "node-llama-cpp v3 (нативные llama.cpp бинари для win32-x64-electron/linux-x64 в комплекте)",
-      "url": "https://github.com/ggml-org/llama.cpp/releases",
-      "note": "Бинари распространяются вместе с пакетом node-llama-cpp; CI-этап validate-ai-assets проверяет пакет и его упаковку"
     }
   }
 }

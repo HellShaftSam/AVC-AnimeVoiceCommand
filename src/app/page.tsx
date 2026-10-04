@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { avcApi, getElectronBridge } from '@/lib/avc/api'
-import { AquariumBackground } from '@/components/avc/aquarium-background'
+import { SeaBackground } from '@/components/avc/sea-background'
 import { AuthDialog } from '@/components/avc/auth-dialog'
 import { AiSetupDialog } from '@/components/avc/ai-setup-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
@@ -158,8 +158,8 @@ export default function Page() {
         couchMode ? 'text-[17px] lg:text-[21px]' : 'text-sm',
       )}
     >
-      {/* Подводный мир позади интерфейса: волны и свет видны СКВОЗЬ панели */}
-      <AquariumBackground />
+      {/* Морской фон позади интерфейса: статичный градиент, ноль GPU-нагрузки */}
+      <SeaBackground />
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <HeaderBar />

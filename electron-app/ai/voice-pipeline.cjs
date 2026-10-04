@@ -1,18 +1,22 @@
 /**
- * VoicePipeline — оркестратор локального голосового слоя AVC-Anime (спецификация §4, §12–§14, §40–§47).
+ * VoicePipeline — оркестратор локального голосового слоя AVC-Anime.
  *
- * Архитектура (единая точка исполнения, §41):
- *   ЭКСПЛУАТАЦИЯ: детерминированный парсер рендерера (parser.ts) остаётся единственным
+ * РЕШЕНИЕ ВЛАДЕЛЬЦА (релиз 1.0.12): LLM и TTS УБРАНЫ из релиза.
+ * Остался только рабочий слой распознавания речи:
+ *   STT (sherpa-onnx, T-One Russian + Silero VAD) — частичные/финальные
+ *   транскрипты + EarlyCommandDetector (безопасные частичные фразы).
+ *
+ * Архитектура (единая точка исполнения):
+ *   ЭКСПУАТАЦИЯ: детерминированный парсер рендерера (parser.ts) остаётся единственным
  *   исполнителем команд. Main-процесс добавляет:
  *     1. STT-события (partial/final) → рендерер → СУЩЕСТВУЮЩИЙ парсер → СУЩЕСТВУЮЩИЙ executor;
- *     2. EarlyCommandDetector: безопасные ЧАСТИЧНЫЕ фразы (§12) → рендереру как
+ *     2. EarlyCommandDetector: безопасные ЧАСТИЧНЫЕ фразы → рендереру как
  *        'early-command' { type } — рендерер исполняет через ТОТ ЖЕ executor;
- *        опасное (удали/оценка/аккаунт — §13) рано НЕ исполняется никогда;
- *     3. Локальный LLM-роутер (§28–§47) — ТОЛЬКО когда парсер вернул Unknown/низкую
- *        уверенность; тот же контракт команд, что у /api/voice/interpret;
- *     4. Локальный TTS с кэшем (§22–§29) — рендерер получает WAV и проигрывает с ducking.
- *   Дедупликация (§14): early-command и final для одной фразы не исполняются дважды —
- *   main помечает utteranceId исполненным; рендерер дополнительно помечает executedIds.
+ *        опасное (удали/оценка/аккаунт) рано НЕ исполняется никогда.
+ *
+ * Слои LLM/TTS были удалены честно: контракт status/IPC сохранён (готовность = false),
+ * чтобы main-процесс и UI не ломались, но воркер больше НЕ содержит их код и
+ * пак с нативными зависимостями llama.cpp/sherpa-TTS не собирается (§113).
  */
 'use strict'
 
@@ -20,8 +24,9 @@ const path = require('path')
 const { EventEmitter } = require('events')
 const { AIModelManager } = require('./model-manager.cjs')
 const { STTService } = require('./stt-service.cjs')
-const { LLMService } = require('./llm-service.cjs')
-const { TTSService } = require('./tts-service.cjs')
+
+/** Честная причина недоступности убранных слоёв (для UI/диагностики) */
+const REMOVED_REASON = 'Убрано из релиза (решение владельца, 1.0.12)'
 
 /** §12: безопасные ранние команды — только очевидные и обратимые действия плеера/навигации.
  *  Частичные фразы STT обрезают окончания, поэтому допускаются НЕПОЛНЫЕ слова,
@@ -40,6 +45,11 @@ const EARLY_SAFE_PATTERNS = [
 /** §13: опасные намерения — НИКОГДА не исполняются по частичной фразе */
 const UNSAFE_PATTERN = /(удал|убер|сн[иь]м|оцен|выйд|войд|аккаунт|списк|загрузк|коммент)/i
 
+/** Метрики убранного слоя — честный «disabled» вместо выдуманных чисел */
+function removedMetrics() {
+  return { state: 'disabled', enabled: false, reason: REMOVED_REASON }
+}
+
 class VoicePipeline extends EventEmitter {
   constructor(opts = {}) {
     super()
@@ -49,8 +59,6 @@ class VoicePipeline extends EventEmitter {
 
     this.manager = new AIModelManager({ baseDir: this.modelsDir })
     this.stt = new STTService({ modelsDir: this.modelsDir, profile: this.profile })
-    this.llm = new LLMService({ modelsDir: this.modelsDir, profile: this.profile })
-    this.tts = new TTSService({ modelsDir: this.modelsDir })
 
     /** исполненные ранние команды (§14): utteranceId → type */
     this._executedEarly = new Map()
@@ -66,8 +74,6 @@ class VoicePipeline extends EventEmitter {
       const alreadyEarly = this._executedEarly.get(p.utteranceId) || null
       this.emit('stt-final', { ...p, earlyCommandType: alreadyEarly })
     })
-    this.tts.on('speak-file', (p) => this.emit('tts-speak-file', p))
-    this.tts.on('cancel-speech', () => this.emit('tts-cancel'))
   }
 
   /** Общий статус для AI Setup/диагностики (§97) */
@@ -79,14 +85,14 @@ class VoicePipeline extends EventEmitter {
       modelsDir: this.modelsDir,
       models: st.components,
       freeDisk: st.freeDisk,
-      voices: st.voice,
+      voices: [],
       stt: this.stt.getMetrics(),
-      llm: this.llm.getMetrics(),
-      tts: this.tts.getMetrics(),
+      llm: removedMetrics(),
+      tts: removedMetrics(),
       ready: {
         stt: this.stt.isReady(),
-        llm: this.llm.isReady(),
-        tts: this.tts.isReady(),
+        llm: false,
+        tts: false,
       },
     }
   }
@@ -116,16 +122,21 @@ class VoicePipeline extends EventEmitter {
     }
   }
 
-  /** §50–§53: установка компонентов (кнопка Install в AI Setup) */
+  /** §50–§53: установка компонентов (кнопка Install в AI Setup) — только STT+VAD */
   async installComponents(keys, opts = {}) {
+    const allowed = ['stt', 'vad']
+    const wanted = keys.filter((k) => allowed.includes(k))
     const results = []
-    for (const key of keys) {
+    for (const key of wanted) {
       try {
         const r = await this.manager.install(key, opts)
         results.push({ key, ok: true, skipped: !!r.skipped })
       } catch (e) {
         results.push({ key, ok: false, kind: e.kind || 'ERROR', message: e.message })
       }
+    }
+    for (const key of keys.filter((k) => !allowed.includes(k))) {
+      results.push({ key, ok: false, kind: 'REMOVED', message: REMOVED_REASON })
     }
     return results
   }
@@ -135,50 +146,27 @@ class VoicePipeline extends EventEmitter {
   }
 
   /**
-   * Инициализация всех доступных AI-сервисов (§48–§49).
-   * Каждый сервис независим (§129): отказ одного не мешает остальным.
+   * Инициализация STT (единственный оставшийся AI-сервис).
    * UI не блокируется: вызывается фоном после создания окна.
    */
-  async initializeServices({ stt = true, tts = true, llm = true } = {}) {
+  async initializeServices() {
     const out = {}
-    if (stt && STTService.modelsPresent(this.modelsDir)) out.stt = await this.stt.initialize()
-    if (tts && TTSService.modelPresent(this.modelsDir)) out.tts = await this.tts.initialize()
-    if (llm && LLMService.modelPresent(this.modelsDir)) out.llm = await this.llm.initialize()
-    this.emit('services-status', out)
+    if (STTService.modelsPresent(this.modelsDir)) out.stt = await this.stt.initialize()
+    this.emit('services-status', this.getStatus().ready)
     return out
   }
 
   /**
-   * Фаза 2 (аудит №3, «медленный запуск»): поэтапная инициализация.
-   * Сразу — только STT (голос готов ASAP); TTS/LLM — отложенно в фоне,
-   * чтобы старт воркера не тянул тяжёлые модели, а первая команда не ждала LLM.
+   * Поэтапная инициализация: сейчас только STT (голос готов ASAP).
+   * Имя сохранено для совместимости вызовов (§49 + фаза 2 аудита).
    */
-  async initializeCoreThenDeferred({ deferredDelayMs = 8000 } = {}) {
-    const out = {}
-    if (STTService.modelsPresent(this.modelsDir)) out.stt = await this.stt.initialize()
-    this.emit('services-status', this.getStatus().ready)
-    if (this._deferredTimer) clearTimeout(this._deferredTimer)
-    this._deferredTimer = setTimeout(() => {
-      void this.initializeDeferred().catch(() => undefined)
-    }, deferredDelayMs)
-    return out
+  async initializeCoreThenDeferred() {
+    return this.initializeServices()
   }
 
-  /** Догрузка TTS и LLM (фон после старта или по требованию перед первым использованием) */
+  /** Совместимость со старыми вызовами (больше нечего догружать) */
   async initializeDeferred() {
-    const out = {}
-    if (this._deferredTimer) {
-      clearTimeout(this._deferredTimer)
-      this._deferredTimer = null
-    }
-    if (TTSService.modelPresent(this.modelsDir) && !this.tts.isReady()) {
-      out.tts = await this.tts.initialize().catch((e) => ({ error: e.message }))
-    }
-    if (LLMService.modelPresent(this.modelsDir) && !this.llm.isReady()) {
-      out.llm = await this.llm.initialize().catch((e) => ({ error: e.message }))
-    }
-    this.emit('services-status', this.getStatus().ready)
-    return out
+    return this.initializeServices()
   }
 
   /**
@@ -216,35 +204,21 @@ class VoicePipeline extends EventEmitter {
   }
 
   /**
-   * §28–§47: локальный LLM-роутер. Вызывается рендерером ТОЛЬКО когда
-   * детерминированный парсер не смог распознать фразу. Контракт ответа —
- * как у /api/voice/interpret: { commands, needsClarification, clarifyQuestion }.
+   * LLM-роутер УБРАН из релиза: всегда null (рендерер честно использует
+   * только детерминированный парсер).
    */
-  async llmRoute(text, context, opts = {}) {
-    if (!this.enabled) return null
-    // ленивая догрузка: первая команда не должна падать только потому,
-    // что фоновая инициализация ещё не дошла до LLM (фаза 2.2)
-    if (LLMService.modelPresent(this.modelsDir) && !this.llm.isReady()) {
-      await this.initializeDeferred().catch(() => undefined)
-    }
-    if (!this.llm.isReady()) return null
-    return this.llm.route(text, { context, ...opts })
+  async llmRoute() {
+    return null
   }
 
-  /** §22–§29: локальный TTS. Рендерер получает WAV-файл + длительность для ducking. */
-  async ttsSpeak(text, opts = {}) {
-    if (!this.enabled) return null
-    if (TTSService.modelPresent(this.modelsDir) && !this.tts.isReady()) {
-      await this.initializeDeferred().catch(() => undefined)
-    }
-    if (!this.tts.isReady()) return null
-    if (opts.cancelPrevious !== false) this.tts.cancelCurrentSpeech()
-    return this.tts.speak(text, opts)
+  /**
+   * TTS УБРАН из релиза: всегда null (голосовой ответ выключен).
+   */
+  async ttsSpeak() {
+    return null
   }
 
-  ttsCancel() {
-    this.tts.cancelCurrentSpeech()
-  }
+  ttsCancel() { /* TTS убран — no-op */ }
 
   /** Подача аудио из рендерера (Int16Array 16 кГц) — путь живого микрофона (§6, §8) */
   feedAudio(int16Samples) {
@@ -259,10 +233,8 @@ class VoicePipeline extends EventEmitter {
   shutdown() {
     try {
       this.stt.shutdown()
-      this.llm.shutdown()
-      this.tts.shutdown()
     } catch { /* ок */ }
   }
 }
 
-module.exports = { VoicePipeline, EARLY_SAFE_PATTERNS, UNSAFE_PATTERN }
+module.exports = { VoicePipeline, EARLY_SAFE_PATTERNS, UNSAFE_PATTERN, REMOVED_REASON }

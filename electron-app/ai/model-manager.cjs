@@ -117,13 +117,14 @@ class AIModelManager extends EventEmitter {
   }
 
   defaultVoiceId() {
-    const voices = this.manifest.components.tts.voices || []
+    // Релиз 1.0.12: TTS убран — голосов в манифесте может не быть (честно [])
+    const voices = this.manifest.components.tts?.voices || []
     const def = voices.find((v) => v.default) || voices[0]
     return def ? def.id : 'irina'
   }
 
   voiceSpec(voiceId) {
-    const voices = this.manifest.components.tts.voices || []
+    const voices = this.manifest.components.tts?.voices || []
     return voices.find((v) => v.id === voiceId) || voices.find((v) => v.default) || voices[0]
   }
 
@@ -149,10 +150,10 @@ class AIModelManager extends EventEmitter {
     }
   }
 
-  /** Все компоненты, подлежащие установке (для мастера первого запуска §51) */
+  /** Все компоненты, подлежащие установке (для мастера первого запуска §51).
+   *  Релиз 1.0.12: ключи берутся из манифеста (LLM/TTS убраны — в списке только STT+VAD). */
   installableComponents(voiceId) {
-    const list = ['stt', 'vad', 'tts', 'llm']
-    return list
+    return Object.keys(this.manifest.components)
       .map((k) => this.componentSpec(k, voiceId))
       .filter(Boolean)
       .map((s) => ({
@@ -207,7 +208,7 @@ class AIModelManager extends EventEmitter {
       freeDisk: freeDiskSpace(this.baseDir),
       totalDownloadBytes: items.filter((i) => !i.installed).reduce((a, b) => a + (b.sizeBytes || 0), 0),
       components: items,
-      voice: this.manifest.components.tts.voices.map((v) => ({ id: v.id, name: v.name, default: !!v.default })),
+      voice: (this.manifest.components.tts?.voices || []).map((v) => ({ id: v.id, name: v.name, default: !!v.default })),
     }
   }
 

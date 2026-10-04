@@ -268,7 +268,12 @@ function createSplashWindow() {
       maximizable: false,
       minimizable: true,
       fullscreenable: false,
-      show: false,
+      // УРОК РЕЛИЗА 1.0.11 («процессы есть, окон нет»): show:false + ожидание
+      // ready-to-show зависит от исправности композитора — если GPU-конвейер
+      // тормозит/падает, событие могло не прийти и окно НЕ показывалось НИКОГДА
+      // (пользователь видел ~10 процессов в диспетчере и ни одного окна).
+      // Теперь окно показывается СРАЗУ: тёмный фон уже задан, контент дорисуется.
+      show: true,
       center: true,
       alwaysOnTop: true,
       skipTaskbar: false,
@@ -281,12 +286,9 @@ function createSplashWindow() {
         sandbox: true,
       },
     })
-    splashWindow.once('ready-to-show', () => {
-      try { splashWindow.show() } catch { /* окно могли закрыть */ }
-    })
     splashWindow.on('closed', () => { splashWindow = null })
     splashWindow.loadFile(path.join(__dirname, 'splash.html')).catch(() => { /* не критично */ })
-    log('[Splash] окно запуска показано')
+    log('[Splash] окно запуска показано (сразу, без ожидания ready-to-show)')
   } catch (e) {
     log(`[Splash] не удалось показать окно запуска: ${e.message}`)
     splashWindow = null
@@ -436,9 +438,20 @@ async function createMainWindow(url) {
     mainWindow = null
     throw lastErr
   }
-  mainWindow.once('ready-to-show', () => {
-    try { mainWindow.show() } catch { /* окно могли закрыть */ }
-  })
+  // Показ главного окна с ГАРАНТИЕЙ: по ready-to-show ИЛИ по страховочному
+  // таймеру 4 с (урок 1.0.11 — окно не имело права оставаться невидимым,
+  // даже если композитор не отдаёт ready-to-show).
+  let shown = false
+  const showOnce = () => {
+    if (shown) return
+    shown = true
+    try {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show()
+    } catch { /* окно могли закрыть */ }
+  }
+  mainWindow.once('ready-to-show', showOnce)
+  const fallbackTimer = setTimeout(showOnce, 4000)
+  mainWindow.once('closed', () => clearTimeout(fallbackTimer))
   closeSplash()
   markStartup('ui-loaded')
   mainWindow.webContents.once('did-finish-load', () => {
@@ -659,12 +672,9 @@ function setupAiIpc() {
   ipcMain.handle('avc:ai:recover', () => aiWorkerRequest('recover'))
   ipcMain.handle('avc:ai:set-enabled', (_e, args) => aiWorkerRequest('set-enabled', args))
   ipcMain.handle('avc:ai:set-profile', (_e, args) => aiWorkerRequest('set-profile', args))
-  ipcMain.handle('avc:ai:llm-route', (_e, args) =>
-    aiWorkerRequest('llm-route', { ...args, __timeoutMs: (args?.timeoutMs || 8000) + 30000 }),
-  )
-  ipcMain.handle('avc:ai:tts-speak', (_e, args) => aiWorkerRequest('tts-speak', { ...args, __timeoutMs: 60000 }))
-  ipcMain.handle('avc:ai:tts-cancel', () => aiWorkerRequest('tts-cancel'))
-  ipcMain.handle('avc:ai:set-voice', (_e, args) => aiWorkerRequest('set-voice', args))
+  // РЕЛИЗ 1.0.12: обработчики LLM ('avc:ai:llm-route') и TTS ('avc:ai:tts-speak',
+  // 'avc:ai:tts-cancel', 'avc:ai:set-voice') удалены вместе со слоями —
+  // рендерер больше не вызывает их (мост в api.ts/use-voice.ts снят).
   ipcMain.handle('avc:ai:initialize', () => aiWorkerRequest('initialize', { __timeoutMs: 600000 }))
   ipcMain.handle('avc:ai:stt-feed', (_e, args) => {
     const samples = args?.samples
@@ -865,7 +875,8 @@ app.whenReady().then(async () => {
     return
   }
 
-  // AI-самопроверка в реальном main-процессе: ЧЕРЕЗ utilityProcess-воркер (как в продакшне)
+  // AI-самопроверка в реальном main-процессе: ЧЕРЕЗ воркер на чистом Node (как в продакшне).
+  // РЕЛИЗ 1.0.12: LLM/TTS убраны — проверяем запуск воркера и готовность STT.
   if (AI_SELFTEST) {
     try {
       setupAiIpc()
@@ -875,66 +886,23 @@ app.whenReady().then(async () => {
         platform: process.platform,
         electron: process.versions.electron,
         workerStarted: !!aiWorker,
+        removedFromRelease: { llm: true, tts: true },
       }
       if (!aiWorker) throw new Error(aiWorkerFailed || 'воркер не запустился')
-      // ждём готовности сервисов (worker инициализирует их сам, ждём до 120 с)
+      // ждём готовности STT (воркер инициализирует её сам, ждём до 120 с)
       let status = null
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, 1000))
         status = await aiWorkerRequest('status')
-        if (status.ready.stt && status.ready.tts && status.ready.llm) break
+        if (status.ready.stt) break
       }
-      report.models = status.models.map((m) => ({ key: m.key, installed: m.installed }))
+      report.models = (status.models || []).map((m) => ({ key: m.key, installed: m.installed }))
       report.services = status.ready
-      // мини-прогон TTS→STT→early (§121, Test A) через воркер
-      if (status.ready.stt && status.ready.tts) {
-        const events = { partials: 0, finalText: '', early: null, partialTexts: [], rawFirst: null }
-        aiWorker.on('message', (msg) => {
-          if (msg && msg.event === 'stt-partial') {
-            events.partials++
-            if (!events.rawFirst) events.rawFirst = JSON.stringify(msg.payload)
-            events.partialTexts.push(msg.payload && msg.payload.text)
-            if (msg.payload && msg.payload.earlyCommand) events.early = msg.payload.earlyCommand
-          }
-          if (msg && msg.event === 'stt-final') events.finalText = (msg.payload && msg.payload.text) || ''
-        })
-        await aiWorkerRequest('tts-speak', { text: 'Пауза.' })
-        // TTS отдаёт файл через событие tts-speak-file; для самопроверки читаем последний кэш-файл фразы
-        const { TTSService } = require('./ai/tts-service.cjs')
-        const tts = new TTSService({ modelsDir: path.join(__dirname, 'models') })
-        const wav = tts.cachePath('Пауза.')
-        const { readWavAsFloat32 } = require('./ai/stt-service.cjs')
-        const info = readWavAsFloat32(wav)
-        const n = Math.floor(info.samples.length * 16000 / info.sampleRate)
-        const s16 = new Float32Array(n)
-        for (let i = 0; i < n; i++) {
-          const t = i * (info.sampleRate / 16000)
-          const i0 = Math.floor(t)
-          const a = info.samples[Math.min(i0, info.samples.length - 1)]
-          const b = info.samples[Math.min(i0 + 1, info.samples.length - 1)]
-          s16[i] = a + (b - a) * (t - i0)
-        }
-        const headPad = new Int16Array(16000 * 0.4)
-        const tailPad = new Int16Array(16000 * 0.8)
-        const int16 = new Int16Array(headPad.length + s16.length + tailPad.length)
-        for (let i = 0; i < s16.length; i++) int16[headPad.length + i] = Math.round(s16[i] * 32768)
-        const CH = 512
-        for (let off = 0; off + CH <= int16.length; off += CH) {
-          await aiWorkerRequest('feed', { samples: int16.subarray(off, off + CH) })
-          // реальный темп микрофона: окно 512 сэмплов @16 кГц = 32 мс —
-          // иначе частичные результаты не успевают появляться (§11/§12)
-          await new Promise((r) => setTimeout(r, 30))
-        }
-        await aiWorkerRequest('flush')
-        await new Promise((r) => setTimeout(r, 800))
-        status = await aiWorkerRequest('status')
-        report.loopTest = { partials: events.partials, partialTexts: events.partialTexts, rawFirst: events.rawFirst, finalText: events.finalText, earlyCommand: events.early, sttUtterances: status.stt.utterances, sttLastFinalMs: status.stt.lastFinalMs, sttError: status.stt.error }
-      }
-      process.stdout.write(`[AI-SELFTEST] report: ${path.join(__dirname, 'tools', 'ai-main-selftest-report.json')}\n`)
+      const ok = report.workerStarted && status.ready.stt === true
+      process.stdout.write(`[AI-SELFTEST] ok=${ok} services=${JSON.stringify(status.ready)}\n`)
       try {
         fs.writeFileSync(path.join(__dirname, 'tools', 'ai-main-selftest-report.json'), JSON.stringify(report, null, 2))
       } catch { /* ок */ }
-      const ok = report.workerStarted && status.ready.stt && status.ready.tts && status.ready.llm && report.loopTest && report.loopTest.earlyCommand === 'Pause'
       app.exit(ok ? 0 : 2)
     } catch (e) {
       process.stdout.write(`${JSON.stringify({ error: e.message })}\n`)

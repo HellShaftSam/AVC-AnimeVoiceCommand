@@ -44,29 +44,37 @@
 }
 
 /*
- * AVC-Anime — тёмная Navy Blue тема (фаза 7 мастер-промпта).
+ * AVC-Anime — морская тема в морских тонах (урок релиза 1.0.11).
  *
- * Палитра (ТЗ §7.1):
+ * Палитра (ТЗ §7.1, морские тона):
  *   фон основной   #07111F   фон вторичный  #0B1728   панель   #10223A
- *   приподнятая    #142B46   синий primary  #2563EB   тёмный   #1D4ED8
+ *   приподнятая    #142B46   teal primary   #0D9488   тёмный   #0F766E
  *   cyan-акцент    #38BDF8   мягкий голубой #7DD3FC   текст    #E6F0FF
  *   втор. текст    #A8BCD4   приглушённый   #7187A3   граница  #203A57
  *   успех #34D399  предупреждение #FBBF24  ошибка #FB7185
  *
- * Navy — тема по умолчанию (:root). Светлой темы в приложении не было,
+ * УРОК РЕЛИЗА 1.0.11 («лагающее говно»): анимированная аквариумная тема с
+ * blur(70px) × 4 слоя + mix-blend-mode: screen + backdrop-filter на всех
+ * панелях превращала рендерер в слайдшоу на слабых GPU — и в браузерном
+ * превью, и в EXE (первая отрисовка окна растягивалась на десятки секунд).
+ * НОВАЯ ТЕМА: статичные CSS-градиенты (рисуются один раз, ноль анимаций),
+ * никаких filter/mix-blend/backdrop-filter. Выглядит по-прежнему «море»:
+ * глубина, свет у поверхности, свечение панелей — но цена рендера нулевая.
+ *
+ * Морская — тема по умолчанию (:root). Светлой темы в приложении нет,
  * поэтому .dark зеркалит :root (переключатель не предусмотрен — честно).
  */
 :root {
   --radius: 0.625rem;
   --background: #07111f;
   --foreground: #e6f0ff;
-  /* Карточки полупрозрачные («подводное стекло»): сквозь них видна вода */
+  /* Карточки полупрозрачные — сквозь них проступает морской градиент фона */
   --card: #10223ad9;
   --card-foreground: #e6f0ff;
   --popover: #142b46f2;
   --popover-foreground: #e6f0ff;
-  --primary: #2563eb;
-  --primary-foreground: #eef4ff;
+  --primary: #0d9488;
+  --primary-foreground: #eefcff;
   --secondary: #0b1728;
   --secondary-foreground: #e6f0ff;
   --muted: #0b1728;
@@ -79,13 +87,13 @@
   --ring: #38bdf8;
   --chart-1: #38bdf8;
   --chart-2: #34d399;
-  --chart-3: #2563eb;
+  --chart-3: #14b8a6;
   --chart-4: #fbbf24;
   --chart-5: #fb7185;
   --sidebar: #0b1728;
   --sidebar-foreground: #e6f0ff;
-  --sidebar-primary: #2563eb;
-  --sidebar-primary-foreground: #eef4ff;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #eefcff;
   --sidebar-accent: #142b46;
   --sidebar-accent-foreground: #7dd3fc;
   --sidebar-border: #203a57;
@@ -99,8 +107,8 @@
   --card-foreground: #e6f0ff;
   --popover: #142b46f2;
   --popover-foreground: #e6f0ff;
-  --primary: #2563eb;
-  --primary-foreground: #eef4ff;
+  --primary: #0d9488;
+  --primary-foreground: #eefcff;
   --secondary: #0b1728;
   --secondary-foreground: #e6f0ff;
   --muted: #0b1728;
@@ -113,13 +121,13 @@
   --ring: #38bdf8;
   --chart-1: #38bdf8;
   --chart-2: #34d399;
-  --chart-3: #2563eb;
+  --chart-3: #14b8a6;
   --chart-4: #fbbf24;
   --chart-5: #fb7185;
   --sidebar: #0b1728;
   --sidebar-foreground: #e6f0ff;
-  --sidebar-primary: #2563eb;
-  --sidebar-primary-foreground: #eef4ff;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #eefcff;
   --sidebar-accent: #142b46;
   --sidebar-accent-foreground: #7dd3fc;
   --sidebar-border: #203a57;
@@ -139,7 +147,7 @@
   }
 }
 
-/* Anime Voice Controller — кастомный скроллбар (cyan на navy, тонкий) */
+/* Anime Voice Controller — кастомный скроллбар (cyan на морском, тонкий) */
 .avc-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(56, 189, 248, 0.35) transparent;
@@ -163,145 +171,56 @@
 }
 
 /* ============================================================
- * АКВАРИУМ — подводный мир сквозь интерфейс (re: референс с волнами)
- * ============================================================ */
+ * МОРЕ — статичный подводный градиент (урок релиза 1.0.11)
+ * ============================================================
+ * Один div с многослойным CSS-градиентом: глубина (свет у поверхности
+ * → бездна) + мягкие свечения (teal/cyan) + виньетка. Рисуется один раз,
+ * не анимируется, не содержит filter/mix-blend/backdrop-filter —
+ * нулевая нагрузка на GPU в любом браузере и в EXE.
+ */
 
-/* «Подводное стекло» для каркаса (шапка, панели, футер):
-   полупрозрачная панель + размытие — сквозь неё плывут волны */
-.glass {
-  background: linear-gradient(
-    180deg,
-    rgba(13, 30, 52, 0.62),
-    rgba(7, 17, 31, 0.72)
-  );
-  backdrop-filter: blur(16px) saturate(1.25);
-  -webkit-backdrop-filter: blur(16px) saturate(1.25);
-}
-
-/* Свечение заголовка как отражение света в воде */
-.avc-title-glow {
-  text-shadow:
-    0 0 18px rgba(56, 189, 248, 0.35),
-    0 0 42px rgba(56, 189, 248, 0.14);
-}
-
-/* --- 1. Глубина --- */
-.aq-depth {
-  background: linear-gradient(
-    180deg,
-    #0b2c4d 0%,
-    #0a2340 14%,
-    #081a30 32%,
-    #07111f 55%,
-    #050d18 100%
-  );
+.sea-bg {
+  background:
+    /* свет «поверхности» сверху */
+    radial-gradient(120% 55% at 50% -8%, rgba(125, 211, 252, 0.16) 0%, rgba(125, 211, 252, 0) 60%),
+    /* мягкое teal-свечение слева */
+    radial-gradient(58% 42% at 8% 30%, rgba(20, 184, 166, 0.13) 0%, rgba(20, 184, 166, 0) 70%),
+    /* глубокое cyan-свечение справа */
+    radial-gradient(62% 48% at 94% 22%, rgba(56, 189, 248, 0.11) 0%, rgba(56, 189, 248, 0) 70%),
+    /* холодная подсветка дна */
+    radial-gradient(90% 36% at 50% 104%, rgba(13, 148, 136, 0.12) 0%, rgba(13, 148, 136, 0) 72%),
+    /* глубина: светлее у поверхности — бездна внизу */
+    linear-gradient(
+      180deg,
+      #0b2c4d 0%,
+      #0a2340 14%,
+      #081a30 32%,
+      #07111f 55%,
+      #050d18 100%
+    );
 }
 
-/* --- 2. Каустика: биолюминесцентные разводы (blur статичный, движется transform) --- */
-.aq-blob {
-  border-radius: 50%;
-  filter: blur(70px);
-  mix-blend-mode: screen;
-  will-change: transform;
-}
-.aq-blob-1 {
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0) 62%);
-  animation: aq-drift-1 46s ease-in-out infinite alternate;
-}
-.aq-blob-2 {
-  background: radial-gradient(circle, rgba(45, 212, 191, 0.18) 0%, rgba(45, 212, 191, 0) 60%);
-  animation: aq-drift-2 58s ease-in-out infinite alternate;
-}
-.aq-blob-3 {
-  background: radial-gradient(circle, rgba(103, 232, 249, 0.2) 0%, rgba(103, 232, 249, 0) 62%);
-  animation: aq-drift-3 52s ease-in-out infinite alternate;
-}
-.aq-blob-4 {
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.3) 0%, rgba(37, 99, 235, 0) 64%);
-  animation: aq-drift-1 64s ease-in-out infinite alternate-reverse;
-}
-@keyframes aq-drift-1 {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(7%, 6%, 0) scale(1.18); }
-}
-@keyframes aq-drift-2 {
-  0% { transform: translate3d(0, 0, 0) scale(1.1); }
-  100% { transform: translate3d(-8%, -5%, 0) scale(0.94); }
-}
-@keyframes aq-drift-3 {
-  0% { transform: translate3d(0, 0, 0) scale(0.95); }
-  100% { transform: translate3d(-6%, 8%, 0) scale(1.14); }
-}
-
-/* --- 3. Световые лучи --- */
-.aq-ray {
-  background: linear-gradient(
-    180deg,
-    rgba(125, 211, 252, 0.09) 0%,
-    rgba(125, 211, 252, 0.03) 45%,
-    rgba(125, 211, 252, 0) 80%
-  );
-  transform-origin: top center;
-  transform: skewX(-12deg);
-  will-change: transform, opacity;
-}
-.aq-ray-1 { animation: aq-ray-sway 17s ease-in-out infinite; }
-.aq-ray-2 { animation: aq-ray-sway 23s ease-in-out infinite reverse; opacity: 0.8; }
-.aq-ray-3 { animation: aq-ray-sway 29s ease-in-out infinite; animation-delay: -8s; }
-@keyframes aq-ray-sway {
-  0%, 100% { transform: skewX(-12deg) translateX(0) scaleX(1); opacity: 0.5; }
-  50% { transform: skewX(-7deg) translateX(26px) scaleX(1.12); opacity: 0.85; }
-}
-
-/* --- 4. Волны: бесшовный горизонтальный дрейф + лёгкий вертикальный ход --- */
-.aq-wave {
-  will-change: transform;
-}
-.aq-wave-a { animation: aq-wave 24s linear infinite; }
-.aq-wave-b { animation: aq-wave 31s linear infinite; animation-delay: -12s; }
-.aq-wave-c { animation: aq-wave 44s linear infinite reverse; }
-.aq-wave-d { animation: aq-wave 57s linear infinite; animation-delay: -20s; }
-@keyframes aq-wave {
-  0% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(-25%, 6px, 0); }
-  100% { transform: translate3d(-50%, 0, 0); }
-}
-
-/* --- 5. Пузырьки: подъём со дна с покачиванием --- */
-.aq-bubble {
-  background: radial-gradient(
-    circle at 32% 28%,
-    rgba(224, 254, 255, 0.55) 0%,
-    rgba(125, 211, 252, 0.18) 42%,
-    rgba(125, 211, 252, 0.06) 70%
-  );
-  border: 1px solid rgba(165, 243, 252, 0.22);
-  opacity: 0;
-  animation-name: aq-bubble-rise;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform, opacity;
-}
-@keyframes aq-bubble-rise {
-  0% { transform: translate3d(0, 0, 0) scale(0.6); opacity: 0; }
-  7% { opacity: var(--aq-bubble-o, 0.3); }
-  50% { transform: translate3d(var(--aq-sway, 14px), -56vh, 0) scale(1); }
-  88% { opacity: var(--aq-bubble-o, 0.3); }
-  100% { transform: translate3d(calc(var(--aq-sway, 14px) * -0.7), -112vh, 0) scale(1.08); opacity: 0; }
-}
-
-/* --- 6. Виньетка --- */
-.aq-vignette {
+/* Виньетка поверх градиента: края темнее, контент «выпрыгивает» (статично) */
+.sea-vignette {
   background:
     radial-gradient(120% 90% at 50% 8%, rgba(0, 0, 0, 0) 52%, rgba(3, 9, 17, 0.42) 100%),
     linear-gradient(180deg, rgba(3, 9, 17, 0) 70%, rgba(3, 9, 17, 0.5) 100%);
 }
 
-/* Уважаем reduced-motion: вода замирает, декор остаётся статичным */
-@media (prefers-reduced-motion: reduce) {
-  .aq *,
-  .aq *::before,
-  .aq *::after {
-    animation: none !important;
-  }
+/* «Морское стекло» для каркаса (шапка, панели, футер): полупрозрачная панель.
+   БЕЗ backdrop-filter (урок 1.0.11): фон статичен, размытие ничего не даёт,
+   а стоит дорого на слабых GPU. */
+.glass {
+  background: linear-gradient(
+    180deg,
+    rgba(13, 30, 52, 0.72),
+    rgba(7, 17, 31, 0.82)
+  );
+}
+
+/* Свечение заголовка как отражение света в воде (дешёвый text-shadow) */
+.avc-title-glow {
+  text-shadow:
+    0 0 18px rgba(56, 189, 248, 0.35),
+    0 0 42px rgba(56, 189, 248, 0.14);
 }

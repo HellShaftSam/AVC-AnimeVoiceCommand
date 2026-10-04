@@ -14,7 +14,6 @@
  */
 'use strict'
 
-const fs = require('fs')
 const path = require('path')
 
 const MODELS_DIR = process.env.AVC_MODELS_DIR || path.join(__dirname, '..', 'models')
@@ -40,8 +39,6 @@ function send(msg) {
 pipeline.on('stt-partial', (payload) => send({ event: 'stt-partial', payload }))
 pipeline.on('stt-final', (payload) => send({ event: 'stt-final', payload }))
 pipeline.on('services-status', (payload) => send({ event: 'services-status', payload }))
-pipeline.on('tts-speak-file', (payload) => send({ event: 'tts-speak-file', payload }))
-pipeline.on('tts-cancel', () => send({ event: 'tts-cancel', payload: null }))
 pipeline.manager.on('progress', (payload) => send({ event: 'model-progress', payload }))
 
 const handlers = {
@@ -52,7 +49,7 @@ const handlers = {
     hw.gpu = null
     return hw
   },
-  install: async (args) => pipeline.installComponents(args?.keys || ['stt', 'vad', 'tts', 'llm'], { voiceId: args?.voiceId }),
+  install: async (args) => pipeline.installComponents(args?.keys || ['stt', 'vad'], { voiceId: args?.voiceId }),
   'cancel-install': (args) => pipeline.cancelInstall(args?.key),
   recover: () => pipeline.manager.recoverPending(),
   'set-enabled': (args) => {
@@ -63,23 +60,9 @@ const handlers = {
     pipeline.profile = String(args?.profile || 'max_responsiveness')
     return pipeline.profile
   },
-  'llm-route': async (args) => pipeline.llmRoute(String(args?.text || ''), args?.context || null, { timeoutMs: args?.timeoutMs }),
-  'tts-speak': async (args) => {
-    const res = await pipeline.ttsSpeak(String(args?.text || ''), {})
-    if (!res) return null
-    // рендерер не может читать файл:// из http-происхождения — отдаём WAV как data URL
-    let dataUrl = null
-    try {
-      const b64 = fs.readFileSync(res.file).toString('base64')
-      dataUrl = `data:audio/wav;base64,${b64}`
-    } catch { /* файл мог исчезнуть — честный null */ }
-    return { ...res, dataUrl }
-  },
-  'tts-cancel': () => pipeline.ttsCancel(),
-  'set-voice': (args) => {
-    pipeline.tts.setVoice(String(args?.voice || 'irina'))
-    return pipeline.tts.voiceId
-  },
+  // LLM и TTS УБРАНЫ из релиза (решение владельца, 1.0.12): обработчики
+  // 'llm-route'/'tts-speak'/'tts-cancel'/'set-voice' удалены — такие запросы
+  // получают честный отказ «Неизвестный запрос» ниже по коду.
   /** повторная инициализация после установки моделей (AI Setup) */
   initialize: async () => pipeline.initializeServices(),
   feed: (args) => {
@@ -94,7 +77,7 @@ const handlers = {
 if (process.parentPort) {
   process.parentPort.on('message', (e) => handleMessage(e.data))
   // поэтапная инициализация фоном после старта воркера (§49 + фаза 2 аудита):
-  // сразу STT (голос готов ASAP), TTS/LLM — догрузка в фоне/по требованию
+  // сразу STT (голос готов ASAP). LLM/TTS убраны из релиза — догружать больше нечего.
   setTimeout(() => {
     void pipeline.initializeCoreThenDeferred()
   }, 100)
