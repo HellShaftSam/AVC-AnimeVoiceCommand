@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
         success: Boolean(b.success),
         message: b.message ? String(b.message).slice(0, 300) : null,
         source: String(b.source ?? 'voice').slice(0, 20),
+        correlationId:
+          typeof b.correlationId === 'string' && b.correlationId.length <= 64
+            ? b.correlationId
+            : null,
       },
     })
     return NextResponse.json({ item })

@@ -41,6 +41,9 @@ import { Slider } from '@/components/ui/slider'
 import { toast } from '@/hooks/use-toast'
 import { executeCommand } from '@/lib/avc/executor'
 import { AutoSkipControls } from '@/components/avc/auto-skip-panel'
+import { avcApi } from '@/lib/avc/api'
+import { enabledTypes } from '@/lib/avc/skip/core'
+import { resolveSkipSegments } from '@/lib/avc/skip/resolver'
 import {
   hasStickyActivation,
   parsePlayerEvent,
@@ -77,6 +80,9 @@ export function Player() {
   const currentTime = useAvcStore((s) => s.playback.currentTime)
   const duration = useAvcStore((s) => s.playback.duration)
   const executing = useAvcStore((s) => s.voiceStatus === 'executing')
+  const settings = useAvcStore((s) => s.settings)
+  const skipSegments = useAvcStore((s) => s.skipSegments)
+  const skipMarksVersion = useAvcStore((s) => s.skipMarksVersion)
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   /** URL серии, для которой старт-оверлей уже снят (голосом/кликом/событием плеера).
@@ -132,10 +138,12 @@ export function Player() {
   }
 
   /**
-   * АВТОПРОПУСК опенинга/эндинга — два источника (приоритет у точных таймингов сайта):
-   *  1. skips из /api/anime/{id}/videos (settings.autoSkipIntros; формат {time,length}
+   * АВТОПРОПУСК опенинга/эндинга — три источника (приоритет у данных resolver'a):
+   *  1. Сегменты SkipResolver (site/aniskip/user): автопропуск только в режиме
+   *     «auto», при confidence ≥ порога и включённом типе (skipOp/skipEd);
+   *  2. skips из /api/anime/{id}/videos (settings.autoSkipIntros; формат {time,length}
    *     проверен живым API) — если включены и есть у серии;
-   *  2. РУЧНЫЕ СЛАЙДЕРЫ у плеера (settings.autoSkipOpening/autoSkipOpeningSec —
+   *  3. РУЧНЫЕ СЛАЙДЕРЫ у плеера (settings.autoSkipOpening/autoSkipOpeningSec —
    *     «первые N секунд», autoSkipEnding/autoSkipEndingSec — «последние N секунд») —
    *     работают на ЛЮБОЙ серии, даже без таймингов сайта (как на других сайтах).
    * Защита от ложных срабатываний: серия короче (порог + 4 мин) не трогается,
@@ -148,11 +156,17 @@ export function Player() {
     const dur = st.playback.duration
     const apiSkips = st.settings.autoSkipIntros ? st.playback.currentSkips : null
     const MANUAL_MARGIN = 240 // сек: не трогаем видео короче порога + 4 мин
+    const autoSegments =
+      st.settings.skipMode === 'auto' ? st.skipSegments.filter((s) => s.source !== 'fallback') : []
 
     // --- ОПЕНИНГ ---
     if (skippedOpeningRef.current !== url) {
       let target: number | null = null
-      if (apiSkips?.opening) {
+      const opSeg = autoSegments.find((s) => s.type === 'op')
+      if (opSeg && st.settings.skipOp && opSeg.confidence >= st.settings.skipConfidence) {
+        // задержка автопропуска: не дёргаемся в первые секунды сегмента
+        if (t >= opSeg.start + st.settings.skipAutoDelaySec && t < opSeg.end - 1) target = opSeg.end
+      } else if (apiSkips?.opening) {
         const end = apiSkips.opening.time + apiSkips.opening.length
         if (t >= apiSkips.opening.time && t < end - 1) target = end
       } else if (st.settings.autoSkipOpening) {
@@ -172,7 +186,10 @@ export function Player() {
     // --- ЭНДИНГ ---
     if (skippedEndingRef.current !== url) {
       let target: number | null = null
-      if (apiSkips?.ending) {
+      const edSeg = autoSegments.find((s) => s.type === 'ed')
+      if (edSeg && st.settings.skipEd && edSeg.confidence >= st.settings.skipConfidence) {
+        if (t >= edSeg.start + st.settings.skipAutoDelaySec && t < edSeg.end - 1) target = edSeg.end
+      } else if (apiSkips?.ending) {
         const end = apiSkips.ending.time + apiSkips.ending.length
         if (t >= apiSkips.ending.time && t < end - 1) target = end
       } else if (st.settings.autoSkipEnding && dur > 0) {
@@ -223,6 +240,54 @@ export function Player() {
     }
     return () => registerPlayerWindow(null)
   }, [url])
+
+  // SkipResolver: сегменты пропуска для текущей серии (кнопка + голос + автопропуск).
+  // Смена серии/озвучки/длительности/настроек/отметок — переразрешение; устаревшие
+  // ответы отбрасываются (resolver считает по requestId, здесь — по url).
+  useEffect(() => {
+    if (!url) return
+    useAvcStore.getState().setSkipSegments([])
+    const st = useAvcStore.getState()
+    if (st.settings.skipMode === 'off') return
+    const acc = st.yummyAccount.state === 'loggedIn' ? st.yummyAccount.user?.userId : null
+    const accountKey = acc && /^[A-Za-z0-9_-]{1,64}$/.test(acc) ? acc : 'anon'
+    let cancelled = false
+    void avcApi
+      .skipMarksList(accountKey, st.playback.animeId ?? undefined)
+      .then((marks) => {
+        if (cancelled) return null
+        const live = useAvcStore.getState()
+        return resolveSkipSegments({
+          malId: live.playback.malId,
+          episode: live.playback.currentEpisode ?? 1,
+          dubId: live.playback.currentDub,
+          durationSec: live.playback.duration,
+          siteSkips: live.playback.currentSkips,
+          userMarks: marks,
+          sources: {
+            site: live.settings.skipSourceSite,
+            aniskip: live.settings.skipSourceAniskip,
+          },
+          fallback: {
+            openingSec: live.settings.autoSkipOpeningSec,
+            endingSec: live.settings.autoSkipEndingSec,
+            openingEnabled: live.settings.autoSkipOpening,
+            endingEnabled: live.settings.autoSkipEnding,
+          },
+          types: enabledTypes(live.settings),
+        })
+      })
+      .then((res) => {
+        if (cancelled || !res) return
+        // серия уже сменилась — ответ неактуален
+        if (useAvcStore.getState().playerIframeUrl !== url) return
+        useAvcStore.getState().setSkipSegments(res.segments)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [url, duration, skipMarksVersion, settings])
 
   // РЕАЛЬНЫЕ события плеера → store (время, длительность, громкость, старт/пауза)
   useEffect(() => {
@@ -363,6 +428,23 @@ export function Player() {
   /** Кнопка ±30: иконка с маленьким бейджем «30» в углу */
   const seekBtn = cn(iconBtn, 'relative')
 
+  // Активный СЕЙЧАС сегмент пропуска: кнопка видна, пока start ≤ t < end − 3
+  const activeSkipSeg = (() => {
+    if (settings.skipMode === 'off' || !url || startOverlay) return null
+    const typeOn = (t: string) =>
+      t === 'op' ? settings.skipOp : t === 'ed' ? settings.skipEd : settings.skipRecap
+    return (
+      skipSegments.find(
+        (s) => currentTime >= s.start && currentTime < s.end - 3 && typeOn(s.type),
+      ) ?? null
+    )
+  })()
+  const SKIP_LABELS: Record<string, string> = {
+    op: 'Пропустить опенинг',
+    ed: 'Пропустить эндинг',
+    recap: 'Пропустить рекап',
+  }
+
   return (
     <div
       className={cn(
@@ -438,6 +520,26 @@ export function Player() {
                   : 'Один клик (или старт микрофона) включает голосовое управление'}
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Кнопка пропуска сегмента (Skip Segments): крупная, доступна с дивана и
+            с клавиатуры; работает в fullscreen — fullscreen приложения СВОЙ
+            (fixed inset-0 поверх UI), панель хоста не исчезает как в нативном */}
+        {activeSkipSeg && (
+          <div className="absolute bottom-4 right-4 z-20">
+            <Button
+              size="sm"
+              onClick={() => ctrl(VoiceCommandType.SkipSegment, { type: activeSkipSeg.type })}
+              className="min-h-11 gap-2 rounded-lg bg-sky-400 px-4 text-sm font-semibold text-sky-950 shadow-[0_2px_16px_rgba(0,0,0,0.6)] hover:bg-sky-300"
+              aria-label={`${SKIP_LABELS[activeSkipSeg.type]} (осталось ${Math.max(0, Math.ceil(activeSkipSeg.end - currentTime))} с)`}
+            >
+              <SkipForward className="h-4 w-4" aria-hidden />
+              {SKIP_LABELS[activeSkipSeg.type]}
+              <span className="tabular-nums opacity-80">
+                {Math.max(0, Math.ceil(activeSkipSeg.end - currentTime))} с
+              </span>
+            </Button>
           </div>
         )}
       </div>

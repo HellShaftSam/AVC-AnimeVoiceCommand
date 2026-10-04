@@ -682,6 +682,38 @@ export async function executeAnimeAction(
   return { httpStatus, state: null, verification: 'unconfirmed', siteError }
 }
 
+/**
+ * Прочитать своё состояние тайтла с серверного HTML страницы (для UI страницы
+ * аниме: подсветка активного списка/сердца/оценки). null — не удалось прочитать
+ * (нет сессии/сети или страница гостя).
+ */
+export async function readOwnState(
+  cookie: string,
+  slug: string,
+): Promise<YummyAnimeOwnState | null> {
+  const s = String(slug ?? '').trim()
+  if (s === '') return null
+  try {
+    const page = await siteFetch(`${SITE_ORIGIN}/catalog/item/${encodeURIComponent(s)}`, {
+      method: 'GET',
+      cookie,
+      extra: { Accept: 'text/html,*/*' },
+      timeoutMs: 20000,
+    })
+    if (!page.ok) return null
+    const state = ownStateFromSignals(parseOwnStateFromHtml(await page.text()))
+    if (!state.hasMarkers || state.authenticatedPage === false) return null
+    return {
+      listId: state.listId,
+      isFavorite: state.isFavorite,
+      rating: state.rating,
+      authenticatedPage: state.authenticatedPage,
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Обновить подпись сессии (не-секретный ник) при её изменении */
 export async function touchSessionUsername(
   session: WebSessionData,

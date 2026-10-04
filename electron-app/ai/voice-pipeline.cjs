@@ -20,10 +20,11 @@
  */
 'use strict'
 
+const fs = require('fs')
 const path = require('path')
 const { EventEmitter } = require('events')
 const { AIModelManager } = require('./model-manager.cjs')
-const { STTService } = require('./stt-service.cjs')
+const { createSttEngine, engineForModel, sttModelFilesPresent } = require('./stt-engines.cjs')
 
 /** Честная причина недоступности убранных слоёв (для UI/диагностики) */
 const REMOVED_REASON = 'Убрано из релиза (решение владельца, 1.0.12)'
@@ -45,26 +46,26 @@ const EARLY_SAFE_PATTERNS = [
 /** §13: опасные намерения — НИКОГДА не исполняются по частичной фразе */
 const UNSAFE_PATTERN = /(удал|убер|сн[иь]м|оцен|выйд|войд|аккаунт|списк|загрузк|коммент)/i
 
-/** Метрики убранного слоя — честный «disabled» вместо выдуманных чисел */
-function removedMetrics() {
-  return { state: 'disabled', enabled: false, reason: REMOVED_REASON }
-}
-
 class VoicePipeline extends EventEmitter {
   constructor(opts = {}) {
     super()
     this.modelsDir = opts.modelsDir || path.join(__dirname, '..', 'models')
     this.profile = opts.profile || 'max_responsiveness'
     this.enabled = opts.enabled !== false // §0/§129: AI — модульное расширение, можно отключить
+    /** Активная модель STT (каталог моделей); движок выбирается по модели */
+    this.activeModelId = opts.modelId || 't-one-russian'
 
     this.manager = new AIModelManager({ baseDir: this.modelsDir })
-    this.stt = new STTService({ modelsDir: this.modelsDir, profile: this.profile })
+    this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId: this.activeModelId })
 
     /** исполненные ранние команды (§14): utteranceId → type */
     this._executedEarly = new Map()
     this._lastEarlyText = ''
+    this._wireStt()
+  }
 
-    // мостим события STT наружу с проверкой ранних команд
+  /** Мостинг событий движка наружу с проверкой ранних команд (§12) */
+  _wireStt() {
     this.stt.on('partial', (p) => {
       const early = this._detectEarly(p.text, p.utteranceId)
       this.emit('stt-partial', { ...p, earlyCommand: early ? early.type : null })
@@ -74,25 +75,25 @@ class VoicePipeline extends EventEmitter {
       const alreadyEarly = this._executedEarly.get(p.utteranceId) || null
       this.emit('stt-final', { ...p, earlyCommandType: alreadyEarly })
     })
+    this.stt.on('status', (s) => this.emit('services-status', this.getStatus().ready))
   }
 
   /** Общий статус для AI Setup/диагностики (§97) */
   getStatus() {
     const st = this.manager.status()
+    // РЕЛИЗ 1.0.12: llm/tts убраны из статуса вместе со слоями (решение владельца)
     return {
       enabled: this.enabled,
       profile: this.profile,
       modelsDir: this.modelsDir,
       models: st.components,
       freeDisk: st.freeDisk,
-      voices: [],
+      activeModel: this.activeModelId,
+      engine: engineForModel(this.activeModelId)?.id || 't-one-streaming',
+      benchmark: this.benchmarkResult || null,
       stt: this.stt.getMetrics(),
-      llm: removedMetrics(),
-      tts: removedMetrics(),
       ready: {
         stt: this.stt.isReady(),
-        llm: false,
-        tts: false,
       },
     }
   }
@@ -122,23 +123,51 @@ class VoicePipeline extends EventEmitter {
     }
   }
 
-  /** §50–§53: установка компонентов (кнопка Install в AI Setup) — только STT+VAD */
+  /** §50–§53: установка компонентов (кнопка Install) — STT/VAD включая каталог "stt:<id>" */
   async installComponents(keys, opts = {}) {
-    const allowed = ['stt', 'vad']
-    const wanted = keys.filter((k) => allowed.includes(k))
+    const allowed = (k) => k === 'stt' || k === 'vad' || k.startsWith('stt:') || k.startsWith('vad:')
+    const wanted = keys.filter(allowed)
     const results = []
     for (const key of wanted) {
       try {
         const r = await this.manager.install(key, opts)
         results.push({ key, ok: true, skipped: !!r.skipped })
+        // установили активную модель — инициализируем движок сразу
+        if (key === `stt:${this.activeModelId}` || key === 'stt') {
+          await this.initializeServices()
+        }
       } catch (e) {
         results.push({ key, ok: false, kind: e.kind || 'ERROR', message: e.message })
       }
     }
-    for (const key of keys.filter((k) => !allowed.includes(k))) {
+    for (const key of keys.filter((k) => !allowed(k))) {
       results.push({ key, ok: false, kind: 'REMOVED', message: REMOVED_REASON })
     }
     return results
+  }
+
+  /** Удалить модель каталога (перед удалением движок должен быть переключён/выгружен) */
+  async removeComponent(key) {
+    try {
+      const r = await this.manager.remove(key)
+      return { ok: true, ...r }
+    } catch (e) {
+      return { ok: false, message: e.message }
+    }
+  }
+
+  /** Проверить установленную модель (файлы/маркер) */
+  async verifyComponent(key) {
+    try {
+      return await this.manager.verify(key)
+    } catch (e) {
+      return { ok: false, message: e.message }
+    }
+  }
+
+  /** Каталог моделей для UI (статусы/лицензии/рекомендации) */
+  getCatalog() {
+    return this.manager.catalogStatus()
   }
 
   cancelInstall(key) {
@@ -151,9 +180,72 @@ class VoicePipeline extends EventEmitter {
    */
   async initializeServices() {
     const out = {}
-    if (STTService.modelsPresent(this.modelsDir)) out.stt = await this.stt.initialize()
+    if (sttModelFilesPresent(this.modelsDir, this.activeModelId)) out.stt = await this.stt.initialize()
     this.emit('services-status', this.getStatus().ready)
     return out
+  }
+
+  /**
+   * Смена активной модели STT (hexagonal: движок заменяется целиком).
+   * Если модель не установлена — честный отказ, старый движок продолжает работать.
+   */
+  async setSttModel(modelId) {
+    const spec = engineForModel(modelId)
+    if (!spec) return { ok: false, message: `Неизвестная модель: ${modelId}` }
+    if (!sttModelFilesPresent(this.modelsDir, modelId)) {
+      return { ok: false, message: `Модель ${modelId} не установлена — сначала скачайте её` }
+    }
+    const old = this.stt
+    this.activeModelId = modelId
+    this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId })
+    this._wireStt()
+    try { old.shutdown() } catch { /* ок */ }
+    const state = await this.stt.initialize()
+    this.emit('services-status', this.getStatus().ready)
+    return { ok: state === 'ready', message: state === 'ready' ? `Активная модель: ${modelId}` : (this.stt.error || String(state)) }
+  }
+
+  /**
+   * Бенчмарк «Проверить скорость на этом ПК» (спецификация STT): декодирование
+   * тестового WAV активным движком → RTF и задержка; рекомендация профиля.
+   * RTF > 0.5 на слабом ПК → max_responsiveness + стриминговая модель.
+   */
+  async benchmark() {
+    const wav = path.join(this.modelsDir, 'stt', 't-one-russian', '0.wav')
+    if (!this.stt.isReady()) {
+      return { ok: false, message: 'STT не готов — сначала установите и инициализируйте модель' }
+    }
+    if (!fs.existsSync(wav)) {
+      return { ok: false, message: 'Тестовый WAV не найден в каталоге модели T-One (0.wav)' }
+    }
+    try {
+      const { readWavAsFloat32 } = require('./stt-service.cjs')
+      const { samples, sampleRate } = readWavAsFloat32(wav)
+      const audioMs = Math.round((samples.length / sampleRate) * 1000)
+      const t0 = Date.now()
+      const res = this.stt.decodeFileForTest
+        ? this.stt.decodeFileForTest(wav)
+        : (() => { // движок без decodeFileForTest — прогон через feed/flush
+            const n = Math.floor(samples.length / 2)
+            const int16 = new Int16Array(n)
+            for (let i = 0; i < n; i++) int16[i] = Math.max(-32768, Math.min(32767, Math.round(samples[i] * 32767)))
+            this.stt.feed(int16)
+            this.stt.flush()
+            return { ms: Date.now() - t0 }
+          })()
+      const decodeMs = Date.now() - t0
+      const rtf = audioMs > 0 ? Math.round((decodeMs / audioMs) * 1000) / 1000 : null
+      const recommendedProfile = rtf !== null && rtf > 0.5 ? 'max_responsiveness' : this.profile
+      const recommendation = rtf !== null && rtf > 0.5
+        ? 'ПК слабый для офлайн-декода — рекомендуется стриминговая модель (ru-fast) и профиль «Максимальная отзывчивость»'
+        : rtf !== null && rtf > 0.25
+          ? 'Скорость приемлемая; при лагах переключитесь на профиль «Максимальная отзывчивость»'
+          : 'Скорость отличная — можно использовать точную модель и профиль «Качество»'
+      this.benchmarkResult = { ranAt: new Date().toISOString(), audioMs, decodeMs, rtf, text: (res.text || '').slice(0, 120), recommendedProfile, recommendation }
+      return { ok: true, ...this.benchmarkResult }
+    } catch (e) {
+      return { ok: false, message: e.message }
+    }
   }
 
   /**
@@ -202,23 +294,6 @@ class VoicePipeline extends EventEmitter {
   markUtteranceHandled(utteranceId, type) {
     this._executedEarly.set(Number(utteranceId), type || 'handled')
   }
-
-  /**
-   * LLM-роутер УБРАН из релиза: всегда null (рендерер честно использует
-   * только детерминированный парсер).
-   */
-  async llmRoute() {
-    return null
-  }
-
-  /**
-   * TTS УБРАН из релиза: всегда null (голосовой ответ выключен).
-   */
-  async ttsSpeak() {
-    return null
-  }
-
-  ttsCancel() { /* TTS убран — no-op */ }
 
   /** Подача аудио из рендерера (Int16Array 16 кГц) — путь живого микрофона (§6, §8) */
   feedAudio(int16Samples) {

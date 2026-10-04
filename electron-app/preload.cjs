@@ -40,6 +40,13 @@ contextBridge.exposeInMainWorld('avcElectron', {
    */
   animeAction: (req) => ipcRenderer.invoke('avc:anime:action', req),
 
+  /**
+   * Прочитать своё состояние тайтла (список/избранное/оценка) внутри сессии
+   * сайта — подсветка активного статуса/сердца/оценки на странице аниме.
+   * Наружу — только не-секретное состояние { listId, isFavorite, rating }.
+   */
+  readAnimeOwnState: (slug) => ipcRenderer.invoke('avc:anime:own-state', slug),
+
   /** Подписка на изменения состояния аккаунта (вход/выход/истечение) */
   onAccountChanged: (cb) => {
     const handler = (_event, snap) => cb(snap)
@@ -83,21 +90,8 @@ contextBridge.exposeInMainWorld('avcElectron', {
     /** Профиль производительности (§19): max_responsiveness | balanced | quality */
     setProfile: (profile) => ipcRenderer.invoke('avc:ai:set-profile', { profile }),
 
-    /**
-     * Локальный LLM-роутер (§28–§47): вызывается ТОЛЬКО когда детерминированный
-     * парсер не распознал фразу. Контракт тот же, что у /api/voice/interpret:
-     * { commands: [{type, params, confidence}], needsClarification, clarifyQuestion } | null
-     */
-    llmRoute: (text, context, timeoutMs) => ipcRenderer.invoke('avc:ai:llm-route', { text, context, timeoutMs }),
-
-    /** Локальный TTS (§22–§29): { file, cached, ms, durationMs } | null */
-    ttsSpeak: (text) => ipcRenderer.invoke('avc:ai:tts-speak', { text }),
-
-    /** Немедленная отмена текущей речи (§26) */
-    ttsCancel: () => ipcRenderer.invoke('avc:ai:tts-cancel'),
-
-    /** Выбор голоса локального TTS (id из манифеста) */
-    setVoice: (voice) => ipcRenderer.invoke('avc:ai:set-voice', { voice }),
+    // УРОК РЕЛИЗА 1.0.12: llmRoute/ttsSpeak/ttsCancel/setVoice удалены вместе
+    // со слоями LLM/TTS — по решению владельца они не нужны в релизах
 
     /** Повторная инициализация сервисов после установки моделей */
     initialize: () => ipcRenderer.invoke('avc:ai:initialize'),
@@ -155,5 +149,20 @@ contextBridge.exposeInMainWorld('avcElectron', {
 
     /** Открыть каталог моделей в системном проводнике */
     openModelsDir: () => ipcRenderer.invoke('avc:ai:models:open-dir'),
+
+    /** Каталог моделей STT: статусы/лицензии/рекомендации (спецификация STT) */
+    catalog: () => ipcRenderer.invoke('avc:ai:catalog'),
+
+    /** Бенчмарк «Проверить скорость на этом ПК»: RTF + рекомендация профиля */
+    benchmark: () => ipcRenderer.invoke('avc:ai:benchmark'),
+
+    /** Сменить активную модель STT (движок заменяется целиком; сохраняется в конфиг) */
+    setSttModel: (modelId) => ipcRenderer.invoke('avc:ai:set-stt-model', { modelId }),
+
+    /** Удалить модель каталога */
+    removeComponent: (key) => ipcRenderer.invoke('avc:ai:remove-component', { key }),
+
+    /** Проверить установленную модель (файлы/маркер) */
+    verifyComponent: (key) => ipcRenderer.invoke('avc:ai:verify-component', { key }),
   },
 })

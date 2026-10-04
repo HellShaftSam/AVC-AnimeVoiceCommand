@@ -508,6 +508,12 @@ class AuthenticationService {
    * результаты (то же доверие к HTTP-успеху, что и у самого сайта + наша
    * reload-проверка сверху).
    */
+  /** Прочитать своё состояние тайтла (UI страницы аниме: подсветка статуса/сердца/оценки) */
+  async readAnimeOwnState(slug) {
+    if (typeof slug !== 'string' || slug.trim() === '') return null
+    return this._readOwnState(slug)
+  }
+
   async animeAction(req) {
     const KINDS = new Set([
       'setList',

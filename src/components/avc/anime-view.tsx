@@ -12,7 +12,7 @@
  * серии командами «вниз» (голос-скролл) и «серия N».
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, Film, Heart, Play, RotateCw, Star } from 'lucide-react'
+import { Check, ExternalLink, Film, Heart, Play, RotateCw, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -29,7 +29,7 @@ import {
 import { avcApi } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import { LIBRARY_STATUSES } from '@/lib/avc/types'
-import type { AnimeDetails, BrowserTab, WatchProgressItem } from '@/lib/avc/types'
+import type { AnimeDetails, BrowserTab, WatchProgressItem, YummyAnimeOwnState } from '@/lib/avc/types'
 import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
@@ -60,6 +60,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   const [loadedKey, setLoadedKey] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [localProgress, setLocalProgress] = useState<WatchProgressItem | null>(null)
+  const accountState = useAvcStore((s) => s.yummyAccount.state)
 
   const slug = typeof tab.payload.slug === 'string' ? tab.payload.slug : null
   const animeId = typeof tab.payload.animeId === 'number' ? tab.payload.animeId : null
@@ -102,6 +103,30 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
       patchTab(tab.id, { title: details.title })
     }
   }, [details, tab.id, tab.title, patchTab])
+
+  // Своё состояние тайтла (список/избранное/оценка) → подсветка кнопок.
+  // Читается при загрузке и каждом входе в аккаунт; после действий состояние
+  // кладёт в стор executor из ответа сайта (без повторного чтения страницы).
+  const detailsSlug = details?.slug ?? null
+  const animeIdNum = details?.animeId ?? null
+  useEffect(() => {
+    if (!detailsSlug || animeIdNum === null) return
+    if (accountState !== 'loggedIn') {
+      useAvcStore.getState().setOwnAnimeState(null)
+      return
+    }
+    let cancelled = false
+    void avcApi
+      .animeOwnState(detailsSlug)
+      .then((state) => {
+        if (cancelled || !state) return
+        useAvcStore.getState().setOwnAnimeState({ animeId: animeIdNum, state })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [detailsSlug, animeIdNum, accountState])
 
   // Локальный трекинг: если этот тайтл уже смотрели — подсказать где остановились
   // (подсказка видна пока серия не включена; после включения playback.currentEpisode !== null)
@@ -176,6 +201,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   // ни ошибки, ни просьбы войти). Теперь каждый результат виден.
   const ACCOUNT_ACT_TYPES = new Set([
     VoiceCommandType.SetWatchStatus,
+    VoiceCommandType.RemoveWatchStatus,
     VoiceCommandType.ToggleFavorite,
     VoiceCommandType.RateAnime,
     VoiceCommandType.RemoveRating,
@@ -382,8 +408,15 @@ function AccountActionBar({
   onOpenSite: () => void
 }) {
   const account = useAvcStore((s) => s.yummyAccount)
+  const ownEntry = useAvcStore((s) => s.ownAnimeState)
   const loggedIn = account.state === 'loggedIn'
   const username = account.user?.username ?? null
+  // Своё состояние тайтла: активный список, избранное, оценка — иначе подсветить
+  // «поставил или нет» невозможно (урок: «ни звездочки ни сердечки не видны»)
+  const own: YummyAnimeOwnState | null =
+    ownEntry && ownEntry.animeId === details.animeId ? ownEntry.state : null
+  const favActive = own?.isFavorite === true
+  const rated = typeof own?.rating === 'number' && own.rating >= 1 && own.rating <= 10
 
   return (
     <div className="mt-4 rounded-xl border border-border bg-card/60 p-3">
@@ -405,41 +438,79 @@ function AccountActionBar({
         </Button>
       </div>
 
-      {/* Статусы списка (реестр сайта: Смотрю/В Планах/Просмотрено/Брошено/Отложено) */}
+      {/* Статусы списка (реестр сайта: Смотрю/В Планах/Просмотрено/Брошено/Отложено).
+          Активный статус подсвечен и помечен aria-pressed — видно, что стоит, и его можно снять. */}
       <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Статус просмотра">
-        {LIBRARY_STATUSES.map((s) => (
-          <Button
-            key={s.id}
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              onAct(VoiceCommandType.SetWatchStatus, { status: s.alias }, `Статус: ${s.title}`)
-            }
-            aria-label={`Добавить «${details.title}» в список «${s.title}»`}
-            className="min-h-9 border-border bg-card/60 px-2.5 text-xs text-foreground hover:border-sky-400/40 hover:text-sky-300"
-          >
-            {s.title}
-          </Button>
-        ))}
+        {LIBRARY_STATUSES.map((s) => {
+          const active = own?.listId === s.id
+          return (
+            <Button
+              key={s.id}
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onAct(VoiceCommandType.SetWatchStatus, { status: s.alias }, `Статус: ${s.title}`)
+              }
+              aria-pressed={active}
+              aria-label={`${active ? 'Стоит в списке' : 'Добавить'} «${details.title}» — «${s.title}»`}
+              className={cn(
+                'min-h-9 border-border px-2.5 text-xs',
+                active
+                  ? 'border-sky-400/70 bg-sky-400/15 text-sky-200'
+                  : 'bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-300',
+              )}
+            >
+              {active && <Check className="h-3.5 w-3.5" aria-hidden />}
+              {s.title}
+            </Button>
+          )
+        })}
         <Button
           variant="outline"
           size="sm"
           onClick={() =>
-            onAct(VoiceCommandType.ToggleFavorite, { favorite: true }, 'В Любимые')
+            onAct(
+              VoiceCommandType.ToggleFavorite,
+              { favorite: !favActive },
+              favActive ? 'Убрать из Любимых' : 'В Любимые',
+            )
           }
-          aria-label={`Добавить «${details.title}» в Любимые (избранное)`}
-          className="min-h-9 gap-1 border-border bg-card/60 px-2.5 text-xs text-foreground hover:border-rose-400/60 hover:text-rose-300"
+          aria-pressed={favActive}
+          aria-label={`${favActive ? 'Убрать из' : 'Добавить в'} Любимые «${details.title}»`}
+          className={cn(
+            'min-h-9 gap-1 border-border px-2.5 text-xs',
+            favActive
+              ? 'border-rose-400/70 bg-rose-400/15 text-rose-300'
+              : 'bg-card/60 text-foreground hover:border-rose-400/60 hover:text-rose-300',
+          )}
         >
-          <Heart className="h-3.5 w-3.5" aria-hidden />
-          Любимое
+          <Heart
+            className={cn('h-3.5 w-3.5', favActive && 'fill-rose-500 text-rose-400')}
+            aria-hidden
+          />
+          {favActive ? 'В Любимых' : 'Любимое'}
         </Button>
+        {own?.listId !== null && own?.listId !== undefined && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onAct(VoiceCommandType.RemoveWatchStatus, {}, 'Убрать из списка')}
+            aria-label="Убрать тайтл из всех списков"
+            className="min-h-9 px-2 text-xs text-muted-foreground hover:text-rose-300"
+          >
+            Убрать из списка
+          </Button>
+        )}
       </div>
 
-      {/* Оценка 1..10 (шкала сайта) */}
+      {/* Оценка 1..10 (шкала сайта): текущая оценка видна в селекте и залитой звезде */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Star className="h-4 w-4 text-sky-300" aria-hidden />
+        <Star
+          className={cn('h-4 w-4', rated ? 'fill-sky-300 text-sky-300' : 'text-sky-300')}
+          aria-hidden
+        />
         <Select
-          value=""
+          value={rated ? String(own?.rating) : ''}
           onValueChange={(v: string) => {
             const n = parseInt(v, 10)
             if (Number.isInteger(n) && n >= 1 && n <= 10) {
@@ -448,10 +519,13 @@ function AccountActionBar({
           }}
         >
           <SelectTrigger
-            aria-label="Поставить оценку от 1 до 10"
-            className="h-9 w-44 border-border bg-card/60 text-xs text-foreground"
+            aria-label={rated ? `Моя оценка ${own?.rating} из 10 — изменить` : 'Поставить оценку от 1 до 10'}
+            className={cn(
+              'h-9 w-44 border-border bg-card/60 text-xs',
+              rated ? 'border-sky-400/70 text-sky-200' : 'text-foreground',
+            )}
           >
-            <SelectValue placeholder="Оценить (1–10)" />
+            <SelectValue placeholder={rated ? `Моя оценка: ${own?.rating} из 10` : 'Оценить (1–10)'} />
           </SelectTrigger>
           <SelectContent className="border-border bg-card">
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => (

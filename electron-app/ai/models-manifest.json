@@ -1,42 +1,17 @@
 {
   "$schema": "./ai-manifest-schema.md",
-  "version": 2,
-  "generatedAt": "2026-10-03",
-  "generatedBy": "scripts/validate-ai-assets.mjs (значения сняты с реальных загрузок, не выдуманы)",
-  "releaseNote": "v2 (1.0.12): LLM и TTS УБРАНЫ из релиза по решению владельца — остался только голосовой слой STT+VAD. Убранные компоненты не перечисляются, чтобы UI не предлагал их установку.",
+  "version": 3,
+  "generatedAt": "2026-10-04",
+  "generatedBy": "scripts/validate-ai-assets.mjs (значения сняты с реальных загрузок/HEAD-проверок, не выдуманы)",
+  "releaseNote": "v3 (STT-переписка): каталог моделей с профилями ru-fast/ru-accurate. LLM и TTS УБРАНЫ из релиза по решению владельца. sha256: null означает «контрольная сумма фиксируется при первой установке и сверяется при всех последующих» — так честно для новых моделей, чей архив ещё не скачан при сборке.",
   "storage": {
     "dirName": "ai-models",
     "layout": {
-      "stt": "stt/t-one-russian/"
+      "stt": "stt/<modelId>/",
+      "vad": "vad/silero-vad/"
     }
   },
   "components": {
-    "stt": {
-      "id": "t-one-russian-streaming",
-      "name": "T-One Russian Streaming CTC",
-      "version": "2025-09-08",
-      "required": true,
-      "runtime": "sherpa-onnx (нативный, Windows x64 + Linux x64)",
-      "description": "Русское стриминговое распознавание речи (CTC, 8 кГц) + Silero VAD",
-      "source": "https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-ctc/t-one-ctc-models.html",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2",
-      "archive": "tar.bz2",
-      "expectedFiles": [
-        "model.onnx",
-        "tokens.txt"
-      ],
-      "sizeBytes": 128468156,
-      "sha256": "b9c907450e99a6e5049e279bf18368a17db0bdc5e63b7fa978943138debbe3ae",
-      "acceptRanges": true,
-      "contentType": "application/octet-stream",
-      "verifiedAt": "2026-10-03",
-      "verifiedChecks": {
-        "httpStatus": 200,
-        "redirects": 1,
-        "contentLengthMatch": true,
-        "acceptRanges": true
-      }
-    },
     "vad": {
       "id": "silero-vad",
       "name": "Silero VAD",
@@ -54,5 +29,105 @@
         "contentLengthMatch": true
       }
     }
-  }
+  },
+  "models": [
+    {
+      "key": "stt",
+      "id": "t-one-russian",
+      "name": "T-One Russian Streaming (ru-fast)",
+      "profile": "ru-fast",
+      "engine": "t-one-streaming",
+      "lang": "ru",
+      "version": "2025-09-08",
+      "required": true,
+      "runtime": "sherpa-onnx OnlineRecognizer (нативный, Windows x64 + Linux x64)",
+      "description": "Стриминговое русское распознавание (CTC, 8 кГц) + живые partial-результаты. Минимальная задержка — рекомендуется для слабых ПК.",
+      "dir": "stt/t-one-russian",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2",
+      "mirrors": [],
+      "archive": "tar.bz2",
+      "expectedFiles": [
+        "model.onnx",
+        "tokens.txt"
+      ],
+      "sizeBytes": 128468156,
+      "sha256": "b9c907450e99a6e5049e279bf18368a17db0bdc5e63b7fa978943138debbe3ae",
+      "acceptRanges": true,
+      "contentType": "application/octet-stream",
+      "license": "MIT (модель T-One, Т-Банк; код sherpa-onnx — Apache-2.0)",
+      "minRamBytes": 4294967296,
+      "recommendedFor": "Слабые ПК (2–4 ядра, 4–8 ГБ RAM): минимальная задержка, живые partial",
+      "verifiedAt": "2026-10-03",
+      "verifiedChecks": {
+        "httpStatus": 200,
+        "redirects": 1,
+        "contentLengthMatch": true,
+        "acceptRanges": true
+      }
+    },
+    {
+      "key": "stt",
+      "id": "gigaam-v3-russian",
+      "name": "GigaAM v3 Russian RNNT int8 (ru-accurate)",
+      "profile": "ru-accurate",
+      "engine": "gigaam-offline",
+      "lang": "ru",
+      "version": "2025-12-16",
+      "required": false,
+      "runtime": "sherpa-onnx OfflineRecognizer transducer (нативный, Windows x64 + Linux x64)",
+      "description": "Лучшая точность для русского (Sber GigaAM v3, RNNT, int8, 16 кГц). Декодирование фразы целиком после VAD — без живых partial-результатов.",
+      "dir": "stt/gigaam-v3-russian",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-transducer-giga-am-v3-russian-2025-12-16.tar.bz2",
+      "mirrors": [],
+      "archive": "tar.bz2",
+      "expectedFiles": [
+        "tokens.txt"
+      ],
+      "sizeBytes": 167388020,
+      "sha256": null,
+      "acceptRanges": true,
+      "license": "MIT (GigaAM v3, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
+      "minRamBytes": 6442450944,
+      "recommendedFor": "ПК с 6+ ГБ RAM, когда нужна максимальная точность распознавания",
+      "verifiedAt": "2026-10-04",
+      "verifiedChecks": {
+        "httpStatus": 200,
+        "redirects": 1,
+        "contentLengthMatch": true,
+        "acceptRanges": true
+      }
+    },
+    {
+      "key": "stt",
+      "id": "gigaam-v2-russian",
+      "name": "GigaAM v2 Russian CTC int8",
+      "profile": "ru-accurate",
+      "engine": "gigaam-offline",
+      "lang": "ru",
+      "version": "2025-04-19",
+      "required": false,
+      "runtime": "sherpa-onnx OfflineRecognizer nemoCtc (нативный, Windows x64 + Linux x64)",
+      "description": "Точная офлайн-модель (GigaAM v2 CTC, int8, 16 кГц). Запасной вариант ru-accurate с другой архитектурой декодера.",
+      "dir": "stt/gigaam-v2-russian",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-ctc-giga-am-v2-russian-2025-04-19.tar.bz2",
+      "mirrors": [],
+      "archive": "tar.bz2",
+      "expectedFiles": [
+        "tokens.txt"
+      ],
+      "sizeBytes": 166917722,
+      "sha256": null,
+      "acceptRanges": true,
+      "license": "MIT (GigaAM v2, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
+      "minRamBytes": 6442450944,
+      "recommendedFor": "Альтернатива GigaAM v3 (та же ниша точности)",
+      "verifiedAt": "2026-10-04",
+      "verifiedChecks": {
+        "httpStatus": 200,
+        "redirects": 1,
+        "contentLengthMatch": true,
+        "acceptRanges": true
+      }
+    }
+  ]
 }

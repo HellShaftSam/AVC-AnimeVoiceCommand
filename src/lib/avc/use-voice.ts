@@ -127,7 +127,6 @@ export interface VoiceApi {
   stopPushToTalkAndProcess: () => void
   toggleAlwaysListening: () => void
   setAlwaysListening: (v: boolean) => void
-  speak: (text: string) => Promise<void>
   /** Живой уровень микрофона 0..1 (обновляется ~10 раз/с, пока идёт listening) */
   micLevel: number
   /** Промежуточный (не финальный) текст Web Speech API, очищается при обработке */
@@ -188,8 +187,6 @@ export function useVoice(): VoiceApi {
   const recorderRef = useRef<MediaRecorder | null>(null)
   const recorderMimeRef = useRef('audio/webm')
   const chunksRef = useRef<Blob[]>([])
-  const audioElRef = useRef<HTMLAudioElement | null>(null)
-  const urlRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
   const alwaysRef = useRef(false)
   const startRef = useRef<(() => Promise<void>) | null>(null)
@@ -296,46 +293,6 @@ export function useVoice(): VoiceApi {
     rafRef.current = requestAnimationFrame(tick)
   }, [])
 
-  const speak = useCallback(async (text: string) => {
-    if (!text.trim()) return
-    try {
-      if (audioElRef.current) {
-        audioElRef.current.pause()
-        audioElRef.current = null
-      }
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current)
-        urlRef.current = null
-      }
-      // Локальный TTS (спецификация §22–§29): офлайн-синтез в EXE — приоритет (§3)
-      const ai = getElectronBridge()?.ai
-      if (ai?.available && useAvcStore.getState().settings.aiLocalTts) {
-        const local = await ai.ttsSpeak(text)
-        if (local?.dataUrl) {
-          const el = new Audio(local.dataUrl)
-          audioElRef.current = el
-          void el.play().catch(() => undefined)
-          return
-        }
-        // локальный TTS недоступен — падаем на облачный путь (§129)
-      }
-      const res = await fetch('/api/voice/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      if (!res.ok) return
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      urlRef.current = url
-      const el = new Audio(url)
-      audioElRef.current = el
-      void el.play().catch(() => undefined)
-    } catch {
-      // TTS не критичен — молча игнорируем
-    }
-  }, [])
-
   const rearmIfNeeded = useCallback(() => {
     if (!alwaysRef.current || !mountedRef.current) return
     if (rearmTimerRef.current) clearTimeout(rearmTimerRef.current)
@@ -379,12 +336,14 @@ export function useVoice(): VoiceApi {
         }
 
         setVoiceStatus('executing', commandText)
-        const result = await executeText(commandText, 'voice')
+        // Сквозной correlationId на фразу (спецификация STT): идёт в историю
+        // команд и пайплайн-логи — одно распознавание можно проследить целиком
+        const correlationId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `u${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+        const result = await executeText(commandText, 'voice', { correlationId })
         const finalMsg = result.results[result.results.length - 1]?.message ?? ''
         setVoiceStatus('idle', finalMsg)
-        if (useAvcStore.getState().settings.ttsEnabled && finalMsg) {
-          void speak(finalMsg)
-        }
       } catch {
         setVoiceStatus('error', 'Ошибка распознавания. Попробуйте ещё раз.')
         scheduleErrorClear()
@@ -393,7 +352,7 @@ export function useVoice(): VoiceApi {
         rearmIfNeeded()
       }
     },
-    [scheduleErrorClear, speak, rearmIfNeeded],
+    [scheduleErrorClear, rearmIfNeeded],
   )
 
   /** Серверный движок: webm → WAV 16 кГц mono (с micGain) → base64 → /api/voice/asr */
@@ -711,7 +670,6 @@ export function useVoice(): VoiceApi {
         void executeEarlyCommand(p.earlyCommand).then((result) => {
           if (result) {
             useAvcStore.getState().setVoiceStatus('idle', result.message)
-            if (useAvcStore.getState().settings.ttsEnabled && result.message) void speak(result.message)
           }
         })
       }
@@ -755,7 +713,7 @@ export function useVoice(): VoiceApi {
       offPartial()
       offFinal()
     }
-  }, [handleRecognizedText, teardownAudio, speak])
+  }, [handleRecognizedText, teardownAudio])
 
   const startPushToTalk = useCallback(async () => {
     const st = useAvcStore.getState()
@@ -960,14 +918,6 @@ export function useVoice(): VoiceApi {
         try { local.processor.disconnect() } catch { /* ок */ }
         void local.ctx.close().catch(() => undefined)
       }
-      if (audioElRef.current) {
-        audioElRef.current.pause()
-        audioElRef.current = null
-      }
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current)
-        urlRef.current = null
-      }
     }
   }, [teardownAudio])
 
@@ -982,7 +932,6 @@ export function useVoice(): VoiceApi {
     stopPushToTalkAndProcess,
     toggleAlwaysListening,
     setAlwaysListening,
-    speak,
     micLevel,
     interimText,
     micDevices,

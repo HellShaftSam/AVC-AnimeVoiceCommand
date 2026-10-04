@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Loader2, Mic, RefreshCw, X } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
-import { avcApi, getElectronBridge, type AiHardwareInfo, type AiStatusSnapshot } from '@/lib/avc/api'
+import { avcApi, getElectronBridge, type AiCatalogModel, type AiHardwareInfo, type AiStatusSnapshot } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import type { AiProfile, AppSettings, SttEngine } from '@/lib/avc/types'
 import {
@@ -29,6 +29,7 @@ import {
   type MicChain,
 } from '@/lib/voice/audio-utils'
 import { DEFAULT_VOICE_ALIASES } from '@/lib/voice/provider-resolver'
+import { clearAniskipCache } from '@/lib/avc/skip/aniskip'
 import { Button } from '@/components/ui/button'
 import { ModelsManagerCard } from '@/components/avc/models-manager-card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -213,13 +214,6 @@ export function SettingsDialog() {
                     }}
                   />
                 </div>
-                <SettingRow label="Голосовые ответы" hint="Озвучивать результаты команд (TTS)">
-                  <Switch
-                    checked={settings.ttsEnabled}
-                    onCheckedChange={(v: boolean) => change({ ttsEnabled: v })}
-                    aria-label="Голосовые ответы"
-                  />
-                </SettingRow>
               </section>
 
               <Separator className="bg-secondary" />
@@ -302,6 +296,109 @@ export function SettingsDialog() {
 
               <Separator className="bg-secondary" />
 
+              {/* --- Skip Segments: пропуск опенинга/эндинга/рекапы --- */}
+              <section>
+                <SectionTitle>Пропуск опенинга/эндинга</SectionTitle>
+                <SettingRow label="Режим пропуска" hint="Кнопка у плеера / автопропуск / выкл">
+                  <Select
+                    value={settings.skipMode}
+                    onValueChange={(v: string) =>
+                      change({ skipMode: v === 'auto' ? 'auto' : v === 'off' ? 'off' : 'button' })
+                    }
+                  >
+                    <SelectTrigger aria-label="Режим пропуска" className="h-9 w-44 border-border bg-card text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-border bg-card">
+                      <SelectItem value="off">Выключено</SelectItem>
+                      <SelectItem value="button">Показывать кнопку</SelectItem>
+                      <SelectItem value="auto">Автопропуск</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </SettingRow>
+                <SettingRow label="Опенинги">
+                  <Switch checked={settings.skipOp} onCheckedChange={(v: boolean) => change({ skipOp: v })} aria-label="Пропускать опенинги" />
+                </SettingRow>
+                <SettingRow label="Эндинги">
+                  <Switch checked={settings.skipEd} onCheckedChange={(v: boolean) => change({ skipEd: v })} aria-label="Пропускать эндинги" />
+                </SettingRow>
+                <SettingRow label="Рекапы">
+                  <Switch checked={settings.skipRecap} onCheckedChange={(v: boolean) => change({ skipRecap: v })} aria-label="Пропускать рекапы" />
+                </SettingRow>
+                <SettingRow label="Тайминги сайта" hint="Источник: skips из данных серии">
+                  <Switch checked={settings.skipSourceSite} onCheckedChange={(v: boolean) => change({ skipSourceSite: v })} aria-label="Тайминги сайта" />
+                </SettingRow>
+                <SettingRow label="Aniskip" hint="Краудсорсинг-таймкоды по MAL ID (открытый API)">
+                  <Switch checked={settings.skipSourceAniskip} onCheckedChange={(v: boolean) => change({ skipSourceAniskip: v })} aria-label="Источник Aniskip" />
+                </SettingRow>
+                <SettingRow
+                  label="Секунды fallback"
+                  hint="«Пропусти опенинг» без данных перематывает на N секунд"
+                >
+                  <Select
+                    value={String(settings.skipFallbackSec)}
+                    onValueChange={(v: string) => change({ skipFallbackSec: Number(v) })}
+                  >
+                    <SelectTrigger aria-label="Секунды fallback" className="h-9 w-24 border-border bg-card text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-border bg-card">
+                      {[60, 85, 90, 120].map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n} сек
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingRow>
+                <div className="py-2">
+                  <div className="flex items-center justify-between text-sm text-foreground">
+                    <span>Порог уверенности автопропуска</span>
+                    <span className="tabular-nums text-sky-300">{Math.round(settings.skipConfidence * 100)}%</span>
+                  </div>
+                  <Slider
+                    value={[settings.skipConfidence]}
+                    min={0.3}
+                    max={1}
+                    step={0.05}
+                    aria-label="Порог уверенности автопропуска"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+                    onValueChange={(v: number[]) => {
+                      const val = Array.isArray(v) ? v[0] : undefined
+                      if (typeof val === 'number') change({ skipConfidence: val })
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-9 border-border text-xs hover:text-rose-300"
+                    onClick={() => {
+                      void avcApi.skipMarksDelete('anon').then(() => {
+                        useAvcStore.getState().bumpSkipMarksVersion()
+                        toast({ description: 'Мои отметки таймкодов очищены' })
+                      })
+                    }}
+                  >
+                    Очистить мои отметки
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-9 px-2 text-xs text-muted-foreground"
+                    onClick={() => {
+                      clearAniskipCache()
+                      toast({ description: 'Кэш таймкодов Aniskip очищен' })
+                    }}
+                  >
+                    Очистить кэш Aniskip
+                  </Button>
+                </div>
+              </section>
+
+              <Separator className="bg-secondary" />
+
               <section>
                 <SectionTitle>Сайт</SectionTitle>
                 <SettingRow label="Базовый URL" hint="Адрес аниме-сайта для адаптера">
@@ -323,16 +420,6 @@ export function SettingsDialog() {
                     checked={settings.saveHistory}
                     onCheckedChange={(v: boolean) => change({ saveHistory: v })}
                     aria-label="Сохранять историю"
-                  />
-                </SettingRow>
-                <SettingRow
-                  label="LLM-fallback"
-                  hint="Если локальный парсер не уверен — фраза уходит в LLM"
-                >
-                  <Switch
-                    checked={settings.llmFallback}
-                    onCheckedChange={(v: boolean) => change({ llmFallback: v })}
-                    aria-label="LLM-fallback"
                   />
                 </SettingRow>
               </section>
@@ -866,9 +953,9 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
         <section>
           <SectionTitle>Локальный AI</SectionTitle>
           <p className="py-2 text-sm text-muted-foreground">
-            Локальный AI (офлайн-распознавание T-One, локальный роутер Qwen3 и голосовые ответы)
-            доступен в приложении AVC-Anime (EXE). В браузере используются браузерное/серверное
-            распознавание и облачный fallback.
+            Локальный AI (офлайн-распознавание русской речи: T-One Streaming или GigaAM,
+           Silero VAD) доступен в приложении AVC-Anime (EXE). LLM и TTS удалены из релиза
+            по решению владельца. В браузере используются браузерное/серверное распознавание.
           </p>
         </section>
       </div>
@@ -885,6 +972,11 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
     <div className="space-y-3">
       {/* Фаза 5 аудита: каталог AI-моделей, безопасная миграция, список моделей */}
       <ModelsManagerCard />
+
+      <Separator className="bg-secondary" />
+
+      {/* Спецификация STT: каталог моделей (ru-fast/ru-accurate) + бенчмарк ПК */}
+      <SttCatalogCard onStatusChanged={refresh} status={status} />
 
       <Separator className="bg-secondary" />
 
@@ -905,33 +997,6 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
               <SelectItem value="max_responsiveness">Максимальная отзывчивость</SelectItem>
               <SelectItem value="balanced">Сбалансированный</SelectItem>
               <SelectItem value="quality">Качество</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-        <SettingRow label="Локальная озвучка ответов" hint="Офлайн TTS вместо облачного">
-          <Switch
-            checked={settings.aiLocalTts}
-            onCheckedChange={(v: boolean) => change({ aiLocalTts: v })}
-            aria-label="Локальная озвучка ответов"
-          />
-        </SettingRow>
-        <SettingRow label="Голос" hint="Русский голос офлайн-синтеза">
-          <Select
-            value={settings.aiVoice}
-            onValueChange={(v: string) => {
-              change({ aiVoice: v })
-              void getElectronBridge()?.ai?.setVoice(v)
-            }}
-          >
-            <SelectTrigger aria-label="Голос TTS" className="h-9 w-52 border-border bg-card text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="border-border bg-card">
-              {(status?.voices ?? [{ id: 'irina', name: 'Ирина (женский)', default: true }]).map((v) => (
-                <SelectItem key={v.id} value={v.id}>
-                  {v.name}
-                </SelectItem>
-              ))}
             </SelectContent>
           </Select>
         </SettingRow>
@@ -968,25 +1033,9 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
                   {readyBadge(status.ready.stt, status.stt.state, status.stt.error)}
                 </span>
               </div>
-              <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
-                <span className="text-foreground">LLM · Qwen3 (семантика)</span>
-                <span className="flex items-center gap-2">
-                  {status.llm.lastRouteMs != null && <span className="text-muted-foreground">{status.llm.lastRouteMs} мс</span>}
-                  {readyBadge(status.ready.llm, status.llm.state, status.llm.error)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
-                <span className="text-foreground">TTS · офлайн-синтез</span>
-                <span className="flex items-center gap-2">
-                  {status.tts.lastSynthMs != null && <span className="text-muted-foreground">{status.tts.lastSynthMs} мс</span>}
-                  {readyBadge(status.ready.tts, status.tts.state, status.tts.error)}
-                </span>
-              </div>
             </div>
-            {(status.stt.error || status.llm.error || status.tts.error) && (
-              <p className="text-[11px] leading-relaxed text-rose-400">
-                {[status.stt.error, status.llm.error, status.tts.error].filter(Boolean).join(' ')}
-              </p>
+            {status.stt.error && (
+              <p className="text-[11px] leading-relaxed text-rose-400">{status.stt.error}</p>
             )}
           </div>
         ) : (
@@ -1032,5 +1081,233 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * SttCatalogCard — каталог моделей STT (спецификация STT, фазы 3–6):
+ * список моделей со статусом/лицензией/рекомендацией, действия
+ * «Скачать / Сделать активной / Проверить / Удалить» и встроенный
+ * бенчмарк «Проверить скорость на этом ПК» (RTF + рекомендация профиля).
+ * Только EXE (в браузере моста нет — блок честно скрыт).
+ */
+function SttCatalogCard({
+  onStatusChanged,
+  status,
+}: {
+  onStatusChanged: () => void
+  status: AiStatusSnapshot | null
+}) {
+  const ai = getElectronBridge()?.ai
+  const [catalog, setCatalog] = useState<AiCatalogModel[] | null>(null)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [benchBusy, setBenchBusy] = useState(false)
+  const [progressNote, setProgressNote] = useState<string | null>(null)
+
+  const refreshCatalog = useCallback(async () => {
+    if (!ai?.catalog) return
+    try {
+      setCatalog(await ai.catalog())
+    } catch {
+      setCatalog(null)
+    }
+  }, [ai])
+
+  useEffect(() => {
+    if (!ai?.catalog) return
+    void refreshCatalog()
+    // прогресс скачивания модели каталога (та же шина событий, что у мастера)
+    const off = ai.onModelProgress?.((p) => {
+      if (p.phase === 'downloading') {
+        setProgressNote(`${p.id}: ${Math.round(p.percent ?? 0)}%`)
+      } else if (p.phase === 'done' || p.phase === 'error' || p.phase === 'removed') {
+        setProgressNote(null)
+        void refreshCatalog()
+      } else if (p.phase === 'verifying-sha256' || p.phase === 'extracting') {
+        setProgressNote(`${p.id}: ${p.phase === 'extracting' ? 'распаковка' : 'проверка суммы'}`)
+      }
+    })
+    return () => off?.()
+  }, [ai, refreshCatalog])
+
+  if (!ai?.catalog) return null
+
+  const action = async (key: string, kind: 'install' | 'activate' | 'verify' | 'remove') => {
+    setBusyKey(key)
+    try {
+      if (kind === 'install') {
+        const res = await ai.install!([key])
+        const bad = res.find((r) => !r.ok)
+        toast({ description: bad ? `Ошибка установки: ${bad.message ?? bad.kind}` : 'Модель установлена' })
+      } else if (kind === 'activate') {
+        const res = await ai.setSttModel!(key.split(':')[1] ?? key)
+        toast({ description: res.message || (res.ok ? 'Модель активирована' : 'Не удалось активировать') })
+        onStatusChanged()
+      } else if (kind === 'verify') {
+        const res = await ai.verifyComponent!(key)
+        toast({ description: res.message || (res.ok ? 'Проверка пройдена' : 'Проверка не пройдена') })
+      } else {
+        const res = await ai.removeComponent!(key)
+        toast({ description: res.ok ? 'Модель удалена' : res.message || 'Не удалось удалить' })
+      }
+      await refreshCatalog()
+      onStatusChanged()
+    } catch (e) {
+      toast({ description: e instanceof Error ? e.message : 'Ошибка операции', variant: 'destructive' })
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const runBenchmark = async () => {
+    if (!ai.benchmark) return
+    setBenchBusy(true)
+    try {
+      const res = await ai.benchmark()
+      if (res.ok) {
+        toast({ description: `RTF ${res.rtf ?? '?'} · декод ${res.decodeMs} мс / аудио ${res.audioMs} мс` })
+      } else {
+        toast({ description: res.message || 'Бенчмарк не выполнен', variant: 'destructive' })
+      }
+      onStatusChanged()
+    } finally {
+      setBenchBusy(false)
+    }
+  }
+
+  const activeModel = status?.activeModel
+
+  return (
+    <section>
+      <SectionTitle>Модели распознавания (STT)</SectionTitle>
+      {!catalog ? (
+        <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Загружаю каталог моделей…
+        </div>
+      ) : (
+        <div className="max-h-96 space-y-2 overflow-y-auto pr-1 [scrollbar-width:thin]">
+          {catalog.map((m) => {
+            const isActive = activeModel === m.id
+            return (
+              <div key={m.key} className={cn('rounded-lg border border-border bg-card/60 p-2.5 text-xs', isActive && 'border-sky-400/60')}>
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="min-w-0 truncate font-medium text-foreground">{m.name}</span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {m.profile === 'ru-fast' && (
+                      <span className="rounded bg-sky-950 px-1.5 py-0.5 text-[11px] text-sky-300">быстрая</span>
+                    )}
+                    {m.profile === 'ru-accurate' && (
+                      <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-300">точная</span>
+                    )}
+                    {isActive && (
+                      <span className="rounded bg-sky-400 px-1.5 py-0.5 text-[11px] font-semibold text-sky-950">АКТИВНА</span>
+                    )}
+                    {m.damaged ? (
+                      <span className="rounded bg-rose-950 px-1.5 py-0.5 text-[11px] text-rose-400">повреждена</span>
+                    ) : m.installed ? (
+                      <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-400">установлена</span>
+                    ) : (
+                      <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">не установлена</span>
+                    )}
+                  </span>
+                </div>
+                {m.description && <p className="mt-1 leading-relaxed text-muted-foreground">{m.description}</p>}
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {m.sizeHuman} · лицензия: {m.license ?? '—'}
+                </p>
+                {m.recommendedFor && (
+                  <p className="mt-0.5 text-[11px] text-sky-300/80">{m.recommendedFor}</p>
+                )}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {!m.installed && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-8 border-border px-2 text-[11px]"
+                      disabled={busyKey !== null}
+                      onClick={() => void action(m.key, 'install')}
+                    >
+                      {busyKey === m.key ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : null}
+                      Скачать
+                    </Button>
+                  )}
+                  {m.installed && !isActive && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-8 border-border px-2 text-[11px] hover:text-sky-300"
+                      disabled={busyKey !== null}
+                      onClick={() => void action(m.key, 'activate')}
+                    >
+                      Сделать активной
+                    </Button>
+                  )}
+                  {m.installed && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-8 px-2 text-[11px] text-muted-foreground"
+                      disabled={busyKey !== null}
+                      onClick={() => void action(m.key, 'verify')}
+                    >
+                      Проверить
+                    </Button>
+                  )}
+                  {m.installed && !m.required && !isActive && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-8 px-2 text-[11px] text-muted-foreground hover:text-rose-300"
+                      disabled={busyKey !== null}
+                      onClick={() => void action(m.key, 'remove')}
+                    >
+                      Удалить
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {progressNote && (
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-sky-300">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> {progressNote}
+        </p>
+      )}
+
+      {/* Бенчмарк: RTF и рекомендация профиля под этот ПК */}
+      <div className="mt-3 rounded-lg border border-border bg-card/60 p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-foreground">Скорость на этом ПК</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-8 border-border px-2 text-[11px]"
+            disabled={benchBusy || !status?.ready.stt}
+            onClick={() => void runBenchmark()}
+          >
+            {benchBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : null}
+            Проверить скорость
+          </Button>
+        </div>
+        {status?.benchmark ? (
+          <div className="mt-1.5 space-y-0.5 text-[11px] text-muted-foreground">
+            <p>
+              RTF <span className="tabular-nums text-foreground">{status.benchmark.rtf ?? '—'}</span> · декод{' '}
+              <span className="tabular-nums text-foreground">{status.benchmark.decodeMs}</span> мс за{' '}
+              <span className="tabular-nums text-foreground">{status.benchmark.audioMs}</span> мс аудио
+            </p>
+            <p className="text-sky-300/80">{status.benchmark.recommendation}</p>
+          </div>
+        ) : (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Замеряет RTF (отношение времени распознавания к длине аудио) и рекомендует профиль.
+            RTF &gt; 0.5 — ПК слабый, лучше модель «быстрая» и профиль «Максимальная отзывчивость».
+          </p>
+        )}
+      </div>
+    </section>
   )
 }

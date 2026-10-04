@@ -59,6 +59,16 @@ export enum VoiceCommandType {
   RateAnime = 'RateAnime',
   /** «убери оценку» — DELETE /anime/{id}/rate через сессию сайта (EXE) */
   RemoveRating = 'RemoveRating',
+  /** «убери из списка» — DELETE /anime/{id}/list: тайтл не должен молча застревать в списках */
+  RemoveWatchStatus = 'RemoveWatchStatus',
+  /** «пропусти опенинг/эндинг» — перемотка через Skip Segments (или fallback +N сек) */
+  SkipSegment = 'SkipSegment',
+  /** «вернись/отмени пропуск» — возврат к началу только что пропущенного сегмента */
+  UndoSkip = 'UndoSkip',
+  /** «включи/выключи автопропуск опенинга/эндинга» */
+  SetAutoSkip = 'SetAutoSkip',
+  /** «запомни начало/конец опенинга» — пользовательская отметка таймкода (P3) */
+  MarkSegment = 'MarkSegment',
   ContinueWatching = 'ContinueWatching', // «продолжить просмотр» (по локальной сессионной метке)
   ShowLibrary = 'ShowLibrary', // «открой библиотеку» — панель библиотеки YummyAnime
   /** «что я смотрю», «на какой серии я» — ответ по локальному трекингу просмотра */
@@ -278,6 +288,8 @@ export interface PlaybackContext {
   animeId: number | null
   animeTitle: string | null
   animeSlug: string | null
+  /** MAL ID тайтла (remote_ids с сайта) — нужен для Aniskip (пропуска опенингов) */
+  malId: number | null
   currentEpisode: number | null
   episodesAired: number | null
   episodesTotal: number | null
@@ -359,6 +371,8 @@ export interface AnimeDetails extends AnimeCard {
   episodesTotal: number | null
   dubs: DubOption[]
   videos: VideoEntry[]
+  /** MAL ID (MyAnimeList) с сайта — для Aniskip; null если сайт не отдал */
+  malId?: number | null
   /** Откуда данные: live — реальный сайт; demo — сетевой fallback (честный бейдж в UI) */
   source?: 'live' | 'demo'
 }
@@ -393,14 +407,12 @@ export interface AppSettings {
   wakeWordEnabled: boolean
   wakeWord: string
   confidenceThreshold: number
-  ttsEnabled: boolean
   seekStep: number
   volumeStep: number
   defaultVolume: number
   autoplayNext: boolean
   couchMode: boolean
   saveHistory: boolean
-  llmFallback: boolean
   // --- Микрофон и распознавание (улучшенный голосовой ввод) ---
   /** Программное усиление микрофона 1..4 (WebAudio GainNode) */
   micGain: number
@@ -425,13 +437,28 @@ export interface AppSettings {
   autoSkipEnding: boolean
   /** Сколько секунд до конца считать эндингом, сек (слайдер у плеера) */
   autoSkipEndingSec: number
+  // --- Skip Segments (пропуск опенинга/эндинга/рекапы) -------------------------
+  /** Режим: off — ничего; button — только кнопка; auto — кнопка + автопропуск */
+  skipMode: 'off' | 'button' | 'auto'
+  /** Пропускать опенинги (тип сегмента op) */
+  skipOp: boolean
+  /** Пропускать эндинги (тип сегмента ed) */
+  skipEd: boolean
+  /** Пропускать рекапы (тип сегмента recap) */
+  skipRecap: boolean
+  /** Источник «тайминги сайта» (skips из /videos) включён */
+  skipSourceSite: boolean
+  /** Источник Aniskip (краудсорсинг по MAL ID) включён */
+  skipSourceAniskip: boolean
+  /** Порог уверенности для АВТОПРОПУСКА (0..1); кнопка показывается всегда */
+  skipConfidence: number
+  /** Задержка автопропуска после начала сегмента, сек */
+  skipAutoDelaySec: number
+  /** Fallback без данных: «пропусти опенинг» перематывает на N секунд */
+  skipFallbackSec: number
   // --- Локальный AI-слой (спецификация §4–§134; работает только в EXE) --------
-  /** Профиль производительности STT/LLM/TTS (§19, §96) */
+  /** Профиль производительности STT (§19); LLM/TTS удалены из релиза по решению владельца */
   aiProfile: AiProfile
-  /** Локальный TTS для ответов приложения (§22–§29); false — облачный/браузерный */
-  aiLocalTts: boolean
-  /** Голос локального TTS (id из манифеста) */
-  aiVoice: string
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -440,14 +467,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   wakeWordEnabled: false,
   wakeWord: 'аниме',
   confidenceThreshold: 0.55,
-  ttsEnabled: false,
   seekStep: 10,
   volumeStep: 10,
   defaultVolume: 70,
   autoplayNext: false,
   couchMode: false,
   saveHistory: true,
-  llmFallback: true,
   micGain: 1,
   vadSensitivity: 50,
   sttEngine: 'auto',
@@ -463,9 +488,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSkipOpeningSec: 85,
   autoSkipEnding: true,
   autoSkipEndingSec: 30,
+  skipMode: 'button',
+  skipOp: true,
+  skipEd: true,
+  skipRecap: false,
+  skipSourceSite: true,
+  skipSourceAniskip: true,
+  skipConfidence: 0.5,
+  skipAutoDelaySec: 3,
+  skipFallbackSec: 85,
   aiProfile: 'max_responsiveness',
-  aiLocalTts: true,
-  aiVoice: 'irina',
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +524,16 @@ export type YummyAnimeActionKind =
   | 'removeFavorite'
   | 'setRate'
   | 'removeRate'
+
+/** Пользовательская отметка таймкода (Skip Segments P3) — строка из БД */
+export interface SkipMarkRow {
+  animeId: number
+  dubbing: string | null
+  type: string
+  startSec: number | null
+  endSec: number | null
+  updatedAt: string
+}
 
 export interface YummyAnimeActionRequest {
   kind: YummyAnimeActionKind

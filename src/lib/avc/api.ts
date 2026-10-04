@@ -20,9 +20,11 @@ import type {
   VoiceAliasRow,
   WatchProgressItem,
   WatchProgressResult,
+  SkipMarkRow,
   YummyAccountSnapshot,
   YummyAnimeActionRequest,
   YummyAnimeActionResponse,
+  YummyAnimeOwnState,
   YummyAuthSelfTestReport,
   YummyFavoritesResult,
   YummyLibraryResult,
@@ -55,15 +57,40 @@ async function jsonFetch(url: string, init?: RequestInit): Promise<Response> {
 // --- IPC-мост Electron (создаётся preload'ом оболочки) -----------------------
 
 /** Контракт preload-моста EXE-сборки. Все методы возвращают НЕ-секретные данные. */
-/** AI-статус (не-секретный снимок из AI-воркера) */
 export interface AiComponentStatus {
-  key: 'stt' | 'vad' | 'tts' | 'llm'
+  key: 'stt' | 'vad'
   id: string
   name: string
   required: boolean
   sizeBytes: number | null
   sizeHuman: string
   installed: boolean
+}
+
+export interface AiBenchmarkResult {
+  ranAt: string
+  audioMs: number
+  decodeMs: number
+  rtf: number | null
+  text: string
+  recommendedProfile: string
+  recommendation: string
+}
+
+export interface AiCatalogModel {
+  key: string
+  id: string
+  name: string
+  profile: string | null
+  engine: string | null
+  description: string | null
+  license: string | null
+  recommendedFor: string | null
+  sizeBytes: number | null
+  sizeHuman: string
+  installed: boolean
+  damaged: boolean
+  required: boolean
 }
 
 export interface AiStatusSnapshot {
@@ -73,11 +100,11 @@ export interface AiStatusSnapshot {
   reason?: string
   modelsDir?: string
   models: AiComponentStatus[]
-  voices: Array<{ id: string; name: string; default: boolean }>
-  ready: { stt: boolean; llm: boolean; tts: boolean }
+  activeModel?: string
+  engine?: string
+  benchmark?: AiBenchmarkResult | null
+  ready: { stt: boolean }
   stt: { state: string; profile: string; error: string | null; lastFinalMs: number | null; utterances: number }
-  llm: { state: string; error: string | null; lastRouteMs: number | null; routes: number }
-  tts: { state: string; error: string | null; voice: string; lastSynthMs: number | null; cacheHits: number }
 }
 
 /** Конфиг каталога моделей (фаза 5 аудита) */
@@ -120,15 +147,6 @@ export interface AiModelProgress {
   kind?: string
 }
 
-/** Ответ локального LLM-роутера — тот же контракт, что у /api/voice/interpret */
-export interface AiLlmRouteResult {
-  commands: Array<{ type: string; params: Record<string, string | number | boolean>; confidence: number }>
-  needsClarification: boolean
-  clarifyQuestion: string
-  source: string
-  ms: number
-}
-
 export interface AvcElectronBridge {
   platform: 'electron'
   getAccountState(refresh?: boolean): Promise<YummyAccountSnapshot>
@@ -140,6 +158,8 @@ export interface AvcElectronBridge {
   runAuthSelfTest(): Promise<YummyAuthSelfTestReport>
   /** РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное) */
   animeAction(req: YummyAnimeActionRequest): Promise<YummyAnimeActionResponse>
+  /** Прочитать своё состояние тайтла (подсветка статуса/сердца/оценки) — null если не удалось */
+  readAnimeOwnState?(slug: string): Promise<YummyAnimeOwnState | null>
   onAccountChanged(cb: (snap: YummyAccountSnapshot) => void): () => void
   /** Статусы входа из main-процесса (капча/ошибка/успех) для toast */
   onAuthStatus?(cb: (msg: string) => void): () => void
@@ -153,10 +173,7 @@ export interface AvcElectronBridge {
     recover(): Promise<{ pendingParts: string[]; message: string }>
     setEnabled(enabled: boolean): Promise<boolean>
     setProfile(profile: string): Promise<string>
-    llmRoute(text: string, context: unknown, timeoutMs?: number): Promise<AiLlmRouteResult | null>
-    ttsSpeak(text: string): Promise<{ file: string; dataUrl: string; cached: boolean; ms: number; durationMs: number } | null>
-    ttsCancel(): Promise<void>
-    setVoice(voice: string): Promise<string>
+    // УРОК РЕЛИЗА 1.0.12: llmRoute/ttsSpeak/ttsCancel/setVoice удалены вместе со слоями
     initialize(): Promise<Record<string, string>>
     feedAudio(samples: Int16Array): Promise<boolean>
     flushStt(): Promise<void>
@@ -172,6 +189,16 @@ export interface AvcElectronBridge {
     setModelsDir?(dir: string): Promise<AiModelsDirSetResult>
     /** Открыть каталог моделей в проводнике */
     openModelsDir?(): Promise<{ ok: boolean; error: string | null }>
+    /** Каталог моделей STT (спецификация STT) */
+    catalog?(): Promise<AiCatalogModel[]>
+    /** Бенчмарк «Проверить скорость на этом ПК» */
+    benchmark?(): Promise<AiBenchmarkResult & { ok: boolean; message?: string }>
+    /** Сменить активную модель STT */
+    setSttModel?(modelId: string): Promise<{ ok: boolean; message?: string }>
+    /** Удалить модель каталога */
+    removeComponent?(key: string): Promise<{ ok: boolean; message?: string }>
+    /** Проверить установленную модель */
+    verifyComponent?(key: string): Promise<{ ok: boolean; message?: string }>
   }
 }
 
@@ -324,6 +351,30 @@ export const avcApi = {
     }
   },
 
+  /**
+   * Прочитать своё состояние тайтла (список/избранное/оценка) для подсветки
+   * на странице аниме. EXE — чтение в сессии сайта (main-процесс);
+   * web — GET /api/yummy/anime-state (серверная сессия сайта).
+   */
+  async animeOwnState(slug: string): Promise<YummyAnimeOwnState | null> {
+    const bridge = getElectronBridge()
+    if (bridge?.readAnimeOwnState) {
+      try {
+        return await bridge.readAnimeOwnState(slug)
+      } catch {
+        return null
+      }
+    }
+    try {
+      const res = await jsonFetch(`/api/yummy/anime-state?slug=${encodeURIComponent(slug)}`)
+      if (!res.ok) return null
+      const body = (await res.json()) as { state: YummyAnimeOwnState | null }
+      return body.state
+    } catch {
+      return null
+    }
+  },
+
   /** Диагностический selftest аутентификации (только EXE; web → null) */
   async authSelfTest(): Promise<YummyAuthSelfTestReport | null> {
     const bridge = getElectronBridge()
@@ -402,6 +453,53 @@ export const avcApi = {
       const q = new URLSearchParams({ accountKey })
       if (animeId !== undefined) q.set('animeId', String(animeId))
       const res = await jsonFetch(`/api/watch-progress?${q.toString()}`, { method: 'DELETE' })
+      return res.ok
+    } catch {
+      return false
+    }
+  },
+
+  /** Пользовательские отметки таймкодов (Skip Segments P3) — все или по тайтлу */
+  async skipMarksList(accountKey: string, animeId?: number): Promise<SkipMarkRow[]> {
+    try {
+      const q = new URLSearchParams({ accountKey })
+      if (animeId !== undefined) q.set('animeId', String(animeId))
+      const res = await jsonFetch(`/api/skip-marks?${q.toString()}`)
+      if (!res.ok) return []
+      const body = (await res.json()) as { marks?: SkipMarkRow[] }
+      return body.marks ?? []
+    } catch {
+      return []
+    }
+  },
+
+  /** Сохранить границу отметки (upsert мержит: старая граница не затирается) */
+  async skipMarkSave(req: {
+    accountKey: string
+    animeId: number
+    dubbing?: string | null
+    type: 'op' | 'ed' | 'recap'
+    startSec?: number | null
+    endSec?: number | null
+  }): Promise<boolean> {
+    try {
+      const res = await jsonFetch('/api/skip-marks', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  },
+
+  /** Удалить отметку (по тайтлу+типу) или очистить все отметки аккаунта */
+  async skipMarksDelete(accountKey: string, animeId?: number, type?: string): Promise<boolean> {
+    try {
+      const q = new URLSearchParams({ accountKey })
+      if (animeId !== undefined) q.set('animeId', String(animeId))
+      if (type) q.set('type', type)
+      const res = await jsonFetch(`/api/skip-marks?${q.toString()}`, { method: 'DELETE' })
       return res.ok
     } catch {
       return false

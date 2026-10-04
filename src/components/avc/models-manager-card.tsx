@@ -20,8 +20,6 @@ import { cn } from '@/lib/utils'
 const PURPOSE_LABEL: Record<string, string> = {
   stt: 'Распознавание речи (STT)',
   vad: 'Детектор речи (VAD)',
-  tts: 'Синтез голоса (TTS)',
-  llm: 'Локальный ИИ-роутер (LLM)',
 }
 
 function fmtBytes(n: number | null | undefined): string {

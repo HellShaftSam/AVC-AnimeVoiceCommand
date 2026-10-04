@@ -145,7 +145,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
       const r = st?.ready
       toast({
         description: r
-          ? `Голосовой сервис перезапущен: STT ${r.stt ? 'готов' : 'недоступен'}, TTS ${r.tts ? 'готов' : 'недоступен'}, LLM ${r.llm ? 'готов' : 'недоступен'}`
+          ? `Голосовой сервис перезапущен: STT ${r.stt ? 'готов' : 'недоступен'}`
           : 'Голосовой сервис перезапущен',
       })
     } catch (e) {

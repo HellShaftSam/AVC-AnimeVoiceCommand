@@ -103,17 +103,40 @@ class AIModelManager extends EventEmitter {
     this.aborts = new Map() // key -> AbortController
   }
 
-  componentDir(componentKey, voiceId) {
-    const c = this.manifest.components[componentKey]
-    if (!c) throw new Error(`Unknown component: ${componentKey}`)
-    if (componentKey === 'tts') {
-      const voice = voiceId || this.defaultVoiceId()
-      return path.join(this.baseDir, 'tts', voice)
-    }
-    if (componentKey === 'llm') return path.join(this.baseDir, 'llm', 'qwen3-0.6b')
+  componentDir(componentKey) {
+    // ПРЯМОЕ вычисление каталога (не через componentSpec — иначе взаимная рекурсия)
     if (componentKey === 'stt') return path.join(this.baseDir, 'stt', 't-one-russian')
     if (componentKey === 'vad') return path.join(this.baseDir, 'vad', 'silero-vad')
     return path.join(this.baseDir, componentKey)
+  }
+
+  /**
+   * Спецификация модели ИЗ КАТАЛОГА (manifest.models): ключ вида "stt:t-one-russian".
+   * Добавить модель = добавить запись в JSON, код не меняется (спецификация STT).
+   */
+  catalogModelSpec(modelKey) {
+    const [kind, id] = String(modelKey).split(':')
+    if (kind !== 'stt' || !id) return null
+    const list = this.manifest.models || []
+    const m = list.find((x) => x.id === id && x.key === 'stt')
+    if (!m) return null
+    return {
+      key: modelKey,
+      id: m.id,
+      name: m.name,
+      url: m.url,
+      mirrors: m.mirrors || [],
+      sizeBytes: m.sizeBytes,
+      sha256: m.sha256 ?? null,
+      expectedFiles: m.expectedFiles,
+      archive: m.archive,
+      acceptRanges: m.acceptRanges,
+      dir: path.join(this.baseDir, m.dir || path.join('stt', id)),
+      license: m.license || null,
+      profile: m.profile || null,
+      recommendedFor: m.recommendedFor || null,
+      required: !!m.required,
+    }
   }
 
   defaultVoiceId() {
@@ -130,9 +153,14 @@ class AIModelManager extends EventEmitter {
 
   /** Спецификация загрузки одного «файла-компонента» (единый формат для STT/TTS/LLM/VAD) */
   componentSpec(componentKey, voiceId) {
+    // ключ каталога вида "stt:<modelId>" — приоритет (спецификация STT, фаза 3)
+    if (String(componentKey).includes(':')) {
+      const cat = this.catalogModelSpec(componentKey)
+      if (cat) return cat
+    }
     if (componentKey === 'tts') {
       const v = this.voiceSpec(voiceId)
-      return { key: 'tts', id: v.id, name: v.name, url: v.url, sizeBytes: v.sizeBytes, sha256: v.sha256, expectedFiles: v.expectedFiles, archive: v.archive, acceptRanges: v.acceptRanges, dir: this.componentDir('tts', v.id) }
+      return { key: 'tts', id: v.id, name: v.name, url: v.url, sizeBytes: v.sizeBytes, sha256: v.sha256, expectedFiles: v.expectedFiles, archive: v.archive, acceptRanges: v.acceptRanges, dir: this.componentDir('tts', v.id), mirrors: [] }
     }
     const c = this.manifest.components[componentKey]
     if (!c || !c.url) return null
@@ -141,6 +169,7 @@ class AIModelManager extends EventEmitter {
       id: c.id,
       name: c.name,
       url: c.url,
+      mirrors: [],
       sizeBytes: c.sizeBytes,
       sha256: c.sha256,
       expectedFiles: c.expectedFiles,
@@ -150,21 +179,66 @@ class AIModelManager extends EventEmitter {
     }
   }
 
+  /** Модель установлена? (по ключу каталога "stt:<id>" или компоненту) */
+  isModelInstalled(modelKey) {
+    const spec = this.catalogModelSpec(modelKey)
+    if (!spec) return false
+    return this.isInstalled(modelKey, spec.id)
+  }
+
+  /** Каталог моделей для UI: статус, лицензия, профиль, рекомендация */
+  catalogStatus() {
+    const list = this.manifest.models || []
+    return list.map((m) => {
+      const key = `${m.key}:${m.id}`
+      const dir = path.join(this.baseDir, m.dir || path.join(m.key, m.id))
+      let installed = false
+      let damaged = false
+      try {
+        // файлы на месте = установлена (маркер добавляет проверку SHA, но файлы
+        // важнее: STT-движок инициализируется именно по файлам)
+        installed = (m.expectedFiles || []).every((f) => fs.existsSync(path.join(dir, f)))
+        if (installed && fs.existsSync(this.markerPath(dir))) {
+          const data = JSON.parse(fs.readFileSync(this.markerPath(dir), 'utf8'))
+          damaged = data.id !== undefined && data.id !== m.id
+        }
+      } catch { damaged = true }
+      return {
+        key,
+        id: m.id,
+        name: m.name,
+        profile: m.profile || null,
+        engine: m.engine || null,
+        description: m.description || null,
+        license: m.license || null,
+        recommendedFor: m.recommendedFor || null,
+        sizeBytes: m.sizeBytes,
+        sizeHuman: fmtBytes(m.sizeBytes),
+        installed,
+        damaged,
+        required: !!m.required,
+      }
+    })
+  }
+
   /** Все компоненты, подлежащие установке (для мастера первого запуска §51).
    *  Релиз 1.0.12: ключи берутся из манифеста (LLM/TTS убраны — в списке только STT+VAD). */
   installableComponents(voiceId) {
-    return Object.keys(this.manifest.components)
+    const legacy = Object.keys(this.manifest.components)
       .map((k) => this.componentSpec(k, voiceId))
       .filter(Boolean)
-      .map((s) => ({
-        key: s.key,
-        id: s.id,
-        name: s.name,
-        sizeBytes: s.sizeBytes,
-        installed: this.isInstalled(s.key, s.id),
-        required: s.key === 'stt',
-        dir: s.dir,
-      }))
+    const catalog = (this.manifest.models || [])
+      .map((m) => this.componentSpec(`${m.key}:${m.id}`, voiceId))
+      .filter(Boolean)
+    return [...legacy, ...catalog].map((s) => ({
+      key: s.key,
+      id: s.id,
+      name: s.name,
+      sizeBytes: s.sizeBytes,
+      installed: this.isInstalled(s.key, s.id),
+      required: !!s.required,
+      dir: s.dir,
+    }))
   }
 
   // --- состояние установки -------------------------------------------------------
@@ -242,7 +316,7 @@ class AIModelManager extends EventEmitter {
         throw new DownloadError('DISK_FULL', `Недостаточно места на диске: доступно ${fmtBytes(free)}, требуется ${fmtBytes(spec.sizeBytes)}`)
       }
 
-      const archivePath = await this._download(spec, controller, opts)
+      const archivePath = await this._downloadWithMirrors(spec, controller, opts)
       const { shaActual } = await this._verifyAndExtract(spec, archivePath)
 
       // маркер установки — только после успешной верификации (§56)
@@ -264,6 +338,26 @@ class AIModelManager extends EventEmitter {
     } finally {
       this.aborts.delete(componentKey)
     }
+  }
+
+  /**
+   * Скачать с перебором зеркал (spec.mirrors): основной URL, затем зеркала.
+   * Повторяются только ошибки, при которых зеркало имеет смысл (404/5xx/сеть/TLS).
+   */
+  async _downloadWithMirrors(spec, controller, opts) {
+    const urls = [spec.url, ...(spec.mirrors || [])].filter(Boolean)
+    let lastErr = null
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        return await this._download({ ...spec, url: urls[i] }, controller, opts)
+      } catch (e) {
+        lastErr = e
+        const retryable = ['HTTP_404', 'HTTP_5xx', 'NETWORK', 'TLS', 'TIMEOUT'].includes(e.kind)
+        if (!retryable || i === urls.length - 1) throw e
+        this.emit('progress', { key: spec.key, id: spec.id, phase: 'mirror-fallback', message: `Источник недоступен (${e.kind}) — пробую зеркало` })
+      }
+    }
+    throw lastErr
   }
 
   _download(spec, controller, opts = {}) {
@@ -404,6 +498,35 @@ class AIModelManager extends EventEmitter {
     }
     try { fs.unlinkSync(archivePath) } catch { /* не критично */ }
     return { shaActual }
+  }
+
+  /** Удалить установленную модель/компонент (папка целиком; активность проверяет вызывающий) */
+  async remove(componentKey) {
+    const spec = this.componentSpec(componentKey)
+    if (!spec) throw new DownloadError('UNKNOWN_COMPONENT', `Неизвестный компонент: ${componentKey}`)
+    await fs.promises.rm(spec.dir, { recursive: true, force: true })
+    this.emit('progress', { key: componentKey, id: spec.id, phase: 'removed' })
+    return { ok: true }
+  }
+
+  /**
+   * Проверить установленную модель: размер маркера + SHA-256 архива нет (распакован),
+   * поэтому сверяем факт файлов + записанный в маркере sha (smoke-тест загрузки — на движке).
+   */
+  async verify(componentKey) {
+    const spec = this.componentSpec(componentKey)
+    if (!spec) throw new DownloadError('UNKNOWN_COMPONENT', `Неизвестный компонент: ${componentKey}`)
+    if (!this.isInstalled(componentKey, spec.id)) {
+      return { ok: false, message: 'Не установлена' }
+    }
+    let total = 0
+    for (const f of spec.expectedFiles || []) {
+      const p = path.join(spec.dir, f)
+      if (!fs.existsSync(p)) return { ok: false, message: `Файл отсутствует: ${f}` }
+      total += fs.statSync(p).size
+    }
+    if (total === 0) return { ok: false, message: 'Установленные файлы пусты' }
+    return { ok: true, message: `Файлы на месте (${fmtBytes(total)}), маркер цел` }
   }
 
   /** Повторное возобновление после перезапуска приложения (§57, §128) */

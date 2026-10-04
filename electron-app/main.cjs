@@ -412,8 +412,23 @@ async function createMainWindow(url) {
   mainWindow.webContents.on('will-navigate', (e, target) => {
     if (!target.startsWith(url)) e.preventDefault()
   })
+  // УРОК РЕЛИЗА 1.0.11 («открыло вот столько вкладок»): реклама в кросс-доменном
+  // iframe плеера вызывает window.open пачками, и раньше КАЖДЫЙ попап улетал в
+  // shell.openExternal → десятки вкладок в системном браузере. Теперь: только
+  // https, не чаще 3 за 30 с, всё остальное — тихий отказ с записью в лог.
+  let externalOpens = []
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
-    shell.openExternal(target) // внешние ссылки — в системный браузер
+    let parsed = null
+    try { parsed = new URL(target) } catch { /* мусорная ссылка */ }
+    const now = Date.now()
+    externalOpens = externalOpens.filter((t) => now - t < 30_000)
+    const okUrl = parsed && (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+    if (!okUrl || externalOpens.length >= 3) {
+      log(`[Main] Попап заблокирован (внешние вкладки): ${String(target).slice(0, 120)}`)
+      return { action: 'deny' }
+    }
+    externalOpens.push(now)
+    shell.openExternal(target) // внешние ссылки — в системный браузер, дозированно
     return { action: 'deny' }
   })
 
@@ -473,6 +488,12 @@ function setupIpc(service) {
   ipcMain.handle('avc:auth:selftest', () => service.selftest())
   // РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное)
   ipcMain.handle('avc:anime:action', (_e, req) => service.animeAction(req))
+  // Своё состояние тайтла — подсветка активного статуса/сердца/оценки (UI страницы аниме)
+  ipcMain.handle('avc:anime:own-state', (_e, slug) =>
+    typeof slug === 'string' && slug.trim() !== ''
+      ? service.readAnimeOwnState(slug)
+      : Promise.resolve(null),
+  )
 }
 
 /**
@@ -544,19 +565,27 @@ function readModelsDirConfig() {
   try {
     const raw = JSON.parse(fs.readFileSync(modelsDirConfigPath(), 'utf8'))
     const dir = typeof raw.modelsDir === 'string' ? raw.modelsDir.trim() : ''
-    return dir && path.isAbsolute(dir) ? dir : null
+    const sttModel = typeof raw.sttModel === 'string' && /^[a-z0-9-]{1,64}$/i.test(raw.sttModel) ? raw.sttModel : null
+    return {
+      modelsDir: dir && path.isAbsolute(dir) ? dir : null,
+      sttModel,
+    }
   } catch {
-    return null
+    return { modelsDir: null, sttModel: null }
   }
 }
 
-function writeModelsDirConfig(dir) {
-  fs.writeFileSync(modelsDirConfigPath(), JSON.stringify({ modelsDir: dir }, null, 2))
+function writeModelsDirConfig(dir, sttModel) {
+  const prev = readModelsDirConfig()
+  fs.writeFileSync(
+    modelsDirConfigPath(),
+    JSON.stringify({ modelsDir: dir ?? prev.modelsDir, sttModel: sttModel ?? prev.sttModel }, null, 2),
+  )
 }
 
 /** Каталог моделей: конфиг пользователя → dev-models → userData/ai-models */
 function resolveModelsDir() {
-  const configured = readModelsDirConfig()
+  const configured = readModelsDirConfig().modelsDir
   if (configured) return configured
   const devModels = path.join(app.getAppPath(), 'models')
   if (fs.existsSync(path.join(devModels, 'stt'))) return devModels
@@ -605,7 +634,12 @@ function startAiWorker() {
     }
     aiWorker = childFork(workerScript, [], {
       execPath: nodeExe,
-      env: { ...process.env, AVC_MODELS_DIR: modelsDir },
+      env: {
+        ...process.env,
+        AVC_MODELS_DIR: modelsDir,
+        // активная модель STT (каталог моделей): движок выбирается по модели
+        AVC_STT_MODEL: readModelsDirConfig().sttModel || 't-one-russian',
+      },
       // stdout/stderr воркера — в pipe: логи нативных моделей не смешиваются с выводом main
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       // structured clone: Int16Array аудио доезжает до воркера как типизированный массив
@@ -655,7 +689,7 @@ function setupAiIpc() {
       const st = await aiWorkerRequest('status')
       return { ...st, worker: 'ok' }
     } catch (e) {
-      return { enabled: false, worker: 'failed', reason: e.message, ready: { stt: false, llm: false, tts: false } }
+      return { enabled: false, worker: 'failed', reason: e.message, ready: { stt: false } }
     }
   })
   ipcMain.handle('avc:ai:hardware', async () => {
@@ -676,6 +710,22 @@ function setupAiIpc() {
   // 'avc:ai:tts-cancel', 'avc:ai:set-voice') удалены вместе со слоями —
   // рендерер больше не вызывает их (мост в api.ts/use-voice.ts снят).
   ipcMain.handle('avc:ai:initialize', () => aiWorkerRequest('initialize', { __timeoutMs: 600000 }))
+  // --- Каталог моделей STT (спецификация STT, фазы 3–6): бенчмарк, смена модели, ---
+  // --- проверка/удаление. Всё выполняется в изолированном воркере. ---
+  ipcMain.handle('avc:ai:catalog', () => aiWorkerRequest('catalog'))
+  ipcMain.handle('avc:ai:benchmark', () => aiWorkerRequest('benchmark', { __timeoutMs: 300000 }))
+  ipcMain.handle('avc:ai:set-stt-model', async (_e, args) => {
+    const modelId = String(args?.modelId || '').trim()
+    if (!/^[a-z0-9-]{1,64}$/i.test(modelId)) return { ok: false, message: 'Некорректный id модели' }
+    const res = await aiWorkerRequest('set-stt-model', { modelId, __timeoutMs: 600000 })
+    if (res?.ok) {
+      // активная модель сохраняется — переживает перезапуск приложения
+      try { writeModelsDirConfig(null, modelId) } catch { /* не критично */ }
+    }
+    return res
+  })
+  ipcMain.handle('avc:ai:remove-component', (_e, args) => aiWorkerRequest('remove-component', args))
+  ipcMain.handle('avc:ai:verify-component', (_e, args) => aiWorkerRequest('verify-component', { ...args, __timeoutMs: 300000 }))
   ipcMain.handle('avc:ai:stt-feed', (_e, args) => {
     const samples = args?.samples
     if (!samples) return false

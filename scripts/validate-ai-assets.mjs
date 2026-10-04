@@ -118,20 +118,6 @@ async function validateUrl(url, { expectedSize, sha256 } = {}) {
   return { status: 'FAIL', reason: 'Слишком много редиректов', chain }
 }
 
-async function checkNodeLlamaCpp() {
-  try {
-    const pkgPath = path.join(ROOT, 'electron-app', 'node_modules', 'node-llama-cpp', 'package.json')
-    if (!fs.existsSync(pkgPath)) return { status: 'FAIL', reason: 'node-llama-cpp не установлен в electron-app' }
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
-    // нативные бинари resolver
-    const binsDir = path.join(process.env.HOME || '', '.node-llama-cpp')
-    const hasBinCache = fs.existsSync(binsDir)
-    return { status: 'PASS', version: pkg.version, localBinCache: hasBinCache, note: 'нативные бинари win32-x64-electron скачиваются при установке/сборке в CI' }
-  } catch (e) {
-    return { status: 'FAIL', reason: e.message }
-  }
-}
-
 async function checkSherpa() {
   try {
     const candidates = [
@@ -160,28 +146,27 @@ async function main() {
     console.log(`[${res.status}] ${asset} — ${res.reason || `HTTP ${res.httpStatus}, len=${res.contentLength ?? '?'}, ranges=${res.acceptRanges}, probe=${res.probedBytes ?? '?'}B`}`)
   }
 
-  // STT
-  const stt = manifest.components.stt
-  addRow(`STT: ${stt.name}`, stt.url, await validateUrl(stt.url, { expectedSize: stt.sizeBytes, sha256: stt.sha256 }))
-
-  // TTS (все голоса)
-  for (const v of manifest.components.tts.voices) {
-    addRow(`TTS: ${v.name}`, v.url, await validateUrl(v.url, { expectedSize: v.sizeBytes, sha256: v.sha256 }))
+  // VAD (общий для всех движков)
+  const vad = manifest.components?.vad
+  if (vad?.url) {
+    addRow(`VAD: ${vad.name}`, vad.url, await validateUrl(vad.url, { expectedSize: vad.sizeBytes, sha256: vad.sha256 }))
   }
 
-  // LLM
-  const llm = manifest.components.llm
-  addRow(`LLM: ${llm.name} ${llm.quantization}`, llm.url, await validateUrl(llm.url, { expectedSize: llm.sizeBytes, sha256: llm.sha256 }))
-  for (const alt of llm.alternatives || []) {
-    if (!alt.url) continue
-    addRow(`LLM alt: ${alt.name}`, alt.url, await validateUrl(alt.url, { expectedSize: alt.sizeBytes || undefined }))
+  // Каталог моделей STT (манифест v3): каждая модель + зеркала
+  for (const m of manifest.models || []) {
+    addRow(`STT: ${m.name} (${m.profile})`, m.url, await validateUrl(m.url, { expectedSize: m.sizeBytes, sha256: m.sha256 ?? undefined }))
+    for (const mirror of m.mirrors || []) {
+      addRow(`STT mirror: ${m.id}`, mirror, await validateUrl(mirror, {}))
+    }
   }
 
   // Рантаймы
   addRow('Runtime: sherpa-onnx-node', '(npm)', await checkSherpa())
-  addRow('Runtime: node-llama-cpp (llama.cpp)', '(npm, встроенные llama.cpp бинари)', await checkNodeLlamaCpp())
 
-  const requiredFail = rows.some((r) => r.asset.startsWith('STT') && r.status === 'FAIL')
+  const requiredModels = (manifest.models || []).filter((m) => m.required)
+  const requiredFail =
+    rows.some((r) => r.asset.startsWith('STT') && r.status === 'FAIL' && !r.asset.startsWith('STT mirror')) ||
+    rows.some((r) => r.asset.startsWith('VAD') && r.status === 'FAIL')
   const exitCode = requiredFail ? 1 : failCount > 0 ? 1 : blockedCount > 0 && rows.every((r) => r.status === 'BLOCKED') ? 2 : 0
 
   // Отчёт (§118)
@@ -189,7 +174,7 @@ async function main() {
     '# AI_ASSET_VALIDATION_REPORT',
     '',
     `Дата: ${new Date().toISOString()}`,
-    `Манифест: ${MANIFEST}`,
+    `Манифест: ${MANIFEST} (версия ${manifest.version})`,
     `Режим: ${FULL ? 'полная загрузка + SHA-256' : 'HEAD + частичная докачка (1 МБ)'}`,
     '',
     '| Ассет | Статус | HTTP | Content-Length | Accept-Ranges | Проба | Примечание |',

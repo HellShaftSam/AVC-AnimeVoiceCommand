@@ -32,6 +32,7 @@ import { siteProfileUrl } from './site-urls'
 import {
   AnimeCard,
   AnimeDetails,
+  AppSettings,
   BrowserContext,
   CommandResult,
   SiteSectionId,
@@ -246,6 +247,7 @@ function applyDetailsToPlayback(details: AnimeDetails | null, card?: AnimeCard):
     animeId: details?.animeId ?? card?.animeId ?? null,
     animeTitle: details?.title ?? card?.title ?? null,
     animeSlug: details?.slug ?? card?.slug ?? null,
+    malId: details?.malId ?? null,
     episodesAired: aired > 0 ? aired : null,
     episodesTotal: details?.episodesTotal ?? null,
     currentEpisode: null,
@@ -732,6 +734,23 @@ async function runAccountAction(
   }
   try {
     const res = await avcApi.animeAction({ ...req, slug: pb.animeSlug ?? '' })
+    // Состояние после действия → в стор: подсветка статуса/сердца/оценки на
+    // странице аниме обязана обновиться БЕЗ перезагрузки страницы (урок:
+    // «ни звездочки ни сердечки не видны визуально поставил или нет»)
+    if (res.state && pb.animeId) {
+      st.setOwnAnimeState({ animeId: pb.animeId, state: res.state })
+    } else if (res.ok && pb.animeSlug && pb.animeId) {
+      // верификация не удалась — перечитываем состояние фоном, UI всё равно обновится
+      void avcApi
+        .animeOwnState(pb.animeSlug)
+        .then((s) => {
+          const live = useAvcStore.getState()
+          if (s && live.playback.animeId === pb.animeId) {
+            live.setOwnAnimeState({ animeId: pb.animeId, state: s })
+          }
+        })
+        .catch(() => {})
+    }
     if (res.ok) {
       if (res.verification === 'pass') return ok(`${successPrefix} — подтверждено сайтом`)
       // HTTP принят; верификация unconfirmed/mismatch — честное сообщение сайта
@@ -784,6 +803,17 @@ async function executeSetWatchStatus(cmd: VoiceCommand): Promise<CommandResult> 
     { kind: 'setList', animeId: pb.animeId, value: listId },
     `Добавлено в «${LIST_TITLES[listId]}»`,
   )
+}
+
+/**
+ * «убери из списка» — РЕАЛЬНОЕ действие: DELETE /anime/{id}/list внутри сессии
+ * сайта (тайтл полностью выходит из списков; ставший видимым статус теперь можно снять)
+ */
+async function executeRemoveWatchStatus(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!pb.animeId) return fail('Сначала откройте аниме')
+  return runAccountAction({ kind: 'removeList', animeId: pb.animeId }, 'Убрано из списка')
 }
 
 /**
@@ -1031,6 +1061,126 @@ function executeSeek(cmd: VoiceCommand): CommandResult {
   return ok(`${delta > 0 ? 'Вперёд' : 'Назад'} на ${Math.abs(seconds)} с`)
 }
 
+// --- Skip Segments: голосовые/кнопочные пропуски --------------------------------
+
+const SKIP_TYPE_TITLES: Record<string, string> = {
+  op: 'опенинг',
+  ed: 'эндинг',
+  recap: 'рекап',
+}
+
+/**
+ * «пропусти опенинг/эндинг»: seek к концу найденного сегмента; без данных —
+ * fallback +N с (для op) / к концу (для ed). Seek верифицируется чтением
+ * currentTime из событий плеера: одна повторная попытка, затем честный ответ.
+ */
+async function executeSkipSegment(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!pb.animeId || pb.currentEpisode === null) return fail('Сначала включите серию')
+  const type = paramString(cmd, 'type') || 'op'
+
+  const seg = st.skipSegments.find((s) => s.type === type)
+  if (seg && pb.currentTime >= seg.start - 45 && pb.currentTime <= seg.end + 10) {
+    sendPlayerCommand({ key: 'player_seek', value: seg.end })
+    st.setLastSkippedSegment(seg)
+    // Верификация seek: плеер шлёт time_update с реальным временем
+    const verified = await verifySeek(seg.end)
+    if (!verified) {
+      sendPlayerCommand({ key: 'player_seek', value: seg.end })
+      const retry = await verifySeek(seg.end)
+      if (!retry) return ok(`${SKIP_TYPE_TITLES[type]}: команда перемотки отправлена, но плеер не подтвердил её`)
+    }
+    return ok(`${SKIP_TYPE_TITLES[type] === 'опенинг' ? 'Опенинг' : type === 'ed' ? 'Эндинг' : 'Рекап'} пропущен`)
+  }
+
+  // Fallback без данных: опенинг — вперёд на N с; эндинг — к концу серии
+  if (type === 'op') {
+    const target = Math.min(pb.currentTime + st.settings.skipFallbackSec, pb.duration || Number.POSITIVE_INFINITY)
+    sendPlayerCommand({ key: 'player_seek', value: target })
+    st.setLastSkippedSegment({ type: 'op', start: pb.currentTime, end: target, source: 'fallback', confidence: 0 })
+    return ok(`Таймингов нет — перемотала вперёд на ${st.settings.skipFallbackSec} с`)
+  }
+  if (type === 'ed' && pb.duration > 0) {
+    sendPlayerCommand({ key: 'player_seek', value: pb.duration - 0.5 })
+    st.setLastSkippedSegment({ type: 'ed', start: pb.currentTime, end: pb.duration - 0.5, source: 'fallback', confidence: 0 })
+    return ok('Эндинг пропущен')
+  }
+  return fail(`Тайминги ${SKIP_TYPE_TITLES[type]} для этой серии неизвестны`)
+}
+
+/** Ждать подтверждения перемотки от плеера (currentTime дойдёт до цели ±1.5 с) */
+async function verifySeek(target: number, timeoutMs = 900): Promise<boolean> {
+  const t0 = Date.now()
+  while (Date.now() - t0 < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 150))
+    const t = useAvcStore.getState().playback.currentTime
+    if (Math.abs(t - target) <= 1.5) return true
+  }
+  return false
+}
+
+/** «вернись/отмени пропуск» — возврат к началу только что пропущенного сегмента */
+async function executeUndoSkip(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const seg = st.lastSkippedSegment
+  if (!seg) return fail('Недавно пропусков не было')
+  sendPlayerCommand({ key: 'player_seek', value: seg.start })
+  const verified = await verifySeek(seg.start)
+  if (!verified) sendPlayerCommand({ key: 'player_seek', value: seg.start })
+  st.setLastSkippedSegment(null)
+  return ok('Возвращаю: пропуск отменён')
+}
+
+/** «включи/выключи автопропуск опенинга/эндинга» — патч настроек + персист */
+async function executeSetAutoSkip(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const on = cmd.params.on !== false
+  const type = paramString(cmd, 'type') || ''
+  const patch: Partial<AppSettings> = { skipMode: on ? 'auto' : 'button' }
+  if (type === 'op') patch.skipOp = on
+  if (type === 'ed') patch.skipEd = on
+  if (type === 'recap') patch.skipRecap = on
+  // Выключение конкретного типа при выключенном автопропуске не должно
+  // случайно включать skipMode — включение всегда поднимает режим до auto
+  if (!on && type === '') patch.skipMode = 'button'
+  st.updateSettings(patch)
+  void fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }).catch(() => undefined)
+  return ok(cmd.label || (on ? 'Автопропуск включён' : 'Автопропуск выключен'))
+}
+
+/**
+ * «запомни начало/конец опенинга» — отметка таймкода на месте (P3).
+ * Частичная отметка (только одна граница) мержится в БД со второй при появлении.
+ */
+async function executeMarkSegment(cmd: VoiceCommand): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  if (!pb.animeId || pb.currentEpisode === null) return fail('Сначала включите серию')
+  const markKind = paramString(cmd, 'markKind')
+  const type = (paramString(cmd, 'type') || 'op') as 'op' | 'ed' | 'recap'
+  if (markKind !== 'start' && markKind !== 'end') return fail('Не понял отметку')
+  const t = pb.currentTime
+  const acc = st.yummyAccount.state === 'loggedIn' ? st.yummyAccount.user?.userId : null
+  const accountKey = acc && /^[A-Za-z0-9_-]{1,64}$/.test(acc) ? acc : 'anon'
+  const saved = await avcApi.skipMarkSave({
+    accountKey,
+    animeId: pb.animeId,
+    dubbing: pb.currentDub,
+    type,
+    startSec: markKind === 'start' ? t : null,
+    endSec: markKind === 'end' ? t : null,
+  })
+  if (!saved) return fail('Не удалось сохранить отметку')
+  st.bumpSkipMarksVersion()
+  const which = markKind === 'start' ? 'Начало' : 'Конец'
+  return ok(`${which} ${SKIP_TYPE_TITLES[type]} отмечено на ${Math.round(t)} с`)
+}
+
 function executeMuteUnmute(cmd: VoiceCommand): CommandResult {
   const st = useAvcStore.getState()
   const pb = st.playback
@@ -1244,6 +1394,16 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
       return executeMuteUnmute(cmd)
     case VoiceCommandType.SetWatchStatus:
       return executeSetWatchStatus(cmd)
+    case VoiceCommandType.RemoveWatchStatus:
+      return executeRemoveWatchStatus()
+    case VoiceCommandType.SkipSegment:
+      return executeSkipSegment(cmd)
+    case VoiceCommandType.UndoSkip:
+      return executeUndoSkip()
+    case VoiceCommandType.SetAutoSkip:
+      return executeSetAutoSkip(cmd)
+    case VoiceCommandType.MarkSegment:
+      return executeMarkSegment(cmd)
     case VoiceCommandType.ToggleFavorite:
       return executeToggleFavorite(cmd)
     case VoiceCommandType.RateAnime:
@@ -1273,51 +1433,10 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
   }
 }
 
-// --- интерпретация LLM (fallback) --------------------------------------------------
-
-/**
- * Локальный LLM-роутер (спецификация §28–§47): в EXE вызывается ПЕРВЫМ —
- * работает офлайн без облака (§3). При недоступности — облачный /api/voice/interpret.
- */
-async function localLlmInterpret(raw: string, context: BrowserContext): Promise<VoiceCommand[] | null> {
-  const bridge = getElectronBridge()
-  const ai = bridge?.ai
-  if (!ai?.available) return null
-  try {
-    const res = await ai.llmRoute(raw, context)
-    if (!res || !res.commands?.length) return null
-    const { VoiceCommandType: VCT } = await import('./types')
-    return res.commands
-      .map((c) => {
-        const type = (VCT as unknown as Record<string, string>)[c.type] ?? null
-        if (!type) return null
-        return { type, params: c.params ?? {}, confidence: c.confidence ?? 0.6, label: c.type } as VoiceCommand
-      })
-      .filter((c): c is VoiceCommand => c !== null)
-  } catch {
-    return null
-  }
-}
-
-async function llmInterpret(raw: string, context: BrowserContext): Promise<VoiceCommand[] | null> {
-  // §30/§46: сначала локальный офлайн-роутер, затем облачный fallback
-  const local = await localLlmInterpret(raw, context)
-  if (local && local.length > 0) return local
-  try {
-    const res = await fetch('/api/voice/interpret', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: raw, context }),
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { commands?: VoiceCommand[] | null }
-    return data.commands && data.commands.length > 0 ? data.commands : null
-  } catch {
-    return null
-  }
-}
-
 // --- executeText ------------------------------------------------------------------
+// УРОК РЕЛИЗА 1.0.12: LLM-fallback удалён по решению владельца — детерминированный
+// парсер единственный источник интентов; фразы мимо словаря честно дают «Не удалось
+// распознать команду», вместо угадывания облаком.
 
 export interface ExecuteTextResult {
   raw: string
@@ -1353,9 +1472,15 @@ export async function executeEarlyCommand(type: string): Promise<CommandResult |
   }
 }
 
+/** Сквозные метаданные фразы (correlationId — от STT до записи истории) */
+export interface ExecuteTextMeta {
+  correlationId?: string
+}
+
 export async function executeText(
   raw: string,
   source: 'voice' | 'text',
+  meta?: ExecuteTextMeta,
 ): Promise<ExecuteTextResult> {
   const initial = useAvcStore.getState()
   initial.resetPipeline()
@@ -1401,19 +1526,7 @@ export async function executeText(
     return { raw, normalized: parsed.normalized, commands: [], results: [skip] }
   }
 
-  let commands = parsed.commands
-  let usedLlm = false
-
-  const threshold = initial.settings.confidenceThreshold
-  const needsLlm = parsed.failed || (commands.length > 0 && parsed.confidence < threshold)
-  if (needsLlm && initial.settings.llmFallback) {
-    const llm = await llmInterpret(raw, context)
-    if (llm) {
-      commands = llm
-      usedLlm = true
-      step('SOURCE', 'LLM fallback')
-    }
-  }
+  const commands = parsed.commands
 
   const results: CommandResult[] = []
 
@@ -1424,7 +1537,7 @@ export async function executeText(
   } else {
     for (const cmd of commands) {
       const label = cmd.label || LABELS[cmd.type] || cmd.type
-      step('COMMAND', usedLlm ? `${label} (LLM)` : label)
+      step('COMMAND', label)
       step('PARAMS', JSON.stringify(cmd.params))
       step('CONFIDENCE', `${Math.round(cmd.confidence * 100)}%`)
       let result: CommandResult
@@ -1449,7 +1562,8 @@ export async function executeText(
             confidence: cmd.confidence,
             success: result.success,
             message: result.message,
-            source: usedLlm ? 'llm' : source,
+            source,
+            correlationId: meta?.correlationId ?? null,
           }),
         })
           .then(() => useAvcStore.getState().bumpHistoryVersion())

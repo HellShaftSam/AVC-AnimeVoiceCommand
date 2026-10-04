@@ -17,11 +17,13 @@
 const path = require('path')
 
 const MODELS_DIR = process.env.AVC_MODELS_DIR || path.join(__dirname, '..', 'models')
+/** Активная модель STT сохраняется main-процессом (models-dir.json) и приходит сюда */
+const ACTIVE_MODEL = process.env.AVC_STT_MODEL || 't-one-russian'
 
 let pipeline = null
 try {
   const { VoicePipeline } = require('./voice-pipeline.cjs')
-  pipeline = new VoicePipeline({ modelsDir: MODELS_DIR })
+  pipeline = new VoicePipeline({ modelsDir: MODELS_DIR, modelId: ACTIVE_MODEL })
 } catch (e) {
   send({ event: 'worker-fatal', payload: { error: e.message } })
   process.exit(1)
@@ -65,6 +67,14 @@ const handlers = {
   // получают честный отказ «Неизвестный запрос» ниже по коду.
   /** повторная инициализация после установки моделей (AI Setup) */
   initialize: async () => pipeline.initializeServices(),
+  /** каталог моделей: статусы/лицензии/рекомендации (спецификация STT) */
+  catalog: () => pipeline.getCatalog(),
+  /** смена активной модели STT (движок заменяется целиком, hexagonal) */
+  'set-stt-model': async (args) => pipeline.setSttModel(String(args?.modelId || '')),
+  /** бенчмарк «Проверить скорость на этом ПК» (RTF + рекомендация профиля) */
+  benchmark: () => pipeline.benchmark(),
+  'remove-component': (args) => pipeline.removeComponent(String(args?.key || '')),
+  'verify-component': async (args) => pipeline.verifyComponent(String(args?.key || '')),
   feed: (args) => {
     const samples = args?.samples
     if (!samples) return false

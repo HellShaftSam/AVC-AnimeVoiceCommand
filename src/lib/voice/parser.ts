@@ -309,6 +309,9 @@ function extractRating(text: string): VoiceCommand | null {
 }
 
 function extractWatchStatus(text: string): VoiceCommand | null {
+  if (/(?:убери|удали|убрать)\s+(?:это\s+)?из\s+(?:моего\s+)?списка|убери\s+из\s+смотрю/.test(text)) {
+    return { type: VoiceCommandType.RemoveWatchStatus, params: {}, confidence: 0.9, label: 'Убрать из списка' }
+  }
   for (const { re, status } of WATCH_STATUS_PATTERNS) {
     if (re.test(text)) {
       return {
@@ -339,6 +342,80 @@ function extractContinueWatching(text: string): VoiceCommand | null {
     return { type: VoiceCommandType.ContinueWatching, params: {}, confidence: 0.9, label: 'Продолжить просмотр' }
   }
   return null
+}
+
+// --- Skip Segments: пропуск опенинга/эндинга/рекапы ---------------------------
+
+const OP_RE = /опенинг|опенинге|заставк|вступлен|интро/
+const ED_RE = /эндинг|эндинге|титр|концовк|аутро/
+const RECAP_RE = /рекап|пересказ/
+
+/**
+ * «пропусти опенинг/заставку/эндинг/титры/рекап». Без объекта («пропусти чуть»)
+ * остаётся зоной существующей перемотки — сюда не попадает.
+ */
+function extractSkipSegment(text: string): VoiceCommand | null {
+  if (!/(пропуст|скипн|перескочи)/.test(text)) return null
+  let type = ''
+  let label = ''
+  if (OP_RE.test(text)) {
+    type = 'op'
+    label = 'Пропустить опенинг'
+  } else if (ED_RE.test(text)) {
+    type = 'ed'
+    label = 'Пропустить эндинг'
+  } else if (RECAP_RE.test(text)) {
+    type = 'recap'
+    label = 'Пропустить рекап'
+  } else {
+    return null
+  }
+  return { type: VoiceCommandType.SkipSegment, params: { type }, confidence: 0.92, label }
+}
+
+/** «отмени пропуск», «вернись к опенингу/к титрам/обратно» */
+function extractUndoSkip(text: string): VoiceCommand | null {
+  if (/отмен(?:и|ить|ите)?\s+(?:последний\s+)?пропуск/.test(text)) {
+    return { type: VoiceCommandType.UndoSkip, params: {}, confidence: 0.92, label: 'Отменить пропуск' }
+  }
+  if (/верн(?:ись|итесь)\s+(?:обратно\s+)?(?:к\s+|на\s+)?(?:опенинг|заставк|эндинг|титр|начал)/.test(text)) {
+    return { type: VoiceCommandType.UndoSkip, params: {}, confidence: 0.9, label: 'Отменить пропуск' }
+  }
+  return null
+}
+
+/** «включи/выключи автопропуск [опенинга/эндинга]» (без объекта — оба типа) */
+function extractSetAutoSkip(text: string): VoiceCommand | null {
+  if (!/автопропуск/.test(text)) return null
+  const on = !/(выключ|отключ|убер|стоп)/.test(text)
+  let type = ''
+  if (OP_RE.test(text)) type = 'op'
+  else if (ED_RE.test(text)) type = 'ed'
+  return {
+    type: VoiceCommandType.SetAutoSkip,
+    params: { on, type },
+    confidence: 0.9,
+    label: on ? 'Автопропуск включён' : 'Автопропуск выключен',
+  }
+}
+
+/**
+ * «запомни начало/конец опенинга/эндинга», «это начало опенинга» — отметка
+ * таймкода на месте (с дивана, во время просмотра).
+ */
+function extractMarkSegment(text: string): VoiceCommand | null {
+  if (!/(запомн|отмет|сохран|^это\s)/.test(text)) return null
+  const kind = /начал/.test(text) ? 'start' : /конец|кончи/.test(text) ? 'end' : null
+  if (!kind) return null
+  let type = ''
+  if (OP_RE.test(text)) type = 'op'
+  else if (ED_RE.test(text)) type = 'ed'
+  else if (RECAP_RE.test(text)) type = 'recap'
+  else return null
+  const label = kind === 'start'
+    ? `Отметка: начало ${type === 'op' ? 'опенинга' : type === 'ed' ? 'эндинга' : 'рекапы'}`
+    : `Отметка: конец ${type === 'op' ? 'опенинга' : type === 'ed' ? 'эндинга' : 'рекапы'}`
+  return { type: VoiceCommandType.MarkSegment, params: { markKind: kind, type }, confidence: 0.88, label }
 }
 
 /** «что я смотрю», «на какой серии я», «мой прогресс» — инфо по трекингу просмотра */
@@ -703,6 +780,20 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
 
   const cont = extractContinueWatching(text)
   if (cont) return cont
+
+  // Skip Segments: «пропусти опенинг», «отмени пропуск», «включи автопропуск»,
+  // «запомни начало опенинга» — ДО extractSeek («вернись» конфликтует с перемоткой)
+  const skip = extractSkipSegment(text)
+  if (skip) return skip
+
+  const undo = extractUndoSkip(text)
+  if (undo) return undo
+
+  const autoskip = extractSetAutoSkip(text)
+  if (autoskip) return autoskip
+
+  const mark = extractMarkSegment(text)
+  if (mark) return mark
 
   const watching = extractWhatAmIWatching(text)
   if (watching) return watching

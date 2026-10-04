@@ -20,7 +20,9 @@ import {
   VoiceAliasRow,
   VoiceProviderMatch,
   YummyAccountSnapshot,
+  YummyAnimeOwnState,
 } from './types'
+import type { SkipSegment } from './skip/core'
 
 export type VoiceStatus = 'idle' | 'listening' | 'recognizing' | 'executing' | 'error'
 
@@ -70,6 +72,23 @@ export interface AvcState {
   /** Инкрементится после записи в историю — HistoryPanel перезагружается */
   historyVersion: number
 
+  /**
+   * Своё состояние тайтла (список/избранное/оценка), прочитанное с сайта.
+   * Ключуется animeId: подсветка активного статуса/сердца/оценки на странице
+   * аниме без неё невозможна (урок: «ни звездочки ни сердечки не видны»).
+   */
+  ownAnimeState: { animeId: number; state: YummyAnimeOwnState } | null
+
+  /**
+   * Сегменты пропуска для ТЕКУЩЕЙ серии (SkipResolver): кнопка в плеере и
+   * голосовой «пропусти опенинг» читают отсюда. Пусто — нет данных/fallback.
+   */
+  skipSegments: SkipSegment[]
+  /** Инкрементится после изменения пользовательских отметок — плеер переразрешает */
+  skipMarksVersion: number
+  /** Последний пропущенный сегмент — для «вернись/отмени пропуск» */
+  lastSkippedSegment: SkipSegment | null
+
   // --- аккаунт YummyAnime (реальная сессия сайта) / алиасы ---
   yummyAccount: YummyAccountSnapshot
   voiceAliases: VoiceAliasRow[]
@@ -107,6 +126,10 @@ export interface AvcState {
   setDebugOpen: (v: boolean) => void
 
   // --- действия: аккаунт YummyAnime/алиасы ---
+  setOwnAnimeState: (entry: { animeId: number; state: YummyAnimeOwnState } | null) => void
+  setSkipSegments: (segments: SkipSegment[]) => void
+  bumpSkipMarksVersion: () => void
+  setLastSkippedSegment: (seg: SkipSegment | null) => void
   setYummyAccount: (snap: YummyAccountSnapshot) => void
   setVoiceAliases: (rows: VoiceAliasRow[]) => void
   setFavoritesOpen: (v: boolean) => void
@@ -140,6 +163,7 @@ const INITIAL_PLAYBACK: PlaybackContext = {
   animeId: null,
   animeTitle: null,
   animeSlug: null,
+  malId: null,
   currentEpisode: null,
   episodesAired: null,
   episodesTotal: null,
@@ -191,6 +215,10 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   tabReloadCounter: {},
   tabBackStack: {},
   historyVersion: 0,
+  ownAnimeState: null,
+  skipSegments: [],
+  skipMarksVersion: 0,
+  lastSkippedSegment: null,
 
   // --- аккаунт YummyAnime / алиасы ---
   yummyAccount: {
@@ -312,6 +340,10 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
 
   // --- аккаунт YummyAnime / алиасы ----------------------------------------------
 
+  setOwnAnimeState: (entry) => set({ ownAnimeState: entry }),
+  setSkipSegments: (segments) => set({ skipSegments: segments }),
+  bumpSkipMarksVersion: () => set((s) => ({ skipMarksVersion: s.skipMarksVersion + 1 })),
+  setLastSkippedSegment: (seg) => set({ lastSkippedSegment: seg }),
   setYummyAccount: (snap) => set({ yummyAccount: snap }),
   setVoiceAliases: (rows) => set({ voiceAliases: rows }),
   setFavoritesOpen: (v) => set({ favoritesOpen: v }),

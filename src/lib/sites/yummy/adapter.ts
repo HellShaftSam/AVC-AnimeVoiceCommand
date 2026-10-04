@@ -215,6 +215,8 @@ interface ApiAnimeDetails {
   studios: Array<{ title: string }>
   translates: Array<{ value: number; title: string; href: string }>
   episodes: { count: number; aired: number }
+  /** Внешние ID тайтла (формат не документирован — парсим защитно) */
+  remote_ids?: { myanimelist_id?: unknown; mal?: unknown; [k: string]: unknown }
 }
 
 interface ApiVideoItem {
@@ -514,8 +516,20 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       episodesTotal: d.episodes?.count ?? null,
       dubs,
       videos,
+      malId: parseMalId(d.remote_ids),
     }
   }
+}
+
+/**
+ * MAL ID из remote_ids сайта (research/yummytv-endpoints.md: myanimelist_id).
+ * Защитно: поле не документировано — принимаем число или числовую строку.
+ */
+function parseMalId(remote: ApiAnimeDetails['remote_ids']): number | null {
+  const raw = remote?.myanimelist_id ?? remote?.mal
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw
+  if (typeof raw === 'string' && /^\d{1,7}$/.test(raw.trim())) return parseInt(raw.trim(), 10)
+  return null
 }
 
 /** Адаптер по умолчанию (singleton) */
