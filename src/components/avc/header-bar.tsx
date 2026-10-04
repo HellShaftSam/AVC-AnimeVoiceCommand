@@ -30,6 +30,7 @@ import { getElectronBridge } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { UpdateDialog } from '@/components/avc/update-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,59 +65,29 @@ export function HeaderBar() {
   const setSettingsOpen = useAvcStore((s) => s.setSettingsOpen)
   const setFavoritesOpen = useAvcStore((s) => s.setFavoritesOpen)
   const setAuthOpen = useAvcStore((s) => s.setAuthOpen)
+  const setUpdateDialogOpen = useAvcStore((s) => s.setUpdateDialogOpen)
   const debugOpen = useAvcStore((s) => s.debugOpen)
   const helpOpen = useAvcStore((s) => s.helpOpen)
   const settingsOpen = useAvcStore((s) => s.settingsOpen)
   const account = useAvcStore((s) => s.yummyAccount)
   const [loggingOut, setLoggingOut] = useState(false)
-  const [updateBusy, setUpdateBusy] = useState(false)
   const [devGateOpen, setDevGateOpen] = useState(false)
   const [devConsoleOpen, setDevConsoleOpen] = useState(false)
-  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
 
   /**
-   * ОбНОВЛЕНИЕ одной кнопкой: EXE — проверить GitHub releases против своей
-   * версии и, если новее, скачать и подменить себя с перезапуском; в браузере
-   * (превью) — честный fallback: скачать свежий EXE со страницы релизов.
+   * ОбНОВЛЕНИЕ (§3.5): EXE открывает диалог с полной state-машиной (проверка версий
+   * в main → доступно? → скачивание/SHA-256/перезапуск → итог после старта).
+   * Ничего не скачивается при current == latest — сравнение в main-процессе.
+   * В браузере (превью) — честный fallback: скачать свежий EXE со страницы релизов.
    */
   const runUpdate = async () => {
-    if (updateBusy) return
-    const aiBridge = getElectronBridge()
-    const bridge = aiBridge as unknown as {
-      checkUpdate?: () => Promise<{
-        current: string
-        latest: string | null
-        available: boolean
-        assetUrl: string | null
-        assetName: string | null
-        releasesUrl: string
-        error?: string
-      }>
-      installUpdate?: (url: string) => Promise<{ ok: boolean; error?: string }>
+    const bridge = getElectronBridge()
+    if (bridge?.checkUpdate && bridge?.installUpdate) {
+      setUpdateDialogOpen(true)
+      return
     }
-    setUpdateBusy(true)
+    // web-режим: просто скачать последний EXE
     try {
-      if (bridge?.checkUpdate && bridge?.installUpdate) {
-        const info = await bridge.checkUpdate()
-        if (info.error) {
-          toast({ variant: 'destructive', description: `Обновление: ${info.error}` })
-          return
-        }
-        if (!info.available) {
-          toast({ description: `У вас последняя версия (${info.current})` })
-          return
-        }
-        toast({ description: `Доступна ${info.latest} — скачиваю… приложение перезапустится само` })
-        bridge.onUpdateProgress?.((p) => {
-          if (p.phase === 'downloading' && p.percent != null) {
-            setUpdateProgress(p.percent)
-          }
-        })
-        const res = await bridge.installUpdate(info.assetUrl ?? '')
-        if (!res.ok) toast({ variant: 'destructive', description: `Не удалось обновиться: ${res.error ?? 'ошибка'}` })
-        return
-      }
-      // web-режим: просто скачать последний EXE
       const res = await fetch('/api/download-exe', { cache: 'no-store' })
       const info = (await res.json()) as {
         ok: boolean
@@ -149,10 +120,7 @@ export function HeaderBar() {
         })
       }
     } catch {
-      toast({ variant: 'destructive', description: 'Не удалось проверить обновления' })
-    } finally {
-      setUpdateBusy(false)
-      setUpdateProgress(null)
+      toast({ variant: 'destructive', description: 'Не удалось получить EXE' })
     }
   }
 
@@ -160,6 +128,21 @@ export function HeaderBar() {
   useEffect(() => {
     if (account.state === 'unknown') {
       void refreshAccount(false).catch(() => undefined)
+    }
+    // Итог прошлого обновления (событие из main после перезапуска, §3.12)
+    const bridge = getElectronBridge()
+    const offResult = bridge?.onUpdateResult?.((r) => {
+      if (r.ok) {
+        toast({ description: `AVC-Anime обновлён${r.to ? ` до ${r.to}` : ''} — всё работает` })
+      } else {
+        toast({
+          variant: 'destructive',
+          description: `Обновление не завершилось: ожидалась ${r.expected ?? '—'}, работает ${r.running ?? '—'}`,
+        })
+      }
+    })
+    return () => {
+      offResult?.()
     }
   }, [])
 
@@ -335,25 +318,21 @@ export function HeaderBar() {
         >
           <Settings className="h-5 w-5" />
         </Button>
-        {/* Обновление: EXE проверяет релизы и обновляет себя; web — скачать EXE */}
+        {/* Обновление: EXE — диалог state-машины; web — скачать EXE */}
         <Button
           variant="ghost"
           size="icon"
           aria-label="Обновление приложения"
-          title={updateProgress != null ? `Скачивание обновления… ${updateProgress}%` : 'Обновление приложения'}
+          title="Обновление приложения"
           className="h-11 w-11"
-          disabled={updateBusy}
           onClick={() => void runUpdate()}
         >
-          {updateBusy ? (
-            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-          ) : updateProgress != null ? (
-            <span className="text-[10px] font-bold tabular-nums text-sky-300">{updateProgress}%</span>
-          ) : (
-            <RefreshCw className="h-5 w-5" />
-          )}
+          <RefreshCw className="h-5 w-5" />
         </Button>
       </nav>
+
+      {/* Диалог обновления (только EXE-мост; state-машина §3.5) */}
+      <UpdateDialog />
 
       {/* Панель разработчика: доступ только по секретному коду */}
       <DevGate open={devGateOpen} onClose={() => setDevGateOpen(false)} onUnlocked={() => {

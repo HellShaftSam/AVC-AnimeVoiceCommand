@@ -252,6 +252,126 @@ const FAVORITES_SCRIPT = `(async () => {
   }
 })()`
 
+// --- БИБЛИОТЕКА (списки статусов): Смотрю/В Планах/Просмотрено/Брошено/Любимые/Отложено
+// Эндпоинт снят с бандла сайта и ПОДТВЕРЖДЁН живой сессией (2026-10-03):
+//   GET /api/users/{ЧИСЛОВОЙ_id}/lists/{listId} → 200 {response:[...]} (listId 0..5)
+//   Числовой id — из GET /api/profile → response.id
+//   (id470161 → 400 Arguments error, 470161 → 200 — префикс «id» НЕ нужен)
+
+const LIBRARY_LIST_IDS = [0, 1, 2, 3, 5, 4] // Любимые последними (порядок сайта)
+
+const LIBRARY_LIST_NAMES = {
+  0: 'Смотрю',
+  1: 'В Планах',
+  2: 'Просмотрено',
+  3: 'Брошено',
+  4: 'Любимые',
+  5: 'Отложено',
+}
+
+/** Профиль + все 6 списков одним заходом ВНУТРИ сессии (cookie не читаются) */
+const LIBRARY_SCRIPT = `(async () => {
+  const HEADERS = ${JSON.stringify(SITE_API_HEADERS)}
+  const get = async (path) => {
+    try {
+      const r = await fetch(path, { credentials: 'include', headers: HEADERS })
+      let body = null
+      try { body = await r.json() } catch (_) { body = null }
+      return { status: r.status, body }
+    } catch (e) {
+      return { status: 0, error: String((e && e.message) || e) }
+    }
+  }
+  const profile = await get('/api/profile')
+  const root = profile.body && typeof profile.body === 'object'
+    ? (profile.body.response ?? profile.body.user ?? profile.body)
+    : null
+  const rawId = root ? (root.id ?? root.user_id ?? root.userId) : null
+  const numericId = typeof rawId === 'number'
+    ? String(rawId)
+    : (typeof rawId === 'string' && /^\\d+$/.test(rawId) ? rawId : null)
+  const lists = {}
+  if (numericId) {
+    await Promise.all(${JSON.stringify(LIBRARY_LIST_IDS)}.map(async (id) => {
+      lists[id] = await get('/api/users/' + numericId + '/lists/' + id)
+    }))
+  }
+  return { profileStatus: profile.status, numericId, lists }
+})()`
+
+/** Защитный разбор элемента списка библиотеки (порт из web-auth.ts, без выдумок) */
+function parseLibraryItems(bodyRaw) {
+  const asRec = (v) => (typeof v === 'object' && v !== null ? v : null)
+  let body = bodyRaw
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      return []
+    }
+  }
+  const root = asRec(body)
+  let list = null
+  if (root && Array.isArray(root.response)) list = root.response
+  else if (root && asRec(root.response) && Array.isArray(asRec(root.response).response)) {
+    list = asRec(root.response).response
+  } else if (Array.isArray(body)) list = body
+  if (!Array.isArray(list)) return []
+
+  const out = []
+  for (const raw of list) {
+    const it = asRec(raw)
+    if (!it) continue
+    const title = [it.title, it.name, it.anime_title].find(
+      (v) => typeof v === 'string' && v.trim() !== '',
+    )
+    const rawId = it.anime_id ?? it.animeId ?? it.id
+    let slug = null
+    if (typeof it.anime_url === 'string' && it.anime_url.trim() !== '') slug = it.anime_url.trim()
+    else if (typeof it.slug === 'string' && it.slug.trim() !== '') slug = it.slug.trim()
+    else if (typeof it.url === 'string') {
+      slug = (it.url.match(/\/catalog\/item\/([a-z0-9-]+)/i) || [])[1] || null
+    }
+    if (title === undefined && rawId === undefined && slug === null) continue
+
+    const posterRec = asRec(it.poster)
+    let poster = null
+    if (typeof it.poster === 'string') poster = it.poster
+    else if (posterRec) {
+      const p = posterRec.medium ?? posterRec.big ?? posterRec.small ?? posterRec.fullsize ?? posterRec.huge
+      if (typeof p === 'string' && p.trim() !== '') poster = p
+    }
+
+    const userRec = asRec(it.user)
+    const userListRec = userRec ? asRec(userRec.list) : null
+    const innerListRec = userListRec ? asRec(userListRec.list) : null
+    const ownRatingRaw = userRec ? userRec.rating : null
+    const ownRating = typeof ownRatingRaw === 'number' && ownRatingRaw > 0 ? ownRatingRaw : null
+    const statusRec = asRec(it.anime_status)
+    const typeRec = asRec(it.type)
+    const listIdRaw = innerListRec ? innerListRec.id : null
+
+    out.push({
+      animeId: typeof rawId === 'number' ? rawId : null,
+      slug,
+      title: title ?? `Аниме #${String(rawId ?? '?')}`,
+      poster: poster ? (poster.startsWith('//') ? `https:${poster}` : poster) : null,
+      year: typeof it.year === 'number' ? it.year : null,
+      siteRating: typeof it.rating === 'number' ? it.rating : null,
+      ownRating,
+      isFavorite: !!(userListRec && userListRec.is_fav === true),
+      listId: typeof listIdRaw === 'number' ? listIdRaw : null,
+      listTitle: innerListRec && typeof innerListRec.title === 'string' ? innerListRec.title : null,
+      animeStatus: statusRec && typeof statusRec.title === 'string' ? statusRec.title : null,
+      animeStatusAlias: statusRec && typeof statusRec.alias === 'string' ? statusRec.alias : null,
+      type: typeRec && typeof typeRec.name === 'string' ? typeRec.name : null,
+      nextEpisodeAt: typeof it.next_episode === 'number' && it.next_episode > 0 ? it.next_episode : null,
+      addedAt: typeof it.date === 'number' && it.date > 0 ? it.date : null,
+    })
+  }
+  return out
+}
+
 /**
  * Защитная нормализация JSON профиля сайта. Формат точно не документирован —
  * перебираем известные варианты имён полей; не нашли — null (ничего не выдумываем).
@@ -417,10 +537,14 @@ module.exports = {
   DETECTION_SCRIPT,
   LOGOUT_SCRIPT,
   FAVORITES_SCRIPT,
+  LIBRARY_SCRIPT,
+  LIBRARY_LIST_IDS,
+  LIBRARY_LIST_NAMES,
   buildActionScript,
   STATE_SCRIPT,
   parseProfile,
   parseFavorites,
+  parseLibraryItems,
   parseOwnState,
   expectedOwnState,
   decide,

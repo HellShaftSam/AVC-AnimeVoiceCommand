@@ -70,6 +70,7 @@ class AuthenticationService {
     this.loginWindow = null // видимое окно входа
     this.loginMonitor = null // { interval, timeout, settled, resolve }
     this.favoritesCache = null
+    this.libraryCache = null // кеш библиотеки (списки статусов), инвалидируется действиями
 
     // Восстановление последнего известного НЕ-секретного снимка (мгновенный UI)
     const saved = this.accountStore.load()
@@ -443,6 +444,7 @@ class AuthenticationService {
     // Проверяем фактическое состояние после выхода (секция 10: verifyAuthentication)
     const snap = await this.verify({ force: true })
     this.favoritesCache = null
+    this.libraryCache = null
     return snap
   }
 
@@ -489,6 +491,88 @@ class AuthenticationService {
         available: false,
         items: [],
         reason: `Не удалось получить избранное: ${e.message}`,
+        lastSync: null,
+      }
+    }
+  }
+
+  // --- БИБЛИОТЕКА (списки статусов сайта: Смотрю/В Планах/…) -----------------
+
+  /**
+   * ПОЛНАЯ библиотека пользователя: чтение ВНУТРИ постоянной сессии сайта.
+   * Источник — реальный сайт: /api/profile (числовой id) + /api/users/{id}/lists/{N}
+   * (эндпоинт подтверждён живой сессией 2026-10-03). Кеш 2 минуты; инвалидируется
+   * любым успешным действием аккаунта и выходом — сервер всегда авторитетен.
+   */
+  async getLibrary({ refresh = false } = {}) {
+    if (!refresh && this.libraryCache && Date.now() - this.libraryCache.at < FAVORITES_TTL_MS) {
+      return this.libraryCache.data
+    }
+    const acc = await this.verify()
+    if (acc.state !== 'loggedIn') {
+      return {
+        available: false,
+        lists: [],
+        reason: acc.message || 'Нет подтверждённой сессии YummyAnime',
+        lastSync: null,
+      }
+    }
+    try {
+      const res = await this.runInSession(adapter.LIBRARY_SCRIPT, 30000)
+      if (res && res.profileStatus === 401) {
+        // сессия умерла между проверками — обновим состояние аккаунта в UI честно
+        void this.verify({ force: true }).catch(() => undefined)
+        return {
+          available: false,
+          lists: [],
+          reason: 'Сессия YummyAnime истекла — войдите заново',
+          lastSync: null,
+        }
+      }
+      if (!res || !res.numericId) {
+        return {
+          available: false,
+          lists: [],
+          reason: 'Не удалось определить id пользователя для чтения библиотеки',
+          lastSync: null,
+        }
+      }
+      const lists = []
+      const failed = []
+      for (const listId of adapter.LIBRARY_LIST_IDS) {
+        const r = res.lists ? res.lists[listId] : null
+        const name = adapter.LIBRARY_LIST_NAMES[listId]
+        if (!r) {
+          failed.push(`${name}: нет ответа`)
+          continue
+        }
+        if (r.status === 200) {
+          const items = adapter.parseLibraryItems(r.body)
+          lists.push({ listId, name, count: items.length, items })
+        } else if (r.status === 0) {
+          failed.push(`${name}: сайт недоступен`)
+        } else {
+          failed.push(`${name}: HTTP ${r.status}`)
+        }
+      }
+      const data = {
+        available: lists.length > 0,
+        lists,
+        reason:
+          lists.length === 0
+            ? failed.join('; ') || 'Ни один список не прочитан'
+            : failed.length > 0
+              ? `Часть списков не прочитана: ${failed.join('; ')}`
+              : null,
+        lastSync: lists.length > 0 ? new Date().toISOString() : null,
+      }
+      if (lists.length > 0) this.libraryCache = { at: Date.now(), data }
+      return data
+    } catch (e) {
+      return {
+        available: false,
+        lists: [],
+        reason: `Не удалось получить библиотеку: ${e.message}`,
         lastSync: null,
       }
     }
@@ -577,6 +661,9 @@ class AuthenticationService {
     if (res.status >= 400) {
       return invalid(`Сайт ответил HTTP ${res.status} на действие`)
     }
+
+    // Состояние библиотеки на сервере изменилось — кеш больше не авторитетен
+    this.libraryCache = null
 
     // 3. RELOAD-верификация по серверному HTML страницы тайтла
     const base = {
@@ -843,6 +930,7 @@ class AuthenticationService {
     this.user = null
     this.lastVerifiedAt = null
     this.favoritesCache = null
+    this.libraryCache = null
     this.accountStore.clear()
     this.setState(S.LOGGED_OUT)
     try {

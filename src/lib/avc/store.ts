@@ -94,6 +94,8 @@ export interface AvcState {
   voiceAliases: VoiceAliasRow[]
   favoritesOpen: boolean
   authOpen: boolean
+  /** Диалог обновления приложения (state-машина §3.5, только EXE) */
+  updateDialogOpen: boolean
   voiceConfirm: VoiceConfirmState | null
   /** Громкость до Mute — для восстановления при Unmute */
   prevVolume: number
@@ -134,6 +136,7 @@ export interface AvcState {
   setVoiceAliases: (rows: VoiceAliasRow[]) => void
   setFavoritesOpen: (v: boolean) => void
   setAuthOpen: (v: boolean) => void
+  setUpdateDialogOpen: (v: boolean) => void
   setVoiceConfirm: (vc: VoiceConfirmState | null) => void
   setPrevVolume: (v: number) => void
 
@@ -231,6 +234,7 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   voiceAliases: [],
   favoritesOpen: false,
   authOpen: false,
+  updateDialogOpen: false,
   voiceConfirm: null,
   prevVolume: 70,
 
@@ -348,6 +352,7 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   setVoiceAliases: (rows) => set({ voiceAliases: rows }),
   setFavoritesOpen: (v) => set({ favoritesOpen: v }),
   setAuthOpen: (v) => set({ authOpen: v }),
+  setUpdateDialogOpen: (v) => set({ updateDialogOpen: v }),
   setVoiceConfirm: (vc) => set({ voiceConfirm: vc }),
   setPrevVolume: (v) => set({ prevVolume: v }),
 

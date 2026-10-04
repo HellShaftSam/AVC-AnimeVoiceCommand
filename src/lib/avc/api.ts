@@ -162,6 +162,28 @@ export interface AiModelProgress {
   kind?: string
 }
 
+/** Фазы обновления (state-машина §3.5) */
+export interface UpdateProgress {
+  phase: 'checking' | 'downloading' | 'verifying' | 'preparing' | 'restarting' | 'error'
+  percent?: number | null
+  receivedBytes?: number | null
+  totalBytes?: number | null
+  speedBps?: number | null
+  shaVerified?: boolean
+  warning?: string | null
+  error?: string
+}
+
+/** Итог обновления, сверенный после перезапуска (маркер update-pending.json) */
+export interface UpdateResult {
+  ok: boolean
+  from?: string | null
+  to?: string
+  expected?: string | null
+  running?: string
+  startedAt?: string | null
+}
+
 export interface AvcElectronBridge {
   platform: 'electron'
   getAccountState(refresh?: boolean): Promise<YummyAccountSnapshot>
@@ -169,6 +191,8 @@ export interface AvcElectronBridge {
   verifyAuthentication(): Promise<YummyAccountSnapshot>
   logout(): Promise<YummyAccountSnapshot>
   getFavorites(refresh?: boolean): Promise<YummyFavoritesResult>
+  /** ПОЛНАЯ библиотека сайта (Смотрю/В Планах/…): читается ВНУТРИ сессии main-процесса */
+  readLibrary?(): Promise<YummyLibraryResult>
   resetYummySession(): Promise<{ ok: boolean; backupPath: string | null; message: string }>
   runAuthSelfTest(): Promise<YummyAuthSelfTestReport>
   /** РЕАЛЬНОЕ действие аккаунта ВНУТРИ сессии сайта (список/оценка/избранное) */
@@ -237,22 +261,35 @@ export interface AvcElectronBridge {
     }>
     /** Хвост лога приложения (без секретов — redact на этапе записи) */
     readDebugLogs?(lines?: number): Promise<{ lines: string[]; file?: string; error?: string }>
-
-    /** Проверить обновление (GitHub releases vs встроенная версия) */
-    checkUpdate?(): Promise<{
-      current: string
-      latest: string | null
-      available: boolean
-      assetUrl: string | null
-      assetName: string | null
-      releasesUrl: string
-      error?: string
-    }>
-    /** Скачать и установить обновление (подмена EXE + перезапуск) */
-    installUpdate?(assetUrl: string): Promise<{ ok: boolean; error?: string }>
-    /** Прогресс скачивания обновления */
-    onUpdateProgress?(cb: (p: { phase: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; error?: string }) => void): () => void
   }
+
+  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ: ВЕРХНИЙ уровень моста (НЕ внутри ai) -------------
+  // УРОК РЕЛИЗА 1.0.16: методы были внутри ai.* — UI звал их на верхнем уровне,
+  // получал undefined и проваливался в web-ветку (безусловное скачивание EXE).
+  /** Проверить обновление (GitHub releases/latest, сверка версий в main — §3.3) */
+  checkUpdate?(): Promise<{
+    current: string
+    latest: string | null
+    /** newer | older | up-to-date | unknown — честное отношение версий */
+    relation: 'newer' | 'older' | 'up-to-date' | 'unknown'
+    releaseName?: string | null
+    releasedAt?: string | null
+    releaseNotes?: string | null
+    available: boolean
+    assetUrl: string | null
+    assetName: string | null
+    assetSizeBytes?: number | null
+    shaUrl?: string | null
+    releasesUrl: string
+    lastUpdateResult?: UpdateResult | null
+    error?: string
+  }>
+  /** Скачать и установить обновление (main повторно сверяет версии + SHA-256) */
+  installUpdate?(): Promise<{ ok: boolean; error?: string; relation?: string }>
+  /** Прогресс обновления (фазы state-машины §3.5) */
+  onUpdateProgress?(cb: (p: UpdateProgress) => void): () => void
+  /** Итог прошлого обновления после перезапуска (§3.12) */
+  onUpdateResult?(cb: (r: UpdateResult) => void): () => void
 }
 
 /** Есть ли мост EXE-сборки (в обычном браузере отсутствует) */
@@ -445,9 +482,20 @@ export const avcApi = {
   /**
    * ПОЛНАЯ библиотека YummyAnime — списки статусов с сайта
    * (Смотрю/В Планах/Просмотрено/Брошено/Отложено/Любимые).
-   * Веб и EXE одинаково: GET /api/yummy/library (сервер сессии сайта).
+   * EXE — чтение ВНУТРИ постоянной сессии main-процесса (IPC readLibrary):
+   * серверная cookie-сессия Next.js в EXE отсутствует, поэтому web-маршрут
+   * /api/yummy/library там всегда был «не вошёл» — это и был баг отчёта.
+   * Web (превью) — GET /api/yummy/library (серверная сессия сайта).
    */
   async yummyLibrary(): Promise<YummyLibraryResult> {
+    const bridge = getElectronBridge()
+    if (bridge?.readLibrary) {
+      try {
+        return await bridge.readLibrary()
+      } catch {
+        // падение моста не маскируем фейковыми данными — честная причина ниже
+      }
+    }
     try {
       const res = await jsonFetch('/api/yummy/library')
       if (!res.ok) throw new Error(await readError(res))

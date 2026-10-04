@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('avcElectron', {
   /** Избранное с сайта (данные сессии main-процесса, без секретов) */
   getFavorites: (refresh) => ipcRenderer.invoke('avc:auth:favorites', { refresh: !!refresh }),
 
+  /**
+   * ПОЛНАЯ библиотека сайта (Смотрю/В Планах/Просмотрено/Брошено/Любимые/Отложено).
+   * Читается ВНУТРИ постоянной сессии main-процесса; наружу — только не-секретные
+   * списки тайтлов с сайта (то же доверие, что и у самого сайта).
+   */
+  readLibrary: (refresh) => ipcRenderer.invoke('avc:anime:library', { refresh: !!refresh }),
+
   /** Сброс постоянной сессии (backup + подтверждение в main) */
   resetYummySession: () => ipcRenderer.invoke('avc:auth:reset-session', { confirmed: true }),
 
@@ -178,22 +185,32 @@ contextBridge.exposeInMainWorld('avcElectron', {
     /** Хвост лога приложения */
     readDebugLogs: (lines) => ipcRenderer.invoke('avc:debug:logs', { lines }),
 
-    /** Проверить обновление (GitHub releases/latest vs встроенная версия) */
-    checkUpdate: () => ipcRenderer.invoke('avc:update:check'),
-    /** Скачать и установить обновление (портативная подмена EXE + перезапуск) */
-    installUpdate: (assetUrl) => ipcRenderer.invoke('avc:update:install', { assetUrl }),
-    /** Прогресс скачивания обновления */
-    onUpdateProgress: (cb) => {
-      const handler = (_event, payload) => cb(payload)
-      ipcRenderer.on('avc:update:progress', handler)
-      return () => ipcRenderer.removeListener('avc:update:progress', handler)
-    },
-
     /** Подписка на состояние AI-воркера (запущен/упал + честная причина) */
     onWorkerState: (cb) => {
       const handler = (_event, payload) => cb(payload)
       ipcRenderer.on('avc:ai:worker-state', handler)
       return () => ipcRenderer.removeListener('avc:ai:worker-state', handler)
     },
+  },
+
+  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ: ВЕРХНИЙ уровень моста (НЕ внутри ai) -------------
+  // УРОК РЕЛИЗА 1.0.16: эти методы находились внутри ai.* — а UI вызывал их
+  // на верхнем уровне (bridge.checkUpdate === undefined) → кнопка всегда
+  // проваливалась в web-ветку и СКАЧИВАЛА EXE даже без обновления.
+  /** Проверить обновление (GitHub releases/latest vs встроенная версия; сверка в main) */
+  checkUpdate: () => ipcRenderer.invoke('avc:update:check'),
+  /** Скачать и установить обновление (main сам повторно сверяет версии + SHA-256) */
+  installUpdate: () => ipcRenderer.invoke('avc:update:install'),
+  /** Прогресс обновления (фазы: checking/downloading/verifying/preparing/restarting/error) */
+  onUpdateProgress: (cb) => {
+    const handler = (_event, payload) => cb(payload)
+    ipcRenderer.on('avc:update:progress', handler)
+    return () => ipcRenderer.removeListener('avc:update:progress', handler)
+  },
+  /** Итог прошлого обновления после перезапуска (успех/не завершилось — §3.12) */
+  onUpdateResult: (cb) => {
+    const handler = (_event, payload) => cb(payload)
+    ipcRenderer.on('avc:update:result', handler)
+    return () => ipcRenderer.removeListener('avc:update:result', handler)
   },
 })

@@ -21,6 +21,7 @@ const http = require('http')
 const https = require('https')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const { performance } = require('perf_hooks')
 const { AuthenticationService, PARTITION } = require('./auth/authentication-service.cjs')
 
@@ -98,6 +99,8 @@ let authService = null
 let splashWindow = null
 let fatalWindow = null
 let fatalPromise = null
+/** Результат незавершённого обновления (маркер update-pending.json) — для UI после перезапуска */
+let pendingUpdateResult = null
 
 // --- фатальные ошибки: обработчики регистрируем как можно раньше ----------------
 process.on('uncaughtException', (err) => reportFatal(err, 'uncaughtException'))
@@ -139,6 +142,50 @@ function writeStartupReport(extra = {}) {
 // require падал всегда, а его catch-блок убивал запуск через TDZ-баг лога выше
 // (урок релиза 1.0.9). Модульность сохранена: без моделей/воркера приложение
 // продолжает работать (§0, §129) — статус честно отражается в UI.
+
+// --- верификация результата обновления после перезапуска (§3.12) ----------------
+// Маркер update-pending.json пишет установщик ПЕРЕД перезапуском; при следующем
+// старте сравниваем версию процесса с ожидаемой: совпала — «обновлено успешно»,
+// нет — честно сообщаем «обновление не завершилось» (ни то, ни другое не выдумываем).
+function updatePendingMarkerPath() {
+  return path.join(app.getPath('userData'), 'update-pending.json')
+}
+
+function checkPendingUpdate() {
+  try {
+    const marker = updatePendingMarkerPath()
+    if (!fs.existsSync(marker)) return
+    let data = null
+    try {
+      data = JSON.parse(fs.readFileSync(marker, 'utf8'))
+    } catch {
+      fs.rmSync(marker, { force: true })
+      return
+    }
+    fs.rmSync(marker, { force: true })
+    const running = app.getVersion()
+    if (data.expectedVersion && running === data.expectedVersion) {
+      pendingUpdateResult = {
+        ok: true,
+        from: data.previousVersion || null,
+        to: running,
+        startedAt: data.startedAt || null,
+      }
+      log(`[Update] Обновление подтверждено: работает ${running}`)
+    } else {
+      pendingUpdateResult = {
+        ok: false,
+        expected: data.expectedVersion || null,
+        running,
+        startedAt: data.startedAt || null,
+      }
+      log(`[Update] Обновление НЕ завершилось: ожидалось ${data.expectedVersion}, работает ${running}`)
+    }
+  } catch (e) {
+    log(`[Update] Проверка маркера обновления не удалась: ${e.message}`)
+  }
+}
+
 
 // --- Next.js сервер для packaged-сборки -----------------------------------------
 // (nextProcess объявлен вверху модуля — до регистрации обработчиков ошибок)
@@ -495,6 +542,10 @@ function setupIpc(service) {
       ? service.readAnimeOwnState(slug)
       : Promise.resolve(null),
   )
+  // ПОЛНАЯ библиотека сайта (Смотрю/В Планах/Просмотрено/Брошено/Любимые/Отложено):
+  // читается ВНУТРИ постоянной сессии main-процесса — в EXE серверной cookie-сессии
+  // Next.js нет, поэтому раньше панель библиотеки всегда показывала «войдите»
+  ipcMain.handle('avc:anime:library', (_e, args) => service.getLibrary({ refresh: !!args?.refresh }))
 }
 
 /**
@@ -855,10 +906,19 @@ function setupAiIpc() {
   })
 
   /** Открыть папку с логами (диагностика «что происходит» без поддержки) */
-  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ (портативное сам-обновление) --------------------
-  // Проверка: GitHub releases/latest vs встроенная версия (extraMetadata CI).
-  // Установка: скачать новый EXE в %TEMP% → cmd-скрипт (detached) ждёт выхода,
-  // снимает дерево процессов, подменяет файл и перезапускает приложение.
+  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ (портативное сам-обновление, двухфазная схема) ----
+  // §3.2  Источник истины: GitHub releases/latest (опубликованный, не draft/pre).
+  // §3.3  Версии сравниваются ВСЕГДА ДО скачивания, причём ДВАЖДЫ: в check и
+  //       повторно в install (рендерер не может заставить установить равную/старую).
+  // §3.9  Целостность: SHA-256 по SHA256SUMS.txt из релиза; не совпало — файл
+  //       удаляется, установленная версия не трогается.
+  // §3.10 Двухфазная подмена: приложение завершается ШТАТНО (before-quit снимает
+  //       своих детей), а cmd-скрипт (detached) только ЖДЁТ исчезновения PID,
+  //       подменяет EXE (move; fallback: ren старого → move нового), стартует новый.
+  //       НИКАКИХ taskkill изнутри дерева — прежний скрипт убивал сам себя
+  //       (cmd.exe был потомком mainPid при taskkill /T).
+  // §3.12 Маркер update-pending.json: пишется до перезапуска; при следующем старте
+  //       версия процесса сверяется с ожидаемой → честный итог в UI.
   const UPDATE_REPO = 'HellShaftSam/AVC-AnimeVoiceCommand'
 
   const httpsGetJson = (url, redirects = 0) =>
@@ -879,104 +939,243 @@ function setupAiIpc() {
       req.setTimeout(15000, () => req.destroy(new Error('timeout')))
     })
 
+  /** Формат версии проекта: 1.0.<run_number> (CI extraMetadata); теги v1.0.<N>. */
   const parseVersion = (s) => {
-    const m = String(s || '').match(/1\.0\.(\d+)/)
-    return m ? parseInt(m[1], 10) : null
+    const m = String(s || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)/i)
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+  }
+  /** Правильное числовое сравнение (1.10.0 > 1.9.0); null — формат не распознан */
+  const compareVersions = (a, b) => {
+    const va = parseVersion(a)
+    const vb = parseVersion(b)
+    if (!va || !vb) return null
+    for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return va[i] > vb[i] ? 1 : -1
+    return 0
   }
 
-  ipcMain.handle('avc:update:check', async () => {
+  const httpsDownloadFile = (url, destPath, onProgress, redirects = 0) =>
+    new Promise((resolve, reject) => {
+      if (redirects > 6) return reject(new Error('Слишком много перенаправлений'))
+      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume()
+          return httpsDownloadFile(new URL(res.headers.location, url).toString(), destPath, onProgress, redirects + 1).then(resolve, reject)
+        }
+        if (res.statusCode !== 200) {
+          res.resume()
+          return reject(new Error(`HTTP ${res.statusCode}`))
+        }
+        const total = Number(res.headers['content-length'] || 0)
+        let received = 0
+        let lastEmit = 0
+        const samples = [] // скользящее окно скорости (~2 с)
+        const file = fs.createWriteStream(destPath)
+        res.on('data', (chunk) => {
+          received += chunk.length
+          if (onProgress) {
+            const now = Date.now()
+            samples.push({ t: now, b: received })
+            while (samples.length > 2 && now - samples[0].t > 2000) samples.shift()
+            if (now - lastEmit > 250) {
+              lastEmit = now
+              const first = samples[0]
+              const speed = first && now > first.t ? (received - first.b) / ((now - first.t) / 1000) : 0
+              onProgress({ received, total, speed })
+            }
+          }
+        })
+        res.pipe(file)
+        file.on('finish', () => file.close(() => resolve({ received, total })))
+        file.on('error', (e) => reject(e))
+        res.on('error', (e) => {
+          try { file.close() } catch { /* ок */ }
+          reject(e)
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(60000, () => req.destroy(new Error('Таймаут скачивания обновления')))
+    })
+
+  const sha256File = (file) =>
+    new Promise((resolve, reject) => {
+      const hash = crypto.createHash('sha256')
+      const stream = fs.createReadStream(file)
+      stream.on('data', (c) => hash.update(c))
+      stream.on('error', reject)
+      stream.on('end', () => resolve(hash.digest('hex')))
+    })
+
+  /** releases/latest → нормализованная информация об обновлении (без скачивания) */
+  const fetchLatestReleaseInfo = async () => {
     const current = app.getVersion()
+    const releasesUrl = `https://github.com/${UPDATE_REPO}/releases/latest`
     try {
       const { status, body } = await httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)
-      if (status !== 200) return { current, available: false, error: `GitHub API: HTTP ${status}` }
+      if (status === 404) return { current, latest: null, relation: 'unknown', available: false, error: 'На GitHub нет опубликованного релиза', releasesUrl, lastUpdateResult: pendingUpdateResult }
+      if (status !== 200) return { current, latest: null, relation: 'unknown', available: false, error: `GitHub API: HTTP ${status}`, releasesUrl, lastUpdateResult: pendingUpdateResult }
       const latest = String(body.tag_name || '')
-      const asset = (body.assets || []).find((a) => /\.exe$/i.test(a.name)) || null
-      const latestN = parseVersion(latest)
-      const currentN = parseVersion(current)
+      const assets = Array.isArray(body.assets) ? body.assets : []
+      const asset = assets.find((a) => /\.exe$/i.test(a.name)) || null
+      const shaAsset = assets.find((a) => /^SHA256SUMS\.txt$/i.test(a.name)) || null
+      const cmp = compareVersions(latest, current)
+      const relation = cmp === null ? 'unknown' : cmp > 0 ? 'newer' : cmp < 0 ? 'older' : 'up-to-date'
       return {
         current,
         latest: latest || null,
-        available: latestN !== null && currentN !== null ? latestN > currentN : false,
+        releaseName: body.name || null,
+        releasedAt: body.published_at || null,
+        releaseNotes: typeof body.body === 'string' ? body.body.slice(0, 2000) : null,
+        relation,
+        // §3.3: доступно обновление ТОЛЬКО если latest строго новее и есть EXE
+        available: relation === 'newer' && !!asset,
         assetUrl: asset ? asset.browser_download_url : null,
         assetName: asset ? asset.name : null,
-        releasesUrl: `https://github.com/${UPDATE_REPO}/releases/latest`,
+        assetSizeBytes: asset ? asset.size : null,
+        shaUrl: shaAsset ? shaAsset.browser_download_url : null,
+        releasesUrl,
+        lastUpdateResult: pendingUpdateResult,
       }
     } catch (e) {
-      return { current, available: false, error: e.message }
+      return { current, latest: null, relation: 'unknown', available: false, error: e.message, releasesUrl, lastUpdateResult: pendingUpdateResult }
     }
-  })
+  }
 
-  ipcMain.handle('avc:update:install', async (_e, args) => {
-    const assetUrl = String(args?.assetUrl || '')
-    if (!/^https:\/\/github\.com\//.test(assetUrl)) {
-      return { ok: false, error: 'Некорректный адрес обновления' }
-    }
+  ipcMain.handle('avc:update:check', () => fetchLatestReleaseInfo())
+
+  ipcMain.handle('avc:update:install', async () => {
     const send = (payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('avc:update:progress', payload)
       }
     }
     try {
+      // §3.3 (защита от рассинхрона): ПОВТОРНАЯ сверка версий в main перед скачиванием
+      send({ phase: 'checking' })
+      const info = await fetchLatestReleaseInfo()
+      if (info.error) return { ok: false, error: info.error }
+      if (!info.available || !info.assetUrl) {
+        const why =
+          info.relation === 'up-to-date'
+            ? 'У вас уже последняя версия — установка не требуется'
+            : info.relation === 'older'
+              ? 'Установленная версия новее опубликованной — откат не выполняется'
+              : info.error || 'Обновление недоступно (нет опубликованного EXE)'
+        return { ok: false, error: why, relation: info.relation }
+      }
+
       const tmpDir = path.join(app.getPath('temp'), 'avc-update')
       fs.mkdirSync(tmpDir, { recursive: true })
       const newPath = path.join(tmpDir, 'AVC-Anime-new.exe')
+      try { fs.rmSync(newPath, { force: true }) } catch { /* ок */ }
 
-      // скачивание с прогрессом (redirects GitHub → objects.githubusercontent)
-      await new Promise((resolve, reject) => {
-        const get = (url, redirects) => {
-          if (redirects > 6) return reject(new Error('Слишком много перенаправлений'))
-          const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater' } }, (res) => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-              res.resume()
-              return get(new URL(res.headers.location, url).toString(), redirects + 1)
-            }
-            if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
-            const total = Number(res.headers['content-length'] || 0)
-            let received = 0
-            const file = fs.openSync(newPath, 'w')
-            res.on('data', (chunk) => {
-              received += chunk.length
-              fs.writeSync(file, chunk)
-              send({
-                phase: 'downloading',
-                percent: total ? Math.min(99, Math.round((received / total) * 100)) : null,
-                receivedBytes: received,
-                totalBytes: total,
-              })
-            })
-            res.on('end', () => {
-              fs.closeSync(file)
-              resolve()
-            })
-            res.on('error', (e) => {
-              try { fs.closeSync(file) } catch { /* ок */ }
-              reject(e)
-            })
-          })
-          req.on('error', reject)
-          req.setTimeout(60000, () => req.destroy(new Error('Таймаут скачивания обновления')))
-        }
-        get(assetUrl, 0)
+      // 1. Скачивание с прогрессом (%, МБ, скорость, ETA считает рендерер по speedBps)
+      send({ phase: 'downloading', percent: 0, receivedBytes: 0, totalBytes: info.assetSizeBytes || null })
+      await httpsDownloadFile(info.assetUrl, newPath, (p) => {
+        send({
+          phase: 'downloading',
+          percent: p.total ? Math.min(99, (p.received / p.total) * 100) : null,
+          receivedBytes: p.received,
+          totalBytes: p.total || null,
+          speedBps: p.speed || null,
+        })
       })
 
-      // cmd-скрипт: ждём выход → снимаем дерево → подмена → перезапуск
+      // 2. Целостность: SHA-256 из SHA256SUMS.txt релиза (если релиз его публикует)
+      send({ phase: 'verifying' })
+      let shaVerified = false
+      let shaWarning = null
+      if (info.shaUrl) {
+        const sumsPath = path.join(tmpDir, 'SHA256SUMS.txt')
+        try { fs.rmSync(sumsPath, { force: true }) } catch { /* ок */ }
+        await httpsDownloadFile(info.shaUrl, sumsPath, null)
+        const sums = fs.readFileSync(sumsPath, 'utf8')
+        const line = sums
+          .split(/\r?\n/)
+          .map((l) => l.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/))
+          .find((m) => m && m[2].trim().toLowerCase() === String(info.assetName || '').toLowerCase())
+        if (!line) {
+          shaWarning = 'В SHA256SUMS.txt нет записи для файла обновления'
+        } else {
+          const expected = line[1].toLowerCase()
+          const actual = (await sha256File(newPath)).toLowerCase()
+          if (actual !== expected) {
+            fs.rmSync(newPath, { force: true })
+            return {
+              ok: false,
+              error: `Проверка целостности не пройдена (SHA-256 не совпал). Файл удалён, установленная версия не тронута — повторите обновление позже.`,
+            }
+          }
+          shaVerified = true
+        }
+      } else {
+        shaWarning = 'Релиз не содержит SHA256SUMS.txt — проверка целостности недоступна'
+      }
+
+      // 3. Маркер результата (сверится при следующем старте — §3.12)
+      send({ phase: 'preparing', shaVerified })
       const exePath = app.getPath('exe')
-      const mainPid = process.pid
+      const prevPath = path.join(path.dirname(exePath), 'AVC-Anime-previous.exe')
+      fs.writeFileSync(
+        updatePendingMarkerPath(),
+        JSON.stringify(
+          {
+            expectedVersion: info.latest,
+            previousVersion: app.getVersion(),
+            exePath,
+            startedAt: new Date().toISOString(),
+            assetName: info.assetName,
+            shaVerified,
+          },
+          null,
+          2,
+        ),
+      )
+
+      // 4. Двухфазный установщик: ждать выход → подмена → старт. Без taskkill себя.
       const scriptPath = path.join(tmpDir, 'update-avc.cmd')
       const script = [
         '@echo off',
-        'timeout /t 3 /nobreak >nul',
-        `taskkill /f /pid ${mainPid} /T >nul 2>&1`,
-        `move /y "${newPath}" "${exePath}" >nul 2>&1`,
-        `start "" "${exePath}"`,
+        'setlocal EnableExtensions',
+        `set "AVC_EXE=${exePath}"`,
+        `set "AVC_NEW=${newPath}"`,
+        `set "AVC_PREV=${prevPath}"`,
+        `set "AVC_MARKER=${updatePendingMarkerPath()}"`,
+        'set /a AVC_WAITED=0',
+        ':avc_waitloop',
+        `tasklist /FI "PID eq ${process.pid}" 2>nul | find "${process.pid}" >nul`,
+        'if errorlevel 1 goto avc_swap',
+        'if %AVC_WAITED% GEQ 120 goto avc_timeout',
+        'ping -n 2 127.0.0.1 >nul',
+        'set /a AVC_WAITED+=1',
+        'goto avc_waitloop',
+        ':avc_swap',
+        'move /y "%AVC_NEW%" "%AVC_EXE%" >nul 2>&1',
+        'if not errorlevel 1 goto avc_launch',
+        'if exist "%AVC_EXE%" ren "%AVC_EXE%" "AVC-Anime-previous.exe" >nul 2>&1',
+        'move /y "%AVC_NEW%" "%AVC_EXE%" >nul 2>&1',
+        'if not errorlevel 1 goto avc_launch',
+        'if not exist "%AVC_EXE%" if exist "%AVC_PREV%" ren "%AVC_PREV%" "AVC-Anime.exe" >nul 2>&1',
+        'goto avc_giveup',
+        ':avc_launch',
+        'if exist "%AVC_EXE%" start "" "%AVC_EXE%"',
         'del "%~f0" >nul 2>&1',
+        'exit /b 0',
+        ':avc_timeout',
+        'del "%AVC_MARKER%" >nul 2>&1',
+        'del "%~f0" >nul 2>&1',
+        'exit /b 2',
+        ':avc_giveup',
+        'del "%AVC_MARKER%" >nul 2>&1',
+        'del "%~f0" >nul 2>&1',
+        'exit /b 3',
       ].join('\r\n')
       fs.writeFileSync(scriptPath, script, 'utf8')
 
-      send({ phase: 'restarting' })
+      send({ phase: 'restarting', shaVerified, warning: shaWarning })
       const child = spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore' })
       child.unref()
-      // выходим — скрипт дождётся, подменит EXE и вернёт приложение
+      // Штатный выход: before-quit снимает дерево своих детей; установщик при этом
+      // выживает (он НЕ в списке killProcessTree) и завершает подмену.
       setTimeout(() => app.quit(), 300)
       return { ok: true }
     } catch (e) {
@@ -1153,6 +1352,17 @@ async function boot() {
   markStartup('window-created')
   log(`[Main] UI ready at ${url}`)
 
+  // §3.12: сообщить рендереру итог прошлого обновления (успех/не завершилось)
+  if (pendingUpdateResult && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('avc:update:result', pendingUpdateResult)
+        }
+      } catch { /* окно могли закрыть */ }
+    })
+  }
+
   // Фоновая сверка состояния аккаунта при старте (одна проверка, без поллинга)
   void authService.verify().catch(() => undefined)
 
@@ -1164,6 +1374,7 @@ async function boot() {
 app.whenReady().then(async () => {
   flushEarlyLogs() // дальше логи сразу пишутся в файл
   markStartup('app-ready')
+  checkPendingUpdate() // §3.12: сверка маркера обновления до UI (результат уйдёт в рендерер)
   log('[Auth] Initializing YummyAnime session (persistent partition)')
 
   if (SELFTEST) {
