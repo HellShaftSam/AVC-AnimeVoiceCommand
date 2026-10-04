@@ -214,6 +214,9 @@ class VoicePipeline extends EventEmitter {
     }
     const old = this.stt
     this.activeModelId = modelId
+    // явный выбор пользователя меняет и «запрошенную»: иначе статус показал бы
+    // ложный fallback («модель X не установлена») до перезапуска приложения
+    this.requestedModelId = modelId
     this.stt = createSttEngine({ modelsDir: this.modelsDir, profile: this.profile, modelId })
     this._wireStt()
     try { old.shutdown() } catch { /* ок */ }
