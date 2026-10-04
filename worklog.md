@@ -940,3 +940,19 @@ Work Log:
 
 Stage Summary:
 - v1.0.9 = latest на GitHub Releases: в 2.5 раза меньший EXE, быстрая распаковка, обратная связь с первой секунды (splash), гарантированное окно ошибки при любом сбое старта, диалог при «уже запущен»
+
+---
+Task ID: exe-tdz-crash-fix-1
+Agent: Z.ai Code (main)
+Task: Исправить крах запуска v1.0.9 — «A JavaScript error occurred in the main process: ReferenceError: Cannot access 'fileLogEnabled' before initialization» (EXE висел в процессах без окна, скриншот ошибки от пользователя)
+
+Work Log:
+- Диагноз по скриншоту: TDZ-ошибка на фазе оценки модуля main.cjs; трасса «at log → at Object.<anonymous>» = верхнеуровневый вызов log()
+- Корень (два совпавших дефекта в 9d9ac79): (1) верхнеуровневый try/require('./ai/voice-pipeline.cjs') — в packaged ai/** в extraResources (resources/ai), а НЕ в app.asar (files без ai/**) → require падал всегда; (2) catch вызывал log(), а let fileLogEnabled объявлен НИЖЕ (стр. 71) → ReferenceError из TDZ; process.on('uncaughtException') регистрировался ещё ниже (стр. 117) → дефолтный фатальный диалог Electron; класс VoicePipeline в main вообще не использовался (весь AI — воркер на чистом Node)
+- ФИКС main.cjs: мёртвый require удалён; реордер шапки модуля — selftest-флаги → лог (LOG_MAX_BYTES/logStream/EARLY_LOG_LINES/fileLogEnabled/logFile/log/flushEarlyLogs/redact) → состояние (nextProcess/mainWindow/authService/splashWindow/fatalWindow/fatalPromise) → process.on(uncaughtException/unhandledRejection) → телеметрия; дубль-объявления ниже по файлу убраны; комментарии «УРОК РЕЛИЗА 1.0.9» на месте
+- ВЕРИФИКАЦИЯ: node --check OK; стенд /home/z/avc-loadtest/run.cjs (electron-стаб через Module._load): TEST1 module-eval без TDZ/ReferenceError, TEST2 reportFatal — окно ошибки создаётся, при закрытии app.exit(1), контракт соблюдён; аудит require всех asar-файлов (main/preload/splash-preload/auth/*) — только electron/builtins/auth (npm-зависимостей нет, ai/ — только dev-only selftest внутри whenReady); bun run lint — 0 (стенд вынесен из проекта в /home/z/avc-loadtest, был бы no-require-imports)
+- ПУШ: 143e418 → CI run 37165347864 (run #10, windows-latest) SUCCESS; релиз v1.0.10 опубликован: AVC-Anime-Portable-1.0.10.exe = 150 806 802 байт; /releases/latest → v1.0.10
+
+Stage Summary:
+- Причина краха v1.0.9 («Cannot access 'fileLogEnabled' before initialization») устранена на уровне архитектуры модуля: TDZ теперь невозможен — лог и состояние инициализируются до любых верхнеуровневых вызовов и обработчиков ошибок
+- v1.0.10 = latest: тот же лёгкий EXE (~151MB), но без краха на фазе загрузки; splash/окно ошибки/watchdog из 9d9ac79 сохранены и работают поверх
