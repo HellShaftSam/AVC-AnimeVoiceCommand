@@ -151,6 +151,14 @@ function updatePendingMarkerPath() {
   return path.join(app.getPath('userData'), 'update-pending.json')
 }
 
+/** Нормализация версии для СРАВНЕНИЯ: тег v1.0.18 и app.getVersion()=1.0.18 равны.
+ *  УРОК v1.0.18: маркер писал tag_name с префиксом «v», а getVersion() без —
+ *  успешное обновление ошибочно считалось «не завершившимся». */
+function versionKey(s) {
+  const m = String(s || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)/i)
+  return m ? `${Number(m[1])}.${Number(m[2])}.${Number(m[3])}` : String(s || '').trim()
+}
+
 function checkPendingUpdate() {
   try {
     const marker = updatePendingMarkerPath()
@@ -164,7 +172,7 @@ function checkPendingUpdate() {
     }
     fs.rmSync(marker, { force: true })
     const running = app.getVersion()
-    if (data.expectedVersion && running === data.expectedVersion) {
+    if (data.expectedVersion && versionKey(running) === versionKey(data.expectedVersion)) {
       pendingUpdateResult = {
         ok: true,
         from: data.previousVersion || null,
@@ -1119,7 +1127,9 @@ function setupAiIpc() {
         updatePendingMarkerPath(),
         JSON.stringify(
           {
-            expectedVersion: info.latest,
+            // храним БЕЗ префикса «v» — getVersion() его не содержит;
+            // сверка при следующем старте всё равно идёт через versionKey
+            expectedVersion: String(info.latest || '').trim().replace(/^v/i, ''),
             previousVersion: app.getVersion(),
             exePath,
             startedAt: new Date().toISOString(),
