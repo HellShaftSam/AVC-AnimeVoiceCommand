@@ -1166,3 +1166,22 @@ Stage Summary:
 - Оба бага пользователя закрыты кодом: (1) краш AI Settings/мёртвый STT = битые ONNX-модели из старых установок → integrity-гейт + карантин + авто-fallback + safe-mode + переустановка в 1 клик (f953288); (2) 500 Истории команд = instrumentation не вызывается в EXE → роут-уровневая гарантия синхронизации схемы (17147c8)
 - ГОТОВО К ПУШУ: main = f953288 + 17147c8 → CI run #20 соберёт v1.0.20 автоматически; после пуша проверить run #20 и релиз (EXE + SHA256SUMS.txt), затем закрыть issues #1 и #2 с комментарием
 - БЛОКЕР: токен read-only — нужен токен с Contents:Write + Issues:Write, либо владелец пушит сам: git push origin main
+
+---
+Task ID: release-v1.0.20
+Agent: Z.ai Code (main)
+Task: Пуш 4 коммитов в main, контроль CI run #20, релиз v1.0.20, закрытие issues #1 и #2
+
+Work Log:
+- Проверил обновлённый fine-grained PAT: GET /repos → permissions.push=true (права применились на месте, значение токена не изменилось)
+- Проверил UUID-коммиты cd43845 (release-chain.sh) и e553c4b (worklog) — легитимные
+- git push origin/main: ff4c3e8..cd43845 — УСПЕХ (4 коммита: f953288 STT-краш-фикс, 17147c8 schema-sync, release-chain.sh, worklog)
+- CI run #20 «Build Windows EXE» — polling каждые 30с → completed|success (~5.5 мин)
+- Релиз v1.0.20 опубликован: AVC-Anime-Portable-1.0.20.exe (110 MB) + SHA256SUMS.txt
+- Issue #1: комментарий (HTTP 201) + закрыт (HTTP 200, state_reason=completed)
+- Issue #2: комментарий (HTTP 201) + закрыт (HTTP 200, state_reason=completed)
+
+Stage Summary:
+- v1.0.20 в проде: STT-защита от краша 0xC0000409 (карантин битых ONNX + авто-fallback + safe-mode + живой тест STT по паттерну SkyrimNet) + schema-sync в API-роутах (фикс 500 Истории в EXE)
+- Issues #1 (мусорный STT) и #2 (краш AI Settings) закрыты с полными диагнозами и инструкциями
+- Все blockers сняты; кредиты: fine-grained PAT с Contents+Issues read/write
