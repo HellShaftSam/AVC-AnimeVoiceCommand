@@ -1145,3 +1145,24 @@ Stage Summary:
 - Root cause краша: битые файлы GigaAM в ai-models пользователя (наследие старых версий: «installed» = только существование файлов) → нативный fail-fast sherpa-onnx → воркер умирал 3× подряд → STT мёртв
 - Теперь: битая модель НЕ грузится нативно; карантин + авто-fallback на T-One; безопасный режим при повторных крашах; переустановка в 1 клик; живой тест STT в настройках
 - Ключевой урок: усечённый ONNX ловится ТОЛЬКО структурной protobuf-проверкой (min-size пропускает 50% усечение — проверено), а JS try/catch нативный краш не ловит никогда
+
+---
+Task ID: schema-drift-route-guards-v1.0.20
+Agent: Z.ai Code (main)
+Task: Продолжение ремонта STT/issues #1,#2: восстановление превью из GitHub, диагностика по логам пользователя, фикс рассинхрона схемы БД (correlationId → 500 Истории), подготовка пуша v1.0.20.
+
+Work Log:
+- Токен пользователя (fine-grained PAT) проверен: login=HellShaftSam, НО только read-права (metadata/issues/actions read; contents:write и issues:write ОТСУТСТВУЮТ) → git push 403, комментирование/закрытие issues 403. Нужен новый токен с Contents:Write + Issues:Write (или classic repo)
+- Прочитаны issue #1 (v1.0.14: T-One мусорит «ннанананнрут») и #2 (v1.0.19: воркер мёртв 0xC0000409=3221226505 + в логе продолжает падать CommandHistoryEntry.correlationId)
+- КЛЮЧЕВАЯ ДИАГНОСТИКА: db-ensure-schema.ts (ALTER TABLE для старых БД) уже есть в v1.0.19 (9a7bffa → предок 1d7134f=run#19), но у пользователя ошибка осталась → instrumentation.register() в packaged standalone-сервере НЕ отрабатывает (dev — работает)
+- ВОСПРОИЗВЕДЕНИЕ в песочнице: (1) логика ensure на копии БД без correlationId — колонка добавляется, findMany OK; (2) PRAGMA table_info через $queryRawUnsafe — работает; (3) решающий тест EXE-режима: instrumentation физически удалена, старая БД, GET /api/history → 200 (раньше 500) — подтверждено, что роут-уровневый вызов самодостаточен
+- ФИКС: await ensureSqliteSchema() в каждом хендлере 6 роутов (history, settings, session, aliases, watch-progress, skip-marks); single-flight → ~0 оверхед; коммит 17147c8
+- Превью восстановлено из GitHub-кода: dev-сервер поднят, агент-браузер: главная рендерится, Настройки → вкладка AI открывается без краша (веб-режим: честное сообщение, что локальный AI в EXE), ошибок консоли 0; золотой путь UI: «наруто 20 серия» → запись в Истории команд (ранее 500) — PASS
+- AI selftest на реальных моделях (/tmp/avc-models): PASS=4 FAIL=0 SKIP=0 (A GigaAM decode текста; B битый encoder → процесс ЖИВ с честным отказом; C карантин+fallback T-One; D T-One decode)
+- Незапушенный коммит прошлой сессии f953288 (STT-краш-фикс по образцу SkyrimNet) проверен линтом и selftest — готов к пушу вместе с 17147c8
+- Уточнено по SkyrimNet (MinLL/SkyrimNet-GamePlugin): выбираемые speech-модели + страница Speech-to-Text Test + изоляция тяжёлого AI от хоста — паттерн реализован 1:1 (каталог моделей + SttLiveTestCard + воркер-изоляция крашей)
+
+Stage Summary:
+- Оба бага пользователя закрыты кодом: (1) краш AI Settings/мёртвый STT = битые ONNX-модели из старых установок → integrity-гейт + карантин + авто-fallback + safe-mode + переустановка в 1 клик (f953288); (2) 500 Истории команд = instrumentation не вызывается в EXE → роут-уровневая гарантия синхронизации схемы (17147c8)
+- ГОТОВО К ПУШУ: main = f953288 + 17147c8 → CI run #20 соберёт v1.0.20 автоматически; после пуша проверить run #20 и релиз (EXE + SHA256SUMS.txt), затем закрыть issues #1 и #2 с комментарием
+- БЛОКЕР: токен read-only — нужен токен с Contents:Write + Issues:Write, либо владелец пушит сам: git push origin main
