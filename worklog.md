@@ -1268,3 +1268,21 @@ Stage Summary:
 - Один авторитетный STT: whisper-python (faster-whisper + внешний Silero-VAD в изолированном Python-процессе); sherpa-onnx удалён из пака
 - Классы крашей sherpa (0xC0000409) закрыты конструктивно: Python-исключения + pre-flight integrity + изоляция
 - Ограничения честно: live-микрофон 30+/1-часовая стабильность BLOCKED (нет микрофона в песочнице); Windows-EXE проверяется CI-selftest'ом; CUDA NOT TESTED
+
+---
+Task ID: 11
+Agent: Z.ai Code (main)
+Task: Релиз v1.0.26 — STT replacement доведён до прода
+
+Work Log:
+- CI #23 FAIL: pkg_resources (setuptools) отсутствует в embeddable-питоне → setuptools==75.6.0 в пины
+- CI #24 FAIL: Windows-консоль cp1252 не кодирует кириллицу в stdout selftest → sys.stdout.reconfigure(utf-8) в сервисе + PYTHONUTF8 в драйвере
+- CI #25 (48cbe62) отменён cancel-in-progress (суперсидён новым пушем)
+- CI #26 SUCCESS @ c4efe44: полный пайплайн включая «STT service selftest (Windows, bundled runtime)»
+  PASS: text="На рута 20 серии." | transcribeMs=1142 | modelLoadMs=592 | float32/cpu — публикация релиза v1.0.26
+- Релиз v1.0.26: AVC-Anime-Portable-1.0.26.exe = 174 MB (+64 MB python-рантайм, −sherpa) + SHA256SUMS.txt
+- STT_PACKAGED_EXE_VALIDATION.md дополнен реальными цифрами Windows-selftest
+
+Stage Summary:
+- STT полностью заменён на faster-whisper (Mantella-verified), проверен на реальном Windows в CI ДО публикации
+- Честные остатки: live-микрофон и 1-час стабильность — на машине владельца; CUDA NOT TESTED

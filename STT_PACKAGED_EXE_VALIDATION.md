@@ -1,6 +1,18 @@
-# STT Packaged EXE Validation — v1.0.22
+# STT Packaged EXE Validation — v1.0.22+
 
-Статус: CI-уровень проверки; финальная проверка на машине владельца — за владельцем (после релиза).
+Статус: **CI-уровень проверки ПРОЙДЕН** (run #26 @ c4efe44, 2026-10-05: все шаги success, релиз v1.0.26 опубликован). Финальная проверка на машине владельца — за владельцем (чек-лист §4).
+
+## 1.1 Результат Windows-selftest (реальный runner, бандленный python, до публикации)
+
+Из логов CI run #26 (шаг «STT service selftest (Windows, bundled runtime)»):
+
+```json
+{"wav": "benchmark-ru.wav", "model": "<pin ebe41f70>", "device": "cpu", "computeType": "float32",
+ "modelLoadMs": 592, "audioMs": 2736, "transcribeMs": 1142,
+ "text": "На рута 20 серии.", "expect": "наруто|нарута|рута", "pass": true}
+```
+
+Совпадение с песочницей-на-Linux бит-в-бит по тексту (детерминизм инференса), латентность сопоставима.
 
 ## 1. Что изменилось в упаковке
 
