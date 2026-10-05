@@ -1185,3 +1185,20 @@ Stage Summary:
 - v1.0.20 в проде: STT-защита от краша 0xC0000409 (карантин битых ONNX + авто-fallback + safe-mode + живой тест STT по паттерну SkyrimNet) + schema-sync в API-роутах (фикс 500 Истории в EXE)
 - Issues #1 (мусорный STT) и #2 (краш AI Settings) закрыты с полными диагнозами и инструкциями
 - Все blockers сняты; кредиты: fine-grained PAT с Contents+Issues read/write
+
+---
+Task ID: hotfix-packaged-ai-require-v1.0.21
+Agent: Z.ai Code (main)
+Task: Хотфикс краша EXE при старте «Cannot find module './ai/model-integrity.cjs'» (v1.0.20) + CI-страж раскладки
+
+Work Log:
+- Диагноз по скриншоту пользователя: main.cjs (пакуется в app.asar) делал require('./ai/model-integrity.cjs'); папка ai/ живёт в resources/ai (extraResources из ai-pack) — относительный require работал в dev, ломал packaged-EXE ДО создания окон
+- Проверка v1.0.19-паттерна: спавн воркера (main.cjs startAiWorker) уже использует app.isPackaged ? process.resourcesPath : __dirname — доказанно рабочий в EXE
+- Фикс main.cjs:590 → тот же resourcesPath-паттерн (в обеих ветках проверен симуляцией: PACKAGED и DEV резолвятся и загружаются)
+- Системный аудит: больше «голых» require('./ai/...') в asar-файлах нет (auth/* — относительные внутри auth/**, легальны)
+- Написан страж scripts/check-packaged-layout.mjs: (1) раскладка dist/win-unpacked/resources/ai/*; (2) acorn-токенизация asar-файлов, поиск require('./ai/...') в реальном коде
+- Урок: самодельный stripper комментариев сломался на regex-литералах redact() /[^;\s"']+/ — заменён на acorn 8.15.0; 4 теста стража: T1 OK/T2 CI-FAIL/T3 ловит реальный require/T4 переживает regex-ловушку
+- CI: шаг «Verify packaged AI layer layout» после electron-builder, до публикации релиза
+
+Stage Summary:
+- v1.0.21: краш при старте EXE устранён (require через resourcesPath), класс бага закрыт стражем в CI навсегда

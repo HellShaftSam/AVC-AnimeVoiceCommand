@@ -587,7 +587,14 @@ let aiWorkerQuarantine = null
 /** Безопасный режим (записан на диск — переживает перезапуск) */
 let aiWorkerSafeMode = null
 
-const { checkModelIntegrity, quarantineModel, listQuarantined } = require('./ai/model-integrity.cjs')
+// УРОК v1.0.20 (краш при старте EXE «Cannot find module './ai/model-integrity.cjs'»):
+// main.cjs пакуется в app.asar, а папка ai/ живёт РЯДОМ (resources/ai — extraResources).
+// Относительный require('./ai/...') работал в dev, но ломал packaged-EXE.
+// Используем тот же паттерн разрешения пути, что и для спавна воркера (см. startAiWorker).
+const modelIntegrityPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'ai', 'model-integrity.cjs')
+  : path.join(__dirname, 'ai', 'model-integrity.cjs')
+const { checkModelIntegrity, quarantineModel, listQuarantined } = require(modelIntegrityPath)
 
 function safeModePath() {
   return path.join(app.getPath('userData'), 'ai-safe-mode.json')
