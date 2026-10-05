@@ -486,6 +486,14 @@ def run_selftest(args):
 
 def main():
     global ARGS, SESSION
+    # Windows-консоли (cp1252/cp866) нельзя доверять: JSON с кириллицей обязан
+    # уходить в stdout как UTF-8 всегда (Node-адаптер тоже ставит PYTHONUTF8,
+    # но сервис не должен зависеть от окружения)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — старые пайтон-обёртки без reconfigure
+        pass
     p = argparse.ArgumentParser(description="AVC-Anime faster-whisper STT service")
     p.add_argument("--model", required=True, help="Каталог CTranslate2-модели (local dir)")
     p.add_argument("--vad", help="Путь к silero_vad.onnx (не нужен для --wav selftest)")

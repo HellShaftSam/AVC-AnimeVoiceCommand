@@ -56,7 +56,7 @@ function main() {
 
   // --- 2) selftest сервиса на реальном Windows + бандленном рантайме ---
   console.log(`[ci-stt] selftest: ${FIXTURE} (expect="${EXPECT}")`)
-  const run = sh(PYTHON, [SERVICE, '--model', modelDir, '--wav', FIXTURE, '--expect', EXPECT], { timeout: 300000 })
+  const run = sh(PYTHON, [SERVICE, '--model', modelDir, '--wav', FIXTURE, '--expect', EXPECT], { timeout: 300000, spawnOpts: { env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } } })
   const lines = (run.stdout || '').split('\n').filter((l) => l.trim().startsWith('{'))
   let result = null
   try { result = JSON.parse(lines[lines.length - 1]) } catch { /* ниже честный FAIL */ }
