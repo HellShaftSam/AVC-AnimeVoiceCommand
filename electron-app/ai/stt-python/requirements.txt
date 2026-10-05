@@ -10,3 +10,6 @@ huggingface_hub==0.24.7
 tokenizers==0.19.1
 numpy==1.26.4
 av==12.3.0
+# ctranslate2 4.4.0 импортирует pkg_resources (setuptools) в рантайме;
+# в embeddable-питоне setuptools отсутствует — ставим явно
+setuptools==75.6.0
