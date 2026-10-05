@@ -124,7 +124,7 @@ export interface VoiceApi {
   engineName: 'browser' | 'server' | 'local'
   alwaysListening: boolean
   startPushToTalk: () => Promise<void>
-  stopPushToTalkAndProcess: () => void
+  stopPushToTalkAndProcess: (opts?: { modeOff?: boolean }) => void
   toggleAlwaysListening: () => void
   setAlwaysListening: (v: boolean) => void
   /** Живой уровень микрофона 0..1 (обновляется ~10 раз/с, пока идёт listening) */
@@ -197,6 +197,15 @@ export function useVoice(): VoiceApi {
   const feedFailedRef = useRef(false)
   /** Страховка: локальный flush не вернул финал (воркер умер/завис) */
   const localFlushGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** УРОК v1.0.26: true — идёт удержание рации (PTT); always-listening живёт с false */
+  const captureHeldRef = useRef(false)
+  /** Эхо-глик: до этой метки не кормим STT (не в удержании рации) — защита от
+   *  самозахвата эха команды из колонок → призрачных повторов */
+  const echoGuardUntilRef = useRef(0)
+  /** Последняя исполненная финальная фраза — дедупликация дублей (эхо/двойные потоки) */
+  const lastExecutedFinalRef = useRef<{ text: string; at: number } | null>(null)
+  /** Флаг «стоп по мёртвому микрофону» — такой стоп обязан обойти guard always-listening */
+  const deadMicStopRef = useRef(false)
   // Web Speech API
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const finalTranscriptRef = useRef('')
@@ -263,6 +272,7 @@ export function useVoice(): VoiceApi {
         if (noAudioSinceRef.current === null) {
           noAudioSinceRef.current = now
         } else if (now - noAudioSinceRef.current >= 5000) {
+          deadMicStopRef.current = true
           stopRef.current?.()
           useAvcStore
             .getState()
@@ -293,8 +303,41 @@ export function useVoice(): VoiceApi {
     rafRef.current = requestAnimationFrame(tick)
   }, [])
 
+  /**
+   * УРОК v1.0.26 («модель постоянно слушает даже когда рация отпущена»):
+   * локальная сессия обязана останавливаться ФИЗИЧЕСКИ — отключить processor/source
+   * и закрыть AudioContext. Раньше stopPushToTalkAndProcess только обнулял ref:
+   * ScriptProcessor продолжал жить и кормить STT. Каждый пресс PTT добавлял ещё
+   * одну параллельную цепочку захвата одного и того же микрофона → дублированные
+   * потоки со сдвигом давали наложения («нарууу-рутуол»), повторное распознавание
+   * старой речи и призрачные команды.
+   */
+  const stopLocalSession = useCallback(() => {
+    const local = localSessionRef.current
+    localSessionRef.current = null
+    if (local) {
+      try { local.processor.disconnect() } catch { /* уже разобрано */ }
+      try { local.source.disconnect() } catch { /* уже разобрано */ }
+      void local.ctx.close().catch(() => undefined)
+    }
+    if (maxTimerRef.current) {
+      clearTimeout(maxTimerRef.current)
+      maxTimerRef.current = null
+    }
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    analyserRef.current = null
+    setMicLevel(0)
+  }, [])
+
   const rearmIfNeeded = useCallback(() => {
     if (!alwaysRef.current || !mountedRef.current) return
+    // Живая локальная сессия (always-listening) не требует перезапуска: Python-VAD
+    // сам начнёт следующую фразу. Раньше здесь рестартилась вся WebAudio-цепочка
+    // на каждую фразу — лишний чурн и риск расщепления сессий.
+    if (localSessionRef.current) return
     if (rearmTimerRef.current) clearTimeout(rearmTimerRef.current)
     rearmTimerRef.current = setTimeout(() => {
       if (alwaysRef.current && mountedRef.current && !processingRef.current) {
@@ -349,6 +392,12 @@ export function useVoice(): VoiceApi {
         scheduleErrorClear()
       } finally {
         processingRef.current = false
+        // Always-listening с живой локальной сессией: сессия НЕ перезапускается
+        // (Python-VAD сам ждёт следующую фразу), поэтому статус честно возвращаем
+        // в «Слушаю» вместо зависшего «idle»
+        if (alwaysRef.current && localSessionRef.current) {
+          useAvcStore.getState().setVoiceStatus('listening', 'Слушаю (локально)...')
+        }
         rearmIfNeeded()
       }
     },
@@ -590,6 +639,9 @@ export function useVoice(): VoiceApi {
     const ai = getElectronBridge()?.ai
     if (!ai?.available) return false
     try {
+      // Защита от рассинхрона: любая предыдущая локальная сессия убивается явно
+      // (иначе — вторая параллельная цепочка кормит STT тем же микрофоном)
+      stopLocalSession()
       const settings = useAvcStore.getState().settings
       const stream = await ensureStream()
       if (seq !== sessionSeqRef.current || !mountedRef.current) return true
@@ -608,6 +660,10 @@ export function useVoice(): VoiceApi {
       source.connect(analyser)
       analyserRef.current = analyser
       processor.onaudioprocess = (e) => {
+        // Эхо-глик (урок v1.0.26): сразу после исполненной команды не кормим STT —
+        // иначе эхо команды из колонок запускает призрачную фразу. Во время
+        // удержания рации глик НЕ действует (там пользователь говорит сам).
+        if (!captureHeldRef.current && Date.now() < echoGuardUntilRef.current) return
         const input = e.inputBuffer.getChannelData(0)
         const int16 = new Int16Array(input.length)
         const gain = settings.micGain || 1
@@ -623,13 +679,8 @@ export function useVoice(): VoiceApi {
           // воркер умер/завис — не молчим: честная ошибка и останов сессии (фаза 6.6)
           if (feedFailedRef.current) return
           feedFailedRef.current = true
-          try {
-            processor.disconnect()
-            source.disconnect()
-          } catch {
-            /* уже разобрано */
-          }
-          localSessionRef.current = null
+          captureHeldRef.current = false
+          stopLocalSession()
           teardownAudio()
           useAvcStore
             .getState()
@@ -648,17 +699,23 @@ export function useVoice(): VoiceApi {
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю (локально)...')
       startRafLoop(false)
       startedAtRef.current = performance.now()
-      // страховка капа длительности
+      // кап длительности фразы: принудительный финал длинной речи. В always-listening
+      // сессия продолжает жить (следующий кап через capMs), в PTT — завершаем захват.
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
-      maxTimerRef.current = setTimeout(() => {
+      const capMs = Math.min(60000, Math.max(4000, settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS))
+      maxTimerRef.current = setTimeout(function capTick() {
         void ai.flushStt().catch(() => undefined)
-        stopRef.current?.()
-      }, Math.min(60000, Math.max(4000, settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS)))
+        if (alwaysRef.current && mountedRef.current && localSessionRef.current) {
+          maxTimerRef.current = setTimeout(capTick, capMs)
+        } else {
+          stopRef.current?.()
+        }
+      }, capMs)
       return true
     } catch {
       return false
     }
-  }, [ensureStream, startRafLoop])
+  }, [ensureStream, startRafLoop, stopLocalSession])
 
   // подписки на события локального STT (монтируются один раз)
   useEffect(() => {
@@ -666,8 +723,12 @@ export function useVoice(): VoiceApi {
     if (!ai?.available) return
     const offPartial = ai.onSttPartial((p) => {
       if (p.text) setInterimText(p.text)
-      // §12: безопасное раннее исполнение ещё до финала; §14 — один раз на фразу
-      if (p.earlyCommand && !localEarlyDoneRef.current.has(p.utteranceId)) {
+      // §12: безопасное раннее исполнение ещё до финала; §14 — один раз на фразу.
+      // УРОК v1.0.26: ранние команды — ТОЛЬКО в удержании рации. В always-listening
+      // частичная фраза чужого аудио (диалоги аниме из колонок, речь за кадром)
+      // запускала паузу/громкость/перемотку без ведома пользователя: частичные
+      // транскрипты не проходят wake-word фильтр в принципе.
+      if (p.earlyCommand && captureHeldRef.current && !localEarlyDoneRef.current.has(p.utteranceId)) {
         localEarlyDoneRef.current.add(p.utteranceId)
         if (localEarlyDoneRef.current.size > 100) {
           const first = localEarlyDoneRef.current.values().next().value
@@ -682,20 +743,21 @@ export function useVoice(): VoiceApi {
       }
     })
     const offFinal = ai.onSttFinal((p) => {
-      // §14: если фраза уже исполнена рано — финал не исполняем второй раз
-      if (p.earlyCommandType || localEarlyDoneRef.current.has(p.utteranceId)) {
-        if (!localFinalHandledRef.current.has(p.utteranceId)) {
-          localFinalHandledRef.current.add(p.utteranceId)
-          if (localFinalHandledRef.current.size > 100) {
-            const first = localFinalHandledRef.current.values().next().value
-            if (first !== undefined) localFinalHandledRef.current.delete(first)
-          }
-          const cur = useAvcStore.getState().voiceStatus
-          if (cur === 'listening' || cur === 'recognizing') useAvcStore.getState().setVoiceStatus('idle')
+      // §14: финал не исполняется второй раз, если раннее исполнение РЕАЛЬНО
+      // произошло в рендерере (удержание рации). Голая метка earlyCommandType от
+      // пайплайна (когда рендерер early сознательно не исполнял — always-listening)
+      // больше НЕ теряет финал: раньше такие команды молча пропадали.
+      if (localFinalHandledRef.current.has(p.utteranceId)) return
+      if (localEarlyDoneRef.current.has(p.utteranceId)) {
+        localFinalHandledRef.current.add(p.utteranceId)
+        if (localFinalHandledRef.current.size > 100) {
+          const first = localFinalHandledRef.current.values().next().value
+          if (first !== undefined) localFinalHandledRef.current.delete(first)
         }
+        const cur = useAvcStore.getState().voiceStatus
+        if (cur === 'listening' || cur === 'recognizing') useAvcStore.getState().setVoiceStatus('idle')
         return
       }
-      if (localFinalHandledRef.current.has(p.utteranceId)) return
       localFinalHandledRef.current.add(p.utteranceId)
       if (localFlushGuardRef.current) {
         clearTimeout(localFlushGuardRef.current)
@@ -706,8 +768,23 @@ export function useVoice(): VoiceApi {
         if (first !== undefined) localFinalHandledRef.current.delete(first)
       }
       if (p.text) {
+        // ДЕДУПЛИКАЦИЯ ДУБЛЕЙ (урок v1.0.26): та же фраза в пределах 2.5 с —
+        // исполняется один раз. Раньше наложенные/дублированные цепочки захвата
+        // давали N копий одной команды подряд — плеер «дёргался».
+        const norm = p.text.trim().toLowerCase().replace(/\s+/g, ' ')
+        const now = Date.now()
+        const prev = lastExecutedFinalRef.current
+        if (norm && prev && prev.text === norm && now - prev.at < 2500) {
+          const cur = useAvcStore.getState().voiceStatus
+          if (cur === 'listening' || cur === 'recognizing') {
+            useAvcStore.getState().setVoiceStatus('idle', 'Дубликат команды пропущен')
+          }
+          return
+        }
+        if (norm) lastExecutedFinalRef.current = { text: norm, at: now }
+        // Эхо-глик после команды: колонки могут «дочитать» эхо в микрофон
+        if (!captureHeldRef.current) echoGuardUntilRef.current = Date.now() + 1500
         useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
-        teardownAudio()
         void handleRecognizedText(p.text)
       } else if (!alwaysRef.current) {
         // 6.4: речь была (VAD сработала), но текста нет — честно сообщаем
@@ -720,7 +797,7 @@ export function useVoice(): VoiceApi {
       offPartial()
       offFinal()
     }
-  }, [handleRecognizedText, teardownAudio])
+  }, [handleRecognizedText])
 
   const startPushToTalk = useCallback(async () => {
     const st = useAvcStore.getState()
@@ -757,10 +834,13 @@ export function useVoice(): VoiceApi {
     if (exeLocalAvailable) {
       const okLocal = await startLocalSession()
       if (okLocal) {
-        // РЕЖИМ РАЦИИ: пока кнопка удерживается — всё аудио считается речью
-        // (без VAD-гейта). Финал — по отпусканию (stopPushToTalkAndProcess).
+        // РЕЖИМ РАЦИИ — только для удержания PTT (урок v1.0.26). В always-listening
+        // рация включалась ошибочно: весь шум/музыка считались речью (VAD обходился),
+        // 12-секундные «фразы» из тишины давали галлюцинации Whisper и призрачные
+        // команды. Always-listening живёт на VAD-гейте Python-сервиса.
+        captureHeldRef.current = !alwaysRef.current
         void getElectronBridge()
-          ?.ai?.setCaptureMode?.(true)
+          ?.ai?.setCaptureMode?.(captureHeldRef.current)
           .catch(() => undefined)
         return
       }
@@ -803,58 +883,84 @@ export function useVoice(): VoiceApi {
     await startServerSession()
   }, [isMicSupported, scheduleErrorClear, startBrowserSession, startServerSession, startLocalSession])
 
-  const stopPushToTalkAndProcess = useCallback(() => {
-    sessionSeqRef.current++ // инвалидируем незавершённые асинхронные старты
-    if (maxTimerRef.current) {
-      clearTimeout(maxTimerRef.current)
-      maxTimerRef.current = null
-    }
-    // Локальный движок: завершить фразу в воркере (final придёт событием)
-    const local = localSessionRef.current
-    if (local) {
-      localSessionRef.current = null
-      teardownAudio()
-      const ai = getElectronBridge()?.ai
-      // снимаем режим рации → движок завершает захваченную фразу,
-      // затем страховочный flush (на случай, если capture не был включён)
-      void ai
-        ?.setCaptureMode?.(false)
-        .then(() => ai.flushStt())
-        .catch(() => ai.flushStt().catch(() => undefined))
-      useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
-      // 6.6: если финал так и не пришёл (воркер завис) — снимаем зависший статус
-      if (localFlushGuardRef.current) clearTimeout(localFlushGuardRef.current)
-      localFlushGuardRef.current = setTimeout(() => {
-        const cur = useAvcStore.getState().voiceStatus
-        if (cur === 'recognizing') {
-          useAvcStore
-            .getState()
-            .setVoiceStatus('error', 'STT не вернул результат (воркер не отвечает). Перезапустите голосовой сервис в Настройках.')
-          scheduleErrorClear()
-        }
-      }, 10000)
-      return
-    }
-    // Web Speech: остановка — результат придёт в onend; индикатор глушим сразу
-    // (защита от движка, который так и не вызовет onend)
-    const recognition = recognitionRef.current
-    if (recognition && recognitionActiveRef.current) {
-      teardownAudio()
-      try {
-        recognition.stop()
-      } catch {
-        recognitionActiveRef.current = false
+  const stopPushToTalkAndProcess = useCallback(
+    (opts?: { modeOff?: boolean }) => {
+      // Always-listening: одиночный Ctrl+Space/клик не управляет фоновой сессией —
+      // она останавливается только выключением режима (setAlwaysListening(false)).
+      // Исключение — стоп по мёртвому микрофону (обязан остановить сессию реально).
+      const forceStop = deadMicStopRef.current
+      deadMicStopRef.current = false
+      if (!forceStop && alwaysRef.current && !captureHeldRef.current && !opts?.modeOff) return
+      sessionSeqRef.current++ // инвалидируем незавершённые асинхронные старты
+      if (maxTimerRef.current) {
+        clearTimeout(maxTimerRef.current)
+        maxTimerRef.current = null
       }
-      return
-    }
-    // Серверный движок: остановить запись и обработать
-    teardownAudio()
-    const recorder = recorderRef.current
-    recorderRef.current = null
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.stop()
-    }
-  }, [teardownAudio])
+      // Локальный движок: завершить фразу в воркере (final придёт событием)
+      const local = localSessionRef.current
+      if (local) {
+        captureHeldRef.current = false
+        // УРОК v1.0.26: физическая остановка захвата. Раньше здесь только
+        // обнулялся ref при ЖИВОМ ScriptProcessor — микрофон бесконечно кормил
+        // STT («модель постоянно слушает даже когда рация отпущена»).
+        stopLocalSession()
+        const ai = getElectronBridge()?.ai
+        // снимаем режим рации → движок завершает захваченную фразу,
+        // затем страховочный flush (на случай, если capture не был включён)
+        void ai
+          ?.setCaptureMode?.(false)
+          .then(() => ai.flushStt())
+          .catch(() => ai.flushStt().catch(() => undefined))
+        if (alwaysRef.current || opts?.modeOff) {
+          // Режим выключен: финал (если фраза была в полёте) придёт событием
+          // и исполнится подпиской; «Обрабатываю...» здесь — ложный статус
+          useAvcStore.getState().setVoiceStatus('idle')
+          return
+        }
+        useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
+        // 6.6: если финал так и не пришёл (воркер завис) — снимаем зависший статус
+        if (localFlushGuardRef.current) clearTimeout(localFlushGuardRef.current)
+        localFlushGuardRef.current = setTimeout(() => {
+          const cur = useAvcStore.getState().voiceStatus
+          if (cur === 'recognizing') {
+            useAvcStore
+              .getState()
+              .setVoiceStatus('error', 'STT не вернул результат (воркер не отвечает). Перезапустите голосовой сервис в Настройках.')
+            scheduleErrorClear()
+          }
+        }, 10000)
+        return
+      }
+      // Локальной сессии уже нет (кап/ошибка/повторный стоп) — тем не менее
+      // ГАРАНТИРОВАННО снимаем режим рации, чтобы Python не остался в состоянии
+      // «всё аудио = речь» (защита от залипания capture-mode)
+      const ai = getElectronBridge()?.ai
+      if (ai?.available) {
+        void ai.setCaptureMode?.(false).catch(() => undefined)
+        void ai.flushStt().catch(() => undefined)
+      }
+      // Web Speech: остановка — результат придёт в onend; индикатор глушим сразу
+      // (защита от движка, который так и не вызовет onend)
+      const recognition = recognitionRef.current
+      if (recognition && recognitionActiveRef.current) {
+        teardownAudio()
+        try {
+          recognition.stop()
+        } catch {
+          recognitionActiveRef.current = false
+        }
+        return
+      }
+      // Серверный движок: остановить запись и обработать
+      teardownAudio()
+      const recorder = recorderRef.current
+      recorderRef.current = null
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop()
+      }
+    },
+    [teardownAudio, stopLocalSession, scheduleErrorClear],
+  )
 
   const setAlwaysListening = useCallback(
     (v: boolean) => {
@@ -874,8 +980,8 @@ export function useVoice(): VoiceApi {
         void startPushToTalk()
       } else {
         if (rearmTimerRef.current) clearTimeout(rearmTimerRef.current)
-        if (useAvcStore.getState().voiceStatus === 'listening') {
-          stopPushToTalkAndProcess()
+        if (useAvcStore.getState().voiceStatus === 'listening' || localSessionRef.current) {
+          stopPushToTalkAndProcess({ modeOff: true })
         }
       }
     },
@@ -930,15 +1036,12 @@ export function useVoice(): VoiceApi {
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
       streamDeviceRef.current = null
-      // локальный AI: закрываем WebAudio-сессию
-      const local = localSessionRef.current
-      if (local) {
-        localSessionRef.current = null
-        try { local.processor.disconnect() } catch { /* ок */ }
-        void local.ctx.close().catch(() => undefined)
-      }
+      // локальный AI: физическая остановка захвата (урок v1.0.26) + снятие рации
+      captureHeldRef.current = false
+      stopLocalSession()
+      void getElectronBridge()?.ai?.setCaptureMode?.(false).catch(() => undefined)
     }
-  }, [teardownAudio])
+  }, [teardownAudio, stopLocalSession])
 
   return {
     voiceStatus,
