@@ -118,18 +118,21 @@ async function validateUrl(url, { expectedSize, sha256 } = {}) {
   return { status: 'FAIL', reason: 'Слишком много редиректов', chain }
 }
 
-async function checkSherpa() {
+async function checkPythonRuntime() {
+  // v1.0.22: STT — faster-whisper в бандленном python-рантайме. В CI рантайм
+  // собирается ПОСЛЕДУЮЩИМ шагом (Assemble bundled Python runtime) — здесь он
+  // может отсутствовать (SKIP); если уже собран — проверяем import-цепочку.
+  const pyDir = path.join(ROOT, 'electron-app', 'python-runtime')
+  const exe = path.join(pyDir, process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  if (!fs.existsSync(exe)) {
+    return { status: 'SKIP', reason: 'python-runtime не собран локально (в CI — отдельный шаг сборки)' }
+  }
   try {
-    const candidates = [
-      path.join(ROOT, 'electron-app', 'node_modules', 'sherpa-onnx-node', 'package.json'),
-    ]
-    const found = candidates.find((p) => fs.existsSync(p))
-    if (!found) return { status: 'FAIL', reason: 'sherpa-onnx-node не установлен' }
-    const pkg = JSON.parse(fs.readFileSync(found, 'utf8'))
-    const platformPkgs = fs.readdirSync(path.join(ROOT, 'electron-app', 'node_modules')).filter((d) => d.startsWith('sherpa-onnx-'))
-    return { status: 'PASS', version: pkg.version, platformPackages: platformPkgs }
+    const { execFileSync } = await import('node:child_process')
+    const out = execFileSync(exe, ['-c', 'import faster_whisper, onnxruntime, numpy; print(faster_whisper.__version__)'], { encoding: 'utf8', timeout: 120000 })
+    return { status: 'PASS', version: out.trim() }
   } catch (e) {
-    return { status: 'FAIL', reason: e.message }
+    return { status: 'FAIL', reason: `import faster_whisper failed: ${String(e.message).slice(0, 200)}` }
   }
 }
 
@@ -146,22 +149,28 @@ async function main() {
     console.log(`[${res.status}] ${asset} — ${res.reason || `HTTP ${res.httpStatus}, len=${res.contentLength ?? '?'}, ranges=${res.acceptRanges}, probe=${res.probedBytes ?? '?'}B`}`)
   }
 
-  // VAD (общий для всех движков)
+  // VAD (общий для всех движков: внешний Silero faster-whisper)
   const vad = manifest.components?.vad
   if (vad?.url) {
     addRow(`VAD: ${vad.name}`, vad.url, await validateUrl(vad.url, { expectedSize: vad.sizeBytes, sha256: vad.sha256 }))
   }
 
-  // Каталог моделей STT (манифест v3): каждая модель + зеркала
+  // Каталог моделей STT (манифест v5): multiFile — каждый файл отдельно
   for (const m of manifest.models || []) {
-    addRow(`STT: ${m.name} (${m.profile})`, m.url, await validateUrl(m.url, { expectedSize: m.sizeBytes, sha256: m.sha256 ?? undefined }))
-    for (const mirror of m.mirrors || []) {
-      addRow(`STT mirror: ${m.id}`, mirror, await validateUrl(mirror, {}))
+    if (m.multiFile && Array.isArray(m.files)) {
+      for (const f of m.files) {
+        addRow(`STT: ${m.id} :: ${f.name}`, f.url, await validateUrl(f.url, { expectedSize: f.sizeBytes, sha256: f.sha256 ?? undefined }))
+      }
+    } else {
+      addRow(`STT: ${m.name} (${m.profile})`, m.url, await validateUrl(m.url, { expectedSize: m.sizeBytes, sha256: m.sha256 ?? undefined }))
+      for (const mirror of m.mirrors || []) {
+        addRow(`STT mirror: ${m.id}`, mirror, await validateUrl(mirror, {}))
+      }
     }
   }
 
-  // Рантаймы
-  addRow('Runtime: sherpa-onnx-node', '(npm)', await checkSherpa())
+  // Рантаймы (v1.0.22: python-рантайм faster-whisper вместо sherpa-onnx)
+  addRow('Runtime: python-runtime (faster-whisper)', '(бандл)', await checkPythonRuntime())
 
   const requiredModels = (manifest.models || []).filter((m) => m.required)
   const requiredFail =

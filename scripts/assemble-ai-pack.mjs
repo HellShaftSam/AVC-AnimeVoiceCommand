@@ -8,7 +8,7 @@
  *   - остаётся только голосовой слой: sherpa-onnx (STT+VAD) + ai-worker + voice-pipeline.
  *
  * Собирает electron-app/ai-pack/:
- *   ai/                    — voice-pipeline + stt-service + model-manager + ai-worker.cjs + models-manifest.json
+ *   ai/                    — voice-pipeline + whisper-python-engine + model-manager + ai-worker.cjs + models-manifest.json
  *     node_modules/        — ЧИСТЫЕ КОПИИ нативных пакетов (asar неприменим: воркер —
  *                            отдельный процесс на чистом Node, а napi-бинарники должны
  *                            лежать реальными файлами)
@@ -62,12 +62,12 @@ function main() {
     else fs.copyFileSync(s, d)
   }
 
-  // 2) нативные npm-пакеты, нужные воркеру — ТОЛЬКО sherpa-onnx (STT+VAD).
-  //    node-llama-cpp исключён из релиза (решение владельца, 1.0.12).
+  // 2) нативные npm-пакеты, нужные воркеру.
+  //    v1.0.22: sherpa-onnx УДАЛЁН — STT переехал на faster-whisper (Python-сервис),
+  //    VAD работает через onnxruntime внутри python-рантайма.
   const nmSrc = path.join(APP, 'node_modules')
   const nmDest = path.join(aiDest, 'node_modules')
-  const wanted = ['sherpa-onnx-node']
-  for (const p of PLATFORM_PKGS[process.platform] || []) wanted.push(p)
+  const wanted = []
 
   for (const w of wanted) {
     const src = path.join(nmSrc, w)

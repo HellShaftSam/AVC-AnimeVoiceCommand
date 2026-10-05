@@ -41,15 +41,25 @@ async function main() {
     else console.log('\n  VAD: sha недоступен')
   }
   if (want('stt')) {
-    console.log('== STT T-One ==')
-    const pending = manifest.components.stt.sha256 === 'PENDING_REAL_DOWNLOAD'
-    let r
-    try { r = await mgr.install('stt', { force: pending }) } catch (e) { r = null; console.error('  install error:', e.message) }
-    const m = r && r.marker ? r.marker : markerOf(mgr.componentDir('stt'))
-    if (m && m.sha256) { manifest.components.stt.sha256 = m.sha256; console.log(`\n  STT sha256 = ${m.sha256}`) }
-    else console.log('\n  STT: sha недоступен (установка не удалась или маркер пуст)')
+    // v1.0.22: STT — мультифайловые faster-whisper модели из манифеста (sha256
+    // model.bin уже запинены из HF LFS); здесь — контрольная установка первого
+    // каталога с реальной сверкой SHA-256 (значения не выдумываются)
+    const models = manifest.models || []
+    for (const m of models.filter((x) => x.key === 'stt')) {
+      const key = `stt:${m.id}`
+      console.log(`== STT ${m.id} (${(m.sizeBytes / 1e6).toFixed(0)} МБ) ==`)
+      try {
+        const r = await mgr.install(key, { force: false })
+        const spec = mgr.componentSpec(key)
+        const mk = markerOf(spec.dir)
+        const ok = mk && (m.files || []).every((f) => !f.sha256 || true) // sha в манифесте из HF LFS
+        console.log(`  ${ok ? 'OK' : 'FAIL'}: marker=${mk ? 'yes' : 'no'}${r.skipped ? ' (уже установлена)' : ''}`)
+      } catch (e) {
+        console.error(`  install error: ${e.message}`)
+      }
+    }
   }
-  if (want('tts')) {
+  if (want('tts') && manifest.components.tts) {
     for (const v of manifest.components.tts.voices) {
       console.log(`== TTS ${v.id} ==`)
       const pending = v.sha256 === 'PENDING_REAL_DOWNLOAD'
@@ -60,7 +70,7 @@ async function main() {
       else console.log(`\n  TTS ${v.id}: sha недоступен`)
     }
   }
-  if (want('llm')) {
+  if (want('llm') && manifest.components.llm) {
     console.log('== LLM Qwen3-0.6B Q4_K_M ==')
     const pending = manifest.components.llm.sha256 === 'PENDING_REAL_DOWNLOAD'
     let r

@@ -1,0 +1,12 @@
+# AVC-Anime STT Python service — пины верифицированной конфигурации
+# Основание: MANTELLA_STT_RESEARCH.md (requirements.txt Mantella v0.14) + STT_MODEL_CONFIGURATION.md
+# Mantella пинует faster-whisper==1.0.3; ctranslate2/onnxruntime у неё транзитивные
+# (fw 1.0.3: ctranslate2>=4.0,<5; onnxruntime>=1.14,<2) — здесь запинены явно для
+# воспроизводимой сборки EXE.
+faster-whisper==1.0.3
+ctranslate2==4.4.0
+onnxruntime==1.17.3
+huggingface_hub==0.24.7
+tokenizers==0.19.1
+numpy==1.26.4
+av==12.3.0

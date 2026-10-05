@@ -655,10 +655,11 @@ function modelsDirConfigPath() {
   return path.join(app.getPath('userData'), 'models-dir.json')
 }
 
-/** Релиз 1.0.15: модель по умолчанию — GigaAM v3 (точная). Значения sttModel,
- *  записанные СТАРЫМ дефолтом (t-one-russian) без явного выбора пользователя
- *  (sttModelChosen), считаются остатком старого дефолта и НЕ блокируют новый. */
-const STT_MODEL_DEFAULT = 'gigaam-v3-russian'
+/** v1.0.22: модель по умолчанию — faster-whisper base (Mantella default, верифицировано).
+ *  Значения sttModel, записанные старыми дефолтами (t-one/gigaam) без явного
+ *  выбора пользователя, считаются остатком старого дефолта и НЕ блокируют новый. */
+const STT_MODEL_DEFAULT = 'faster-whisper-base'
+const STT_MODEL_LEGACY_DEFAULTS = ['t-one-russian', 'gigaam-v3-russian', 'gigaam-v2-russian']
 
 function readModelsDirConfig() {
   try {
@@ -666,8 +667,8 @@ function readModelsDirConfig() {
     const dir = typeof raw.modelsDir === 'string' ? raw.modelsDir.trim() : ''
     let sttModel = typeof raw.sttModel === 'string' && /^[a-z0-9-]{1,64}$/i.test(raw.sttModel) ? raw.sttModel : null
     const chosen = raw.sttModelChosen === true
-    // миграция старого дефолта: t-one-russian без явного выбора → новый дефолт
-    if (sttModel === 't-one-russian' && !chosen) sttModel = null
+    // миграция старых дефолтов: легаси-модель без явного выбора → новый дефолт
+    if (sttModel && STT_MODEL_LEGACY_DEFAULTS.includes(sttModel) && !chosen) sttModel = null
     return {
       modelsDir: dir && path.isAbsolute(dir) ? dir : null,
       sttModel,
@@ -831,7 +832,7 @@ function startAiWorker(retry = 0) {
             const rec = { modelId: requestedModel, code, at: new Date().toISOString(), reason: 'native-crash-loop при целостных файлах' }
             writeSafeMode(rec)
             aiWorkerSafeMode = rec
-            aiWorkerFailed = `Модель ${requestedModel} дважды вызвала нативный краш (код ${code}) при целостных файлах — включён безопасный режим на T-One. Вернуть модель можно переустановкой в Настройках → AI.`
+            aiWorkerFailed = `Модель ${requestedModel} дважды вызвала краш воркера (код ${code}) при целостных файлах — включён безопасный режим на healthier-модели. Вернуть модель можно переустановкой в Настройках → AI.`
             log(`[AI] ${aiWorkerFailed}`)
             notifyWorkerState()
             setTimeout(() => startAiWorker(0), 1000)

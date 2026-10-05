@@ -21,7 +21,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { EventEmitter } = require('events')
-const { writeWavFromFloat32 } = require('./stt-service.cjs')
+const { writeWavFromFloat32 } = require('./audio-wav.cjs')
 
 function lazySherpa() {
   try {

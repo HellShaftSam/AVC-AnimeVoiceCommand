@@ -40,6 +40,8 @@ const REQUIRED_RESOURCES = [
   'resources/ai/ai-worker.cjs',
   'resources/ai/models-manifest.json',
   'resources/ai/voice-pipeline.cjs',
+  'resources/ai/stt-python/stt_service.py',
+  'resources/python-runtime/python.exe',
 ]
 
 if (fs.existsSync(UNPACKED)) {

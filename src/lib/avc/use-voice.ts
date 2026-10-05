@@ -582,7 +582,7 @@ export function useVoice(): VoiceApi {
 
   /**
    * Движок «local» (спецификация §4–§14): захват 16 кГц → IPC → Silero VAD +
-   * T-One стриминговый STT в AI-воркере. Частичные результаты — interimText +
+   * Локальный STT в AI-воркере (v1.0.22: faster-whisper). Частичные результаты — interimText +
    * безопасное раннее исполнение (§12); финал — тот же handleRecognizedText (§41).
    */
   const startLocalSession = useCallback(async () => {

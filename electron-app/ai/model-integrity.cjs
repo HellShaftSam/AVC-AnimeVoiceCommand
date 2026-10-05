@@ -51,6 +51,63 @@ const CATALOG_FILES = {
   'gigaam-v2-russian': ['model.int8.onnx', 'tokens.txt'],
 }
 
+// --- faster-whisper (CTranslate2) — движок whisper-python (v1.0.22) -------------
+
+/** Минимальные размеры файлов CTranslate2-моделей (занижены: ловим обрыв/усечение) */
+const WHISPER_MIN_FILE_BYTES = {
+  'model.bin': 10 * 1024 * 1024, // самый мелкий (tiny) = 75 МБ
+  'config.json': 200,
+  'tokenizer.json': 512 * 1024, // ~2.2 МБ реальный
+  'vocabulary.txt': 100 * 1024, // ~460 КБ реальный
+  'vocabulary.json': 100 * 1024, // large-v3: ~1 МБ
+}
+
+/** CTranslate2-модель — НЕ ONNX: protobuf-walk неприменим, integrity = размеры
+ *  (минимумы + сверка с маркером установки). CTranslate2 при повреждении кидает
+ *  Python-исключение (не fail-fast), но честнее поймать это до загрузки. */
+function isWhisperModelId(id) {
+  return typeof id === 'string' && id.startsWith('faster-whisper-')
+}
+
+function whisperExpectedFiles(dir) {
+  const vocab = fs.existsSync(path.join(dir, 'vocabulary.txt'))
+    ? 'vocabulary.txt'
+    : (fs.existsSync(path.join(dir, 'vocabulary.json')) ? 'vocabulary.json' : null)
+  const base = ['model.bin', 'config.json', 'tokenizer.json']
+  return vocab ? base.concat(vocab) : base
+}
+
+/** Целостность faster-whisper модели (marker files + минимальные размеры) */
+function checkWhisperModelIntegrity(modelsDir, modelId) {
+  const dir = path.join(modelsDir, 'stt', modelId)
+  const problems = []
+  if (!fs.existsSync(dir)) return { ok: false, modelId, dir, problems: ['Каталог модели отсутствует'], markerFound: false }
+  const marker = readMarker(dir)
+  const markerFiles = (marker && marker.files && typeof marker.files === 'object') ? marker.files : null
+  for (const f of whisperExpectedFiles(dir)) {
+    const p = path.join(dir, f)
+    let st = null
+    try { st = fs.statSync(p) } catch { st = null }
+    if (!st || !st.isFile()) {
+      problems.push(`Файл отсутствует: ${f}`)
+      continue
+    }
+    if (st.size === 0) {
+      problems.push(`Файл пустой: ${f}`)
+      continue
+    }
+    const min = WHISPER_MIN_FILE_BYTES[f] || 200
+    if (st.size < min) {
+      problems.push(`Файл усечён: ${f} (${st.size} байт < ожидаемых ${min})`)
+      continue
+    }
+    if (markerFiles && typeof markerFiles[f] === 'number' && st.size < markerFiles[f]) {
+      problems.push(`Размер меньше зафиксированного при установке: ${f} (${st.size} < ${markerFiles[f]})`)
+    }
+  }
+  return { ok: problems.length === 0, modelId, dir, problems, markerFound: !!marker }
+}
+
 function markerPath(dir) {
   return path.join(dir, '.avc-installed.json')
 }
@@ -176,6 +233,8 @@ function onnxProtobufWalkOk(file) {
 function checkModelIntegrity(modelsDir, modelId) {
   const dir = path.join(modelsDir, 'stt', modelId)
   const problems = []
+  // v1.0.22: faster-whisper модели (CTranslate2) — свои правила (не ONNX)
+  if (isWhisperModelId(modelId)) return checkWhisperModelIntegrity(modelsDir, modelId)
   const files = CATALOG_FILES[modelId]
   if (!files) return { ok: false, modelId, dir, problems: [`Неизвестная модель каталога: ${modelId}`], markerFound: false }
   if (!fs.existsSync(dir)) return { ok: false, modelId, dir, problems: ['Каталог модели отсутствует'], markerFound: false }
@@ -278,12 +337,12 @@ function listQuarantined(modelsDir) {
 }
 
 /**
- * Первый ЗДОРОВЫЙ id модели из приоритетной цепочки.
- * preferred → gigaam-v3 → t-one → gigaam-v2; повреждённые пропускаются.
- * exclude — id, который нельзя выбирать (безопасный режим после нативного краша).
+ * Первый ЗДОРОВЫЙ id модели из приоритетной цепочки (v1.0.22: faster-whisper).
+ * preferred → base → tiny → small → medium; повреждённые пропускаются.
+ * exclude — id, который нельзя выбирать (безопасный режим).
  */
 function resolveHealthyModelId(modelsDir, preferred, exclude) {
-  const chain = [preferred, 'gigaam-v3-russian', 't-one-russian', 'gigaam-v2-russian']
+  const chain = [preferred, 'faster-whisper-base', 'faster-whisper-tiny', 'faster-whisper-small', 'faster-whisper-medium']
     .filter(Boolean)
     .filter((id, i, a) => a.indexOf(id) === i)
     .filter((id) => !exclude || id !== exclude)

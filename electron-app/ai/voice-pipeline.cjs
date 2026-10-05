@@ -313,18 +313,18 @@ class VoicePipeline extends EventEmitter {
   /**
    * Бенчмарк «Проверить скорость на этом ПК» (спецификация STT): декодирование
    * тестового WAV активным движком → RTF и задержка; рекомендация профиля.
-   * RTF > 0.5 на слабом ПК → max_responsiveness + стриминговая модель.
+   * v1.0.22: WAV-фикстура в ai/stt-python/fixtures (русский тестовый файл).
    */
   async benchmark() {
-    const wav = path.join(this.modelsDir, 'stt', 't-one-russian', '0.wav')
+    const wav = path.join(__dirname, 'stt-python', 'fixtures', 'benchmark-ru.wav')
     if (!this.stt.isReady()) {
       return { ok: false, message: 'STT не готов — сначала установите и инициализируйте модель' }
     }
     if (!fs.existsSync(wav)) {
-      return { ok: false, message: 'Тестовый WAV не найден в каталоге модели T-One (0.wav)' }
+      return { ok: false, message: 'Тестовый WAV не найден (ai/stt-python/fixtures/benchmark-ru.wav)' }
     }
     try {
-      const { readWavAsFloat32 } = require('./stt-service.cjs')
+      const { readWavAsFloat32 } = require('./audio-wav.cjs')
       const { samples, sampleRate } = readWavAsFloat32(wav)
       const audioMs = Math.round((samples.length / sampleRate) * 1000)
       const t0 = Date.now()
@@ -340,13 +340,12 @@ class VoicePipeline extends EventEmitter {
           })()
       const decodeMs = Date.now() - t0
       const rtf = audioMs > 0 ? Math.round((decodeMs / audioMs) * 1000) / 1000 : null
-      const recommendedProfile = rtf !== null && rtf > 0.5 ? 'max_responsiveness' : this.profile
       const recommendation = rtf !== null && rtf > 0.5
-        ? 'ПК слабый для офлайн-декода — рекомендуется стриминговая модель (ru-fast) и профиль «Максимальная отзывчивость»'
+        ? 'ПК слабый для этой модели — рекомендуется модель меньшего размера (tiny/base) в Настройках → AI'
         : rtf !== null && rtf > 0.25
-          ? 'Скорость приемлемая; при лагах переключитесь на профиль «Максимальная отзывчивость»'
-          : 'Скорость отличная — можно использовать точную модель и профиль «Качество»'
-      this.benchmarkResult = { ranAt: new Date().toISOString(), audioMs, decodeMs, rtf, text: (res.text || '').slice(0, 120), recommendedProfile, recommendation }
+          ? 'Скорость приемлемая; при лагах выберите модель меньшего размера'
+          : 'Скорость отличная — можно использовать модель большего размера (small/medium)'
+      this.benchmarkResult = { ranAt: new Date().toISOString(), audioMs, decodeMs, rtf, text: (res.text || '').slice(0, 120), recommendation }
       return { ok: true, ...this.benchmarkResult }
     } catch (e) {
       return { ok: false, message: e.message }

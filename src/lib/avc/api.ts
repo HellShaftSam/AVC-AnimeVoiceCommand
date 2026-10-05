@@ -65,7 +65,7 @@ export interface AiComponentStatus {
   sizeBytes: number | null
   sizeHuman: string
   installed: boolean
-  /** Модель по умолчанию (релиз 1.0.15 — GigaAM v3) */
+  /** Модель по умолчанию (v1.0.22 — faster-whisper-base, Mantella default) */
   defaultModel?: boolean
 }
 

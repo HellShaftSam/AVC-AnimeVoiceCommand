@@ -82,6 +82,22 @@ jobs:
           Copy-Item "node-tmp/node-v$v-win-x64/node.exe" electron-app/runtime-node/node.exe
           node.exe --version 2>$null; electron-app/runtime-node/node.exe --version
 
+      # --- Бандленный Python-рантайм STT (faster-whisper, верифиц. Mantella, v1.0.22) ---
+
+      - name: Assemble bundled Python runtime (faster-whisper)
+        shell: pwsh
+        run: |
+          $v = '3.11.9'
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$v/python-$v-embed-amd64.zip" -OutFile py-embed.zip
+          Expand-Archive -Path py-embed.zip -DestinationPath electron-app/python-runtime
+          # включаем import site (иначе pip недоступен в embeddable-сборке)
+          $pth = "electron-app/python-runtime/python311._pth"
+          (Get-Content $pth) -replace '#import site', 'import site' | Set-Content $pth
+          Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
+          & electron-app/python-runtime/python.exe get-pip.py --no-warn-script-location --quiet
+          & electron-app/python-runtime/python.exe -m pip install --no-warn-script-location --quiet -r electron-app/ai/stt-python/requirements.txt
+          & electron-app/python-runtime/python.exe -c "import faster_whisper, onnxruntime, numpy; print('python-runtime OK: fw', faster_whisper.__version__, '| ort', onnxruntime.__version__, '| np', numpy.__version__)"
+
       # --- Сборка AI-пака (воркер + нативные модули реальными файлами, §113) ---
 
       - name: Assemble AI pack
@@ -103,6 +119,13 @@ jobs:
       # --- из asar-файла крашит EXE при старте. Проверяем реальную раскладку сборки ---
       - name: Verify packaged AI layer layout
         run: node scripts/check-packaged-layout.mjs
+
+      # --- STT selftest на РЕАЛЬНОМ Windows с бандленным python (до публикации!) ---
+
+      - name: STT service selftest (Windows, bundled runtime)
+        env:
+          AVC_PYTHON: ${{ github.workspace }}/electron-app/dist/win-unpacked/resources/python-runtime/python.exe
+        run: node scripts/ci-stt-selftest.mjs
 
       # --- Контрольные суммы релиза: EXE-обновлятор сверяет SHA-256 перед установкой ---
 

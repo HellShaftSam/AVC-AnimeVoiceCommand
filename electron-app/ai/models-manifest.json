@@ -1,9 +1,9 @@
 {
   "$schema": "./ai-manifest-schema.md",
-  "version": 4,
-  "generatedAt": "2026-10-04",
-  "generatedBy": "scripts/validate-ai-assets.mjs (значения сняты с реальных загрузок/HEAD-проверок, не выдуманы)",
-  "releaseNote": "v4: GigaAM v3 — модель ПО УМОЛЧАНИЮ (точность: «Наруто 20 серия» вместо «уратуту нараратутто» на T-One 8 кГц). sha256 обоих GigaAM сняты с реальных архивов и проверены при сборке. Полные expectedFiles (encoder/decoder/joiner). T-One — необязательный запасной для слабых ПК.",
+  "version": 5,
+  "generatedAt": "2026-10-05",
+  "generatedBy": "scripts/validate-ai-assets.mjs + ручная верификация HF API (размеры и sha256 model.bin сняты с x-linked-etag/x-linked-size реальных LFS-объектов HuggingFace, ревизии запинены)",
+  "releaseNote": "v5: ПОЛНАЯ ЗАМЕНА STT на faster-whisper (верифицированная архитектура Mantella, MANTELLA_STT_RESEARCH.md). Мультифайловые CTranslate2-модели Systran/faster-whisper-* с пиновых ревизий; дефолт = base (как в Mantella). Легаси-модели T-One/GigaAM удалены из каталога (движки убраны в v1.0.22; старые каталоги на диске игнорируются и удаляются вручную). Silero VAD (v4 onnx) — общий компонент, без изменений.",
   "storage": {
     "dirName": "ai-models",
     "layout": {
@@ -16,7 +16,7 @@
       "id": "silero-vad",
       "name": "Silero VAD",
       "required": true,
-      "runtime": "sherpa-onnx Vad",
+      "runtime": "onnxruntime (внешний VAD faster-whisper, как в Mantella)",
       "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
       "expectedFiles": [
         "silero_vad.onnx"
@@ -33,107 +33,228 @@
   "models": [
     {
       "key": "stt",
-      "id": "t-one-russian",
-      "name": "T-One Russian Streaming (ru-fast)",
-      "profile": "ru-fast",
-      "engine": "t-one-streaming",
-      "lang": "ru",
-      "version": "2025-09-08",
-      "required": false,
-      "runtime": "sherpa-onnx OnlineRecognizer (нативный, Windows x64 + Linux x64)",
-      "description": "Стриминговое русское распознавание (CTC, 8 кГц) + живые partial-результаты. Минимальная задержка — рекомендуется для слабых ПК.",
-      "dir": "stt/t-one-russian",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-t-one-russian-2025-09-08.tar.bz2",
-      "mirrors": [],
-      "archive": "tar.bz2",
-      "expectedFiles": [
-        "model.onnx",
-        "tokens.txt"
-      ],
-      "sizeBytes": 128468156,
-      "sha256": "b9c907450e99a6e5049e279bf18368a17db0bdc5e63b7fa978943138debbe3ae",
-      "acceptRanges": true,
-      "contentType": "application/octet-stream",
-      "license": "MIT (модель T-One, Т-Банк; код sherpa-onnx — Apache-2.0)",
-      "minRamBytes": 4294967296,
-      "recommendedFor": "Слабые ПК (2–4 ядра, 4–8 ГБ RAM): минимальная задержка, живые partial",
-      "verifiedAt": "2026-10-03",
-      "verifiedChecks": {
-        "httpStatus": 200,
-        "redirects": 1,
-        "contentLengthMatch": true,
-        "acceptRanges": true
-      }
-    },
-    {
-      "key": "stt",
-      "id": "gigaam-v3-russian",
-      "name": "GigaAM v3 Russian RNNT int8 (ru-accurate) — по умолчанию",
-      "profile": "ru-accurate",
-      "engine": "gigaam-offline",
-      "lang": "ru",
-      "version": "2025-12-16",
-      "required": false,
+      "id": "faster-whisper-base",
+      "name": "Whisper base — Mantella default (русский)",
+      "engine": "whisper-python",
       "default": true,
-      "runtime": "sherpa-onnx OfflineRecognizer transducer (нативный, Windows x64 + Linux x64)",
-      "description": "Лучшая точность для русского (Sber GigaAM v3, RNNT, int8, 16 кГц) — распознаёт «Наруто двадцать серия», названия и числа. Модель ПО УМОЛЧАНИЮ. Декодирование фразы целиком после VAD — без живых partial-результатов.",
-      "dir": "stt/gigaam-v3-russian",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-transducer-giga-am-v3-russian-2025-12-16.tar.bz2",
-      "mirrors": [],
-      "archive": "tar.bz2",
-      "expectedFiles": [
-        "tokens.txt",
-        "encoder.int8.onnx",
-        "decoder.onnx",
-        "joiner.onnx"
+      "required": false,
+      "profile": "mantella-verified",
+      "dir": "stt/faster-whisper-base",
+      "sizeBytes": 147878941,
+      "multiFile": true,
+      "files": [
+        {
+          "name": "model.bin",
+          "url": "https://huggingface.co/Systran/faster-whisper-base/resolve/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/model.bin",
+          "sizeBytes": 145217532,
+          "sha256": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9"
+        },
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-base/resolve/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/config.json",
+          "sizeBytes": 2309
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-base/resolve/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/tokenizer.json",
+          "sizeBytes": 2203239
+        },
+        {
+          "name": "vocabulary.txt",
+          "url": "https://huggingface.co/Systran/faster-whisper-base/resolve/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/vocabulary.txt",
+          "sizeBytes": 459861
+        }
       ],
-      "sizeBytes": 167388020,
-      "sha256": "20a439491904b839f35eb8efaa3d99cbfaaad0c6dcba22d06ff218bb0056772d",
+      "expectedFiles": [
+        "model.bin",
+        "config.json",
+        "tokenizer.json",
+        "vocabulary.txt"
+      ],
       "acceptRanges": true,
-      "license": "MIT (GigaAM v3, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
-      "minRamBytes": 6442450944,
-      "recommendedFor": "ПК с 6+ ГБ RAM, когда нужна максимальная точность распознавания",
-      "verifiedAt": "2026-10-04",
-      "verifiedChecks": {
-        "httpStatus": 200,
-        "redirects": 1,
-        "contentLengthMatch": true,
-        "acceptRanges": true,
-        "sha256VerifiedByDownload": true
-      }
+      "license": "MIT",
+      "recommendedFor": "ru",
+      "description": "Модель по умолчанию Mantella (whisper_model_size=base). Хорошая точность русского на CPU, compute_type float32."
     },
     {
       "key": "stt",
-      "id": "gigaam-v2-russian",
-      "name": "GigaAM v2 Russian CTC int8",
-      "profile": "ru-accurate",
-      "engine": "gigaam-offline",
-      "lang": "ru",
-      "version": "2025-04-19",
+      "id": "faster-whisper-tiny",
+      "name": "Whisper tiny — самый быстрый (русский)",
+      "engine": "whisper-python",
+      "default": false,
       "required": false,
-      "runtime": "sherpa-onnx OfflineRecognizer nemoCtc (нативный, Windows x64 + Linux x64)",
-      "description": "Точная офлайн-модель (GigaAM v2 CTC, int8, 16 кГц). Запасной вариант ru-accurate с другой архитектурой декодера.",
-      "dir": "stt/gigaam-v2-russian",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-ctc-giga-am-v2-russian-2025-04-19.tar.bz2",
-      "mirrors": [],
-      "archive": "tar.bz2",
-      "expectedFiles": [
-        "tokens.txt",
-        "model.int8.onnx"
+      "profile": "mantella-verified",
+      "dir": "stt/faster-whisper-tiny",
+      "sizeBytes": 78203619,
+      "multiFile": true,
+      "files": [
+        {
+          "name": "model.bin",
+          "url": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356/model.bin",
+          "sizeBytes": 75538270,
+          "sha256": "dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1"
+        },
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356/config.json",
+          "sizeBytes": 2249
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356/tokenizer.json",
+          "sizeBytes": 2203239
+        },
+        {
+          "name": "vocabulary.txt",
+          "url": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/d90ca5fe260221311c53c58e660288d3deb8d356/vocabulary.txt",
+          "sizeBytes": 459861
+        }
       ],
-      "sizeBytes": 166917722,
-      "sha256": "777be8717d8aaf04861823671290f7687f7579fd9ac63a2124955573f920caf5",
+      "expectedFiles": [
+        "model.bin",
+        "config.json",
+        "tokenizer.json",
+        "vocabulary.txt"
+      ],
       "acceptRanges": true,
-      "license": "MIT (GigaAM v2, Сбер; подтверждено репозиторием salute-developers/GigaAM)",
-      "minRamBytes": 6442450944,
-      "recommendedFor": "Альтернатива GigaAM v3 (та же ниша точности)",
-      "verifiedAt": "2026-10-04",
-      "verifiedChecks": {
-        "httpStatus": 200,
-        "redirects": 1,
-        "contentLengthMatch": true,
-        "acceptRanges": true
-      }
+      "license": "MIT",
+      "recommendedFor": "ru, слабые ПК",
+      "description": "Минимальная модель: максимальная скорость, заметно ниже точность на русских названиях."
+    },
+    {
+      "key": "stt",
+      "id": "faster-whisper-small",
+      "name": "Whisper small — качественнее (русский)",
+      "engine": "whisper-python",
+      "default": false,
+      "required": false,
+      "profile": "mantella-verified",
+      "dir": "stt/faster-whisper-small",
+      "sizeBytes": 486212372,
+      "multiFile": true,
+      "files": [
+        {
+          "name": "model.bin",
+          "url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/model.bin",
+          "sizeBytes": 483546902,
+          "sha256": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671"
+        },
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/config.json",
+          "sizeBytes": 2370
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/tokenizer.json",
+          "sizeBytes": 2203239
+        },
+        {
+          "name": "vocabulary.txt",
+          "url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/vocabulary.txt",
+          "sizeBytes": 459861
+        }
+      ],
+      "expectedFiles": [
+        "model.bin",
+        "config.json",
+        "tokenizer.json",
+        "vocabulary.txt"
+      ],
+      "acceptRanges": true,
+      "license": "MIT",
+      "recommendedFor": "ru, качество",
+      "description": "Заметно точнее base на русской речи; медленнее примерно в 3 раза."
+    },
+    {
+      "key": "stt",
+      "id": "faster-whisper-medium",
+      "name": "Whisper medium — максимум точности на CPU (русский)",
+      "engine": "whisper-python",
+      "default": false,
+      "required": false,
+      "profile": "mantella-verified",
+      "dir": "stt/faster-whisper-medium",
+      "sizeBytes": 1530571735,
+      "multiFile": true,
+      "files": [
+        {
+          "name": "model.bin",
+          "url": "https://huggingface.co/Systran/faster-whisper-medium/resolve/08e178d48790749d25932bbc082711ddcfdfbc4f/model.bin",
+          "sizeBytes": 1527906378,
+          "sha256": "9b45e1009dcc4ab601eff815b61d80e60ce3fd8c74c1a14f4a282258286b51ae"
+        },
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-medium/resolve/08e178d48790749d25932bbc082711ddcfdfbc4f/config.json",
+          "sizeBytes": 2257
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-medium/resolve/08e178d48790749d25932bbc082711ddcfdfbc4f/tokenizer.json",
+          "sizeBytes": 2203239
+        },
+        {
+          "name": "vocabulary.txt",
+          "url": "https://huggingface.co/Systran/faster-whisper-medium/resolve/08e178d48790749d25932bbc082711ddcfdfbc4f/vocabulary.txt",
+          "sizeBytes": 459861
+        }
+      ],
+      "expectedFiles": [
+        "model.bin",
+        "config.json",
+        "tokenizer.json",
+        "vocabulary.txt"
+      ],
+      "acceptRanges": true,
+      "license": "MIT",
+      "recommendedFor": "ru, максимум на CPU",
+      "description": "Высокая точность; на слабых ПК может отвечать медленнее реального времени."
+    },
+    {
+      "key": "stt",
+      "id": "faster-whisper-large-v3",
+      "name": "Whisper large-v3 — наивысшая точность (русский)",
+      "engine": "whisper-python",
+      "default": false,
+      "required": false,
+      "profile": "mantella-verified",
+      "dir": "stt/faster-whisper-large-v3",
+      "sizeBytes": 3090835362,
+      "multiFile": true,
+      "files": [
+        {
+          "name": "model.bin",
+          "url": "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/edaa852ec7e145841d8ffdb056a99866b5f0a478/model.bin",
+          "sizeBytes": 3087284237,
+          "sha256": "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1"
+        },
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/edaa852ec7e145841d8ffdb056a99866b5f0a478/config.json",
+          "sizeBytes": 2394
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/edaa852ec7e145841d8ffdb056a99866b5f0a478/tokenizer.json",
+          "sizeBytes": 2480617
+        },
+        {
+          "name": "vocabulary.json",
+          "url": "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/edaa852ec7e145841d8ffdb056a99866b5f0a478/vocabulary.json",
+          "sizeBytes": 1068114
+        }
+      ],
+      "expectedFiles": [
+        "model.bin",
+        "config.json",
+        "tokenizer.json",
+        "vocabulary.json"
+      ],
+      "acceptRanges": true,
+      "license": "MIT",
+      "recommendedFor": "ru, CUDA/мощный CPU",
+      "description": "Лучшая точность; на CPU без CUDA очень медленная — рекомендуется только с GPU."
     }
   ]
 }

@@ -566,7 +566,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         <SectionTitle>Движок распознавания</SectionTitle>
         <SettingRow
           label="Движок STT"
-          hint="В EXE «Авто» = локальный офлайн-движок (T-One). Браузерный доступен только в web-версии (Chrome/Edge)"
+          hint="В EXE «Авто» = локальный офлайн-движок (Whisper). Браузерный доступен только в web-версии (Chrome/Edge)"
         >
           <Select
             value={settings.sttEngine}
@@ -579,7 +579,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
               <SelectItem value="auto">Авто (браузер → сервер)</SelectItem>
               <SelectItem value="browser">Браузерный (Chrome/Edge)</SelectItem>
               <SelectItem value="server">Серверный (Whisper)</SelectItem>
-              <SelectItem value="local">Локальный (T-One, офлайн)</SelectItem>
+              <SelectItem value="local">Локальный (Whisper, офлайн)</SelectItem>
             </SelectContent>
           </Select>
         </SettingRow>
@@ -956,7 +956,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
         <section>
           <SectionTitle>Локальный AI</SectionTitle>
           <p className="py-2 text-sm text-muted-foreground">
-            Локальный AI (офлайн-распознавание русской речи: T-One Streaming или GigaAM,
+            Локальный AI (офлайн-распознавание русской речи: faster-whisper +
            Silero VAD) доступен в приложении AVC-Anime (EXE). LLM и TTS удалены из релиза
             по решению владельца. В браузере используются браузерное/серверное распознавание.
           </p>
@@ -1042,10 +1042,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
             <div className="grid grid-cols-1 gap-1.5">
               <div className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
                 <span className="text-foreground">
-                  STT · {status.activeModel === 'gigaam-v3-russian' || status.activeModel === 'gigaam-v2-russian'
-                    ? 'GigaAM (точный)'
-                    : 'T-One Streaming (быстрый)'}{' '}
-                  — активная модель: {status.activeModel ?? '—'}
+                  STT · faster-whisper (Whisper) — активная модель: {status.activeModel ?? '—'}
                   {status.modelFallback && status.requestedModel && (
                     <span className="text-amber-400"> · модель {status.requestedModel} не установлена — работает эта, скачайте её в каталоге ниже</span>
                   )}
@@ -1715,7 +1712,7 @@ function AiWorkerStatusCard({
           </p>
           <p className="mt-1 leading-relaxed text-amber-200/90">
             {quarantine
-              ? `Файлы модели повреждены (${quarantine.reason}). Модель отключена, голос работает на здоровой модели. Переустановите её, чтобы вернуть точность GigaAM.`
+              ? `Файлы модели повреждены (${quarantine.reason}). Модель отключена, голос работает на здоровой модели. Переустановите её, чтобы вернуть качество распознавания.`
               : `Модель вызвала повторный нативный краш${safeMode?.code ? ` (код ${safeMode.code})` : ''} при целостных файлах. Работает запасная модель. Если краш повторится — сообщите логи в Issue.`}
           </p>
           <Button
@@ -1780,7 +1777,7 @@ function AiWorkerStatusCard({
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {running
-          ? `Движок: ${status?.engine === 'gigaam-offline' ? 'GigaAM (точный, офлайн)' : 'T-One Streaming (быстрый)'} · модель: ${status?.activeModel ?? '—'} · распознавание ${status?.ready.stt ? 'ГОТОВО' : 'не готово (модели не установлены?)'}${status?.modelFallback ? ' · запрошенная модель не установлена — работает fallback' : ''}`
+          ? `Движок: faster-whisper (Whisper, локально) · модель: ${status?.activeModel ?? '—'} · распознавание ${status?.ready.stt ? 'ГОТОВО' : 'не готово (модели не установлены?)'}${status?.modelFallback ? ' · запрошенная модель не установлена — работает fallback' : ''}`
           : error
             ? `Причина: ${error} — голосовые команды не работают; текстовые продолжают. Перезапустите воркер; если не помогает — откройте логи и посмотрите последнюю ошибку.`
             : 'Состояние уточняется…'}

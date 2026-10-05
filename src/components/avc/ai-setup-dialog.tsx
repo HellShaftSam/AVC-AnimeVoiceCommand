@@ -74,8 +74,8 @@ export function AiSetupDialog() {
       const missing = (st.models ?? []).filter((m) => !m.installed)
       if (missing.length > 0 && !localStorage.getItem(DISMISS_KEY)) {
         setPhase('ready')
-        // железо нужно ДО предвыбора: слабый ПК получает стриминговую T-One,
-        // обычный — точную GigaAM v3 (модель по умолчанию, релиз 1.0.15)
+        // железо нужно ДО предвыбора: слабый ПК — самая быстрая модель (tiny),
+        // обычный — модель по умолчанию (base, как в Mantella), v1.0.22
         let hw: AiHardwareInfo | null = null
         try {
           hw = await ai.getHardware()
@@ -85,8 +85,8 @@ export function AiSetupDialog() {
         const pre: Record<string, boolean> = {}
         for (const m of st.models ?? []) {
           if (m.key === 'vad' || m.key.startsWith('vad:')) pre[m.key] = true // VAD обязателен всегда
-          else if (m.key === 'stt:gigaam-v3-russian') pre[m.key] = !weak // по умолчанию: точная модель
-          else if (m.key === 'stt:t-one-russian') pre[m.key] = weak // слабый ПК: стриминговая
+          else if (m.key === 'stt:faster-whisper-tiny' && weak) pre[m.key] = true // слабый ПК: самая быстрая
+          else if (m.defaultModel) pre[m.key] = true // иначе: модель по умолчанию (base, как в Mantella)
           else pre[m.key] = false // остальные — по желанию
         }
         setSelected(pre)
@@ -161,8 +161,8 @@ export function AiSetupDialog() {
           <DialogDescription id="ai-setup-desc">
             Русское распознавание речи работает полностью офлайн: модель скачивается один раз,
             проверяется по SHA-256 и живёт в выбранной вами папке. Аудио никуда не отправляется.
-            По умолчанию — точная модель GigaAM v3 (лучше распознаёт названия, числа и команды);
-            для слабых ПК выбирайте стриминговую T-One.
+            По умолчанию — Whisper base (дефолт верифицированной архитектуры Mantella; лучше
+            распознаёт названия, числа и команды); для слабых ПК выбирайте tiny.
           </DialogDescription>
         </DialogHeader>
 

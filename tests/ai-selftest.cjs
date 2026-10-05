@@ -1,22 +1,17 @@
 /**
- * ai-selftest — честная проверка STT-слоя на РЕАЛЬНЫХ моделях (без выдуманных результатов).
+ * ai-selftest — структурная самопроверка STT-стека AVC-Anime (v1.0.22: faster-whisper).
  *
- * Запуск:  AVC_MODELS_DIR=/path/to/models node tests/ai-selftest.cjs
- * Требует установленные модели (манифест electron-app/ai/models-manifest.json).
- * Если моделей нет — соответствующие кейсы честно помечаются NOT TESTED (не PASS).
+ *   A. Манифест v5: whisper-модели с multiFile+files+sha256; легаси-модели отсутствуют.
+ *   B. Integrity-модуль: whisper-правила ловят усечённый model.bin; валидный каталог проходит.
+ *   C. Реестр движков: DEFAULT=faster-whisper-base; engineForModel маппит все faster-whisper-*;
+ *      легаси-id не резолвятся в движок (второго STT нет).
+ *   D. Модель по файлам: modelFilesPresent на фейковом каталоге.
+ *   E. (опционально) Живой Python-сервис: если задан AVC_WHISPER_MODEL_DIR и python доступен —
+ *      spawn + ping + decode короткой тишины (roundtrip протокола).
  *
- * Кейсы:
- *   A. GigaAM v3 (дефолт): инициализация + декод test WAV → непустой текст.
- *   B. Integrity-гейт: усечённый encoder → движок ОТКАЗЫВАЕТ честно, процесс НЕ умирает
- *      (урок 0xC0000409: раньше битый ONNX валил процесс SIGABRT/0xC0000409).
- *   C. Карантин + авто-fallback: битый GigaAM + валидный T-One → VoicePipeline
- *      помещает битую модель в карантин и переключается на T-One, STT готов.
- *   D. T-One streaming (запасная): инициализация + декод 0.wav.
- *
- * Итог печатается в stdout в формате PASS/FAIL/SKIP + причина. Exit code ≠ 0 только
- * при FAIL (SKIP допустим — отсутствие моделей не ложный успех).
+ * Запуск: AVC_MODELS_DIR=/tmp/avc-models node tests/ai-selftest.cjs
+ * Без AVC_MODELS_DIR — только структурные проверки (A–D на временных каталогах).
  */
-
 'use strict'
 
 const fs = require('fs')
@@ -25,172 +20,125 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 
 const AI = path.join(__dirname, '..', 'electron-app', 'ai')
-const MODELS_DIR = process.env.AVC_MODELS_DIR || ''
+const MODELS_DIR = process.env.AVC_MODELS_DIR || null
 
 const results = []
-function report(name, status, details) {
-  results.push({ name, status, details })
-  console.log(`[${status}] ${name}${details ? ` — ${details}` : ''}`)
+function report(name, status, detail) {
+  results.push({ name, status, detail })
+  console.log(`[${status}] ${name} — ${detail}`)
 }
 
-function hasGigaam(dir) {
-  const d = path.join(dir, 'stt', 'gigaam-v3-russian')
-  return (
-    fs.existsSync(path.join(d, 'encoder.int8.onnx')) &&
-    fs.existsSync(path.join(d, 'tokens.txt'))
-  )
-}
-function hasTone(dir) {
-  return fs.existsSync(path.join(dir, 'stt', 't-one-russian', 'model.onnx'))
-}
+function main() {
+  console.log(`models dir: ${MODELS_DIR || '(не задан — только структурные проверки)'}`)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'avc-ai-selftest-'))
+  const { checkModelIntegrity } = require(path.join(AI, 'model-integrity.cjs'))
+  const engines = require(path.join(AI, 'stt-engines.cjs'))
 
-async function main() {
-  console.log(`models dir: ${MODELS_DIR || '(не задан)'}`)
+  // --- A. манифест ---
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(AI, 'models-manifest.json'), 'utf8'))
+    const whisper = (manifest.models || []).filter((m) => m.engine === 'whisper-python')
+    const withSha = whisper.filter((m) => (m.files || []).every((f) => f.name === 'config.json' || f.name.startsWith('tokenizer') || f.name.startsWith('vocabulary') || f.sha256))
+    const legacy = (manifest.models || []).filter((m) => ['t-one-russian', 'gigaam-v3-russian', 'gigaam-v2-russian'].includes(m.id))
+    if (manifest.version < 5) report('A: манифест v5', 'FAIL', `version=${manifest.version}`)
+    else if (whisper.length !== 5) report('A: манифест v5', 'FAIL', `whisper-моделей ${whisper.length}, ожидалось 5`)
+    else if (withSha.length !== whisper.length) report('A: манифест v5', 'FAIL', 'не у всех model.bin есть sha256')
+    else if (legacy.length > 0) report('A: манифест v5', 'FAIL', `легаси-модели остались в каталоге: ${legacy.map((m) => m.id).join(',')}`)
+    else report('A: манифест v5', 'PASS', `whisper-моделей: ${whisper.length}, все model.bin с sha256, легаси отсутствуют`)
+  } catch (e) {
+    report('A: манифест v5', 'FAIL', e.message)
+  }
 
-  // --- A. GigaAM валидный ---
-  if (MODELS_DIR && hasGigaam(MODELS_DIR)) {
-    const { GigaamOfflineEngine } = require(path.join(AI, 'stt-engines.cjs'))
-    const eng = new GigaamOfflineEngine({ modelsDir: MODELS_DIR, modelId: 'gigaam-v3-russian', profile: 'balanced' })
-    const state = await eng.initialize()
-    if (state !== 'ready') {
-      report('A: GigaAM init+decode', 'FAIL', `state=${state}, error=${eng.error}`)
+  // --- B. integrity: whisper-правила ---
+  try {
+    const modelDir = path.join(tmp, 'stt', 'faster-whisper-base')
+    fs.mkdirSync(modelDir, { recursive: true })
+    const integMissing = checkModelIntegrity(tmp, 'faster-whisper-base')
+    fs.writeFileSync(path.join(modelDir, 'model.bin'), Buffer.alloc(1024)) // усечённый
+    fs.writeFileSync(path.join(modelDir, 'config.json'), JSON.stringify({ a: 1 }).padEnd(220, ' '))
+    fs.writeFileSync(path.join(modelDir, 'tokenizer.json'), Buffer.alloc(600 * 1024, 1))
+    fs.writeFileSync(path.join(modelDir, 'vocabulary.txt'), Buffer.alloc(120 * 1024, 1))
+    const integTrunc = checkModelIntegrity(tmp, 'faster-whisper-base')
+    // полный model.bin (мимик под размер)
+    fs.truncateSync(path.join(modelDir, 'model.bin'), 11 * 1024 * 1024)
+    const integOk = checkModelIntegrity(tmp, 'faster-whisper-base')
+    if (!integMissing.ok && /отсутствует/i.test(integMissing.problems[0])
+      && !integTrunc.ok && /усечён/i.test(integTrunc.problems[0])
+      && integOk.ok) {
+      report('B: integrity whisper', 'PASS', 'missing/усечённый/полный — три сценария корректны')
     } else {
-      const wav = path.join(MODELS_DIR, 'stt', 'gigaam-v3-russian', 'test_wavs', 'example.wav')
-      if (!fs.existsSync(wav)) wav.replace(wav, path.join(MODELS_DIR, 'stt', 't-one-russian', '0.wav'))
-      const r = eng.decodeFileForTest(fs.existsSync(wav) ? wav : path.join(MODELS_DIR, 'stt', 't-one-russian', '0.wav'))
-      report(
-        'A: GigaAM init+decode',
-        r.text && r.text.length > 5 ? 'PASS' : 'FAIL',
-        `load=${eng.metrics.modelLoadMs}мс, text="${(r.text || '').slice(0, 80)}"`,
-      )
+      report('B: integrity whisper', 'FAIL', `missing=${JSON.stringify(integMissing.problems)}, trunc=${JSON.stringify(integTrunc.problems)}, ok=${integOk.ok}/${JSON.stringify(integOk.problems)}`)
     }
-    eng.shutdown()
-  } else {
-    report('A: GigaAM init+decode', 'SKIP', 'модели GigaAM нет в AVC_MODELS_DIR')
+  } catch (e) {
+    report('B: integrity whisper', 'FAIL', e.message)
   }
 
-  // --- B. Integrity-гейт: усечённый encoder не должен валить процесс ---
-  if (MODELS_DIR && hasGigaam(MODELS_DIR)) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'avc-selftest-'))
-    try {
-      // минимальный каталог: битый gigaam + VAD
-      fs.mkdirSync(path.join(tmp, 'stt', 'gigaam-v3-russian'), { recursive: true })
-      fs.mkdirSync(path.join(tmp, 'vad', 'silero-vad'), { recursive: true })
-      for (const f of ['decoder.onnx', 'joiner.onnx', 'tokens.txt']) {
-        fs.copyFileSync(path.join(MODELS_DIR, 'stt', 'gigaam-v3-russian', f), path.join(tmp, 'stt', 'gigaam-v3-russian', f))
-      }
-      fs.copyFileSync(
-        path.join(MODELS_DIR, 'vad', 'silero-vad', 'silero_vad.onnx'),
-        path.join(tmp, 'vad', 'silero-vad', 'silero_vad.onnx'),
-      )
-      // усечённый encoder (50%)
-      const encPath = path.join(MODELS_DIR, 'stt', 'gigaam-v3-russian', 'encoder.int8.onnx')
-      const encSize = fs.statSync(encPath).size
-      const head = Buffer.alloc(Math.floor(encSize * 0.5))
-      const fd = fs.openSync(encPath, 'r')
-      fs.readSync(fd, head, 0, head.length, 0)
-      fs.closeSync(fd)
-      fs.writeFileSync(path.join(tmp, 'stt', 'gigaam-v3-russian', 'encoder.int8.onnx'), head)
-
-      // дочерний процесс: раньше здесь был SIGABRT (exit 134) из-за Ort::Exception
-      const child = spawnSync(
-        process.execPath,
-        ['-e', `
-          const { GigaamOfflineEngine } = require(${JSON.stringify(path.join(AI, 'stt-engines.cjs'))})
-          const eng = new GigaamOfflineEngine({ modelsDir: ${JSON.stringify(tmp)}, modelId: 'gigaam-v3-russian' })
-          eng.initialize().then((s) => {
-            console.log('STATE=' + s + ' ERR=' + (eng.error || ''))
-            process.exit(s === 'failed' ? 0 : 2)
-          })
-        `],
-        { encoding: 'utf8', timeout: 120000 },
-      )
-      const survived = child.status === 0
-      const honestError = /поврежд|усеч/i.test(child.stdout || '')
-      report(
-        'B: integrity-гейт (битый encoder)',
-        survived && honestError ? 'PASS' : 'FAIL',
-        survived
-          ? `процесс жив (exit 0), честный отказ: ${(child.stdout || '').trim().slice(0, 120)}`
-          : `процесс умер! exit=${child.status} signal=${child.signal} stderr=${(child.stderr || '').slice(0, 160)}`,
-      )
-    } finally {
-      try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ок */ }
-    }
-  } else {
-    report('B: integrity-гейт (битый encoder)', 'SKIP', 'модели GigaAM нет в AVC_MODELS_DIR')
-  }
-
-  // --- C. Карантин + авто-fallback (нужен валидный T-One как запаска) ---
-  if (MODELS_DIR && hasGigaam(MODELS_DIR) && hasTone(MODELS_DIR)) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'avc-selftest-fb-'))
-    try {
-      fs.mkdirSync(path.join(tmp, 'stt', 'gigaam-v3-russian'), { recursive: true })
-      fs.mkdirSync(path.join(tmp, 'stt', 't-one-russian'), { recursive: true })
-      fs.mkdirSync(path.join(tmp, 'vad', 'silero-vad'), { recursive: true })
-      for (const f of ['decoder.onnx', 'joiner.onnx', 'tokens.txt']) {
-        fs.copyFileSync(path.join(MODELS_DIR, 'stt', 'gigaam-v3-russian', f), path.join(tmp, 'stt', 'gigaam-v3-russian', f))
-      }
-      // битый encoder — копия обрезанного файла
-      const encPath = path.join(MODELS_DIR, 'stt', 'gigaam-v3-russian', 'encoder.int8.onnx')
-      const head = Buffer.alloc(1024 * 1024)
-      const fd = fs.openSync(encPath, 'r')
-      fs.readSync(fd, head, 0, head.length, 0)
-      fs.closeSync(fd)
-      fs.writeFileSync(path.join(tmp, 'stt', 'gigaam-v3-russian', 'encoder.int8.onnx'), head)
-      for (const f of ['model.onnx', 'tokens.txt', '0.wav']) {
-        const src = path.join(MODELS_DIR, 'stt', 't-one-russian', f)
-        if (fs.existsSync(src)) fs.copyFileSync(src, path.join(tmp, 'stt', 't-one-russian', f))
-      }
-      fs.copyFileSync(
-        path.join(MODELS_DIR, 'vad', 'silero-vad', 'silero_vad.onnx'),
-        path.join(tmp, 'vad', 'silero-vad', 'silero_vad.onnx'),
-      )
-
-      const { VoicePipeline } = require(path.join(AI, 'voice-pipeline.cjs'))
-      const pipeline = new VoicePipeline({ modelsDir: tmp, modelId: 'gigaam-v3-russian' })
-      await pipeline.initializeServices()
-      const st = pipeline.getStatus()
-      const quarantined = !!st.quarantine && st.quarantine.modelId === 'gigaam-v3-russian'
-      const switched = st.activeModel === 't-one-russian'
-      const ready = st.ready.stt === true
-      report(
-        'C: карантин + fallback на T-One',
-        quarantined && switched && ready ? 'PASS' : 'FAIL',
-        `quarantine=${quarantined}, активная=${st.activeModel}, ready=${st.ready.stt}`,
-      )
-      pipeline.shutdown()
-    } finally {
-      try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ок */ }
-    }
-  } else {
-    report('C: карантин + fallback на T-One', 'SKIP', 'нужны BOTH модели в AVC_MODELS_DIR')
-  }
-
-  // --- D. T-One валидный ---
-  if (MODELS_DIR && hasTone(MODELS_DIR)) {
-    const { STTService } = require(path.join(AI, 'stt-service.cjs'))
-    const svc = new STTService({ modelsDir: MODELS_DIR, profile: 'balanced' })
-    const state = await svc.initialize()
-    if (state !== 'ready') {
-      report('D: T-One init+decode', 'FAIL', `state=${state}, error=${svc.error}`)
+  // --- C. реестр движков ---
+  try {
+    const okDefault = engines.DEFAULT_STT_MODEL === 'faster-whisper-base'
+    const okMap = ['tiny', 'base', 'small', 'medium', 'large-v3'].every((s) => engines.engineForModel(`faster-whisper-${s}`)?.id === 'whisper-python')
+    const okLegacy = engines.engineForModel('t-one-russian') === null && engines.engineForModel('gigaam-v3-russian') === null
+    const legacyPresent = engines.sttModelFilesPresent(tmp, 't-one-russian')
+    if (okDefault && okMap && okLegacy && !legacyPresent) {
+      report('C: реестр движков', 'PASS', 'только whisper-python; легаси не резолвятся')
     } else {
-      const r = svc.decodeFileForTest(path.join(MODELS_DIR, 'stt', 't-one-russian', '0.wav'))
-      report('D: T-One init+decode', r.text && r.text.length > 3 ? 'PASS' : 'FAIL', `text="${(r.text || '').slice(0, 80)}"`)
+      report('C: реестр движков', 'FAIL', `default=${engines.DEFAULT_STT_MODEL}, map=${okMap}, legacyNull=${okLegacy}, legacyPresent=${legacyPresent}`)
     }
-    svc.shutdown()
-  } else {
-    report('D: T-One init+decode', 'SKIP', 'модели T-One нет в AVC_MODELS_DIR')
+  } catch (e) {
+    report('C: реестр движков', 'FAIL', e.message)
   }
 
-  const failed = results.filter((r) => r.status === 'FAIL').length
-  const passed = results.filter((r) => r.status === 'PASS').length
-  const skipped = results.filter((r) => r.status === 'SKIP').length
-  console.log(`\nИТОГ: PASS=${passed} FAIL=${failed} SKIP=${skipped}`)
-  process.exit(failed > 0 ? 1 : 0)
+  // --- D. modelFilesPresent (нужен и VAD-файл — общий компонент) ---
+  try {
+    fs.mkdirSync(path.join(tmp, 'vad', 'silero-vad'), { recursive: true })
+    fs.writeFileSync(path.join(tmp, 'vad', 'silero-vad', 'silero_vad.onnx'), Buffer.alloc(700 * 1024, 1))
+    const dir = path.join(tmp, 'stt', 'faster-whisper-tiny')
+    fs.mkdirSync(dir, { recursive: true })
+    const before = engines.sttModelFilesPresent(tmp, 'faster-whisper-tiny')
+    fs.writeFileSync(path.join(dir, 'model.bin'), 'x')
+    fs.writeFileSync(path.join(dir, 'config.json'), 'x')
+    fs.writeFileSync(path.join(dir, 'tokenizer.json'), 'x')
+    fs.writeFileSync(path.join(dir, 'vocabulary.txt'), 'x')
+    const after = engines.sttModelFilesPresent(tmp, 'faster-whisper-tiny')
+    report('D: modelFilesPresent', !before && after ? 'PASS' : 'FAIL', `before=${before}, after=${after}`)
+  } catch (e) {
+    report('D: modelFilesPresent', 'FAIL', e.message)
+  }
+
+  // --- E. живой Python-сервис (опционально) ---
+  const modelDirEnv = process.env.AVC_WHISPER_MODEL_DIR
+  const pythonBin = process.env.AVC_STT_PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
+  if (modelDirEnv && fs.existsSync(path.join(modelDirEnv, 'model.bin'))) {
+    const vad = (MODELS_DIR && fs.existsSync(path.join(MODELS_DIR, 'vad', 'silero-vad', 'silero_vad.onnx')))
+      ? path.join(MODELS_DIR, 'vad', 'silero-vad', 'silero_vad.onnx')
+      : null
+    if (!vad) {
+      report('E: python-сервис ping', 'SKIP', 'нет silero_vad.onnx в AVC_MODELS_DIR')
+    } else {
+      const service = path.join(AI, 'stt-python', 'stt_service.py')
+      const child = spawnSync(pythonBin, [service, '--model', modelDirEnv, '--vad', vad, '--language', 'ru'], {
+        input: JSON.stringify({ id: 1, type: 'ping' }) + '\n' + JSON.stringify({ id: 2, type: 'shutdown' }) + '\n',
+        encoding: 'utf8',
+        timeout: 300000,
+      })
+      const lines = (child.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+      const ping = lines.find((m) => m.id === 1)
+      const ready = lines.find((m) => m.event === 'status' && m.state === 'ready')
+      if (ready && ping && ping.ok && ping.result.ready) {
+        report('E: python-сервис ping', 'PASS', `device=${ping.result.device}, computeType=${ping.result.computeType}, loadMs=${ping.result.modelLoadMs}, vad=${ping.result.vad}`)
+      } else {
+        report('E: python-сервис ping', 'FAIL', `stdout=${(child.stdout || '').slice(0, 200)} stderr=${(child.stderr || '').slice(-200)}`)
+      }
+    }
+  } else {
+    report('E: python-сервис ping', 'SKIP', 'AVC_WHISPER_MODEL_DIR не задан (полный тест — tests/stt-whisper-selftest.mjs)')
+  }
+
+  const pass = results.filter((r) => r.status === 'PASS').length
+  const fail = results.filter((r) => r.status === 'FAIL').length
+  const skip = results.filter((r) => r.status === 'SKIP').length
+  console.log(`\nИТОГ: PASS=${pass} FAIL=${fail} SKIP=${skip}`)
+  process.exit(fail > 0 ? 1 : 0)
 }
 
-main().catch((e) => {
-  console.error('SELFTEST CRASH:', e)
-  process.exit(1)
-})
+main()

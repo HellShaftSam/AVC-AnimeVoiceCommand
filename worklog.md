@@ -1202,3 +1202,69 @@ Work Log:
 
 Stage Summary:
 - v1.0.21: краш при старте EXE устранён (require через resourcesPath), класс бага закрыт стражем в CI навсегда
+
+---
+Task ID: 1
+Agent: mantella-research
+Task: Phase 1 — верификация Whisper-реализации Mantella из официальных исходников
+
+Work Log:
+- Прочитан worklog.md (контекст: STT-краши 0xC0000409, воркер-изоляция, образец SkyrimNet) → отчёт MANTELLA_STT_RESEARCH.md
+- GitHub API анонимно был rate-limited (ротация egress-IP песочницы) → retry-циклы до свежего IP: repo, releases/latest, git/trees/main?recursive=1 (275 записей, truncated:false), commits/main, commits?path={4 STT-файла}&per_page=1 — всё получено официально
+- Shallow git-clone Mantella (HEAD c0c1ae6db01f3c2a14dbab8ec5c3e6419e4f6bac, совпал с API) + полные grep'ы по репо: WhisperModel( ровно 2 вызова в src/stt/stt.py; pyaudio в src/ 0 ссылок; faster_whisper импортируется только в stt.py
+- Изучены целиком: src/stt/stt.py (661 строка), src/stt/ptt_controller.py, src/config/definitions/stt_definitions.py (все дефолты STT), src/config/config_loader.py (маппинг stt_language→language), mantella_config_value_definitions_new.py (активный набор UI), tests/stt/test_ptt_controller.py, requirements.txt, data/language_support.csv
+- Сверены с внешними источниками: faster-whisper v1.0.3 transcribe.py (дефолты compute_type="default", download_root=None, beam_size=5, temperature-массив), PyPI metadata faster-whisper 1.0.3 (ctranslate2<5,>=4.0; onnxruntime<2,>=1.14), pypi silero-vad-lite 0.4.0; лицензии raw-файлами: Mantella AGPL-3.0, faster-whisper MIT, CTranslate2 MIT (репо переехало SYSTRAN→OpenNMT), silero-vad MIT, py-silero-vad-lite MIT
+- Зафиксированы также «НЕ НАЙДЕНО»: config.ini-шаблона в репо нет (генерируется в рантайме), download_root не передаётся, пинов ctranslate2/onnxruntime/silero-vad нет, language=None недостижим (всегда явный язык), тестов Whisper-инференса нет, pyaudio — мёртвый пин, латентный баг _create_vad_iterator
+
+Stage Summary:
+- Verified config Mantella STT: whisper_model_size default «base» (опции tiny…large-v3 + distil-*, свободный ввод), device default «cpu» (опции cpu/cuda), compute_type: CPU=float32 явно, CUDA=не передаётся (дефолт «default» CTranslate2), language всегда явный (stt_language «default» → главный language, есть «ru»), beam_size=5, vad_filter=False, initial_prompt передаётся
+- VAD: ВНЕШНИЙ silero-vad-lite (SileroVAD(16000), чанк 512, порог audio_threshold=0.4, пауза pause_threshold=0.25с, cap listen_timeout=30с, pre-roll 5×512), faster-whisper vad_filter выключен явно; микрофон: sounddevice.InputStream 16кГц/mono/float32/blocksize 512/latency low (pyaudio не используется); PTT = GetAsyncKeyState, VAD байпас
+- Пины: faster-whisper==1.0.3, sounddevice==0.5.1, soundfile==0.12.1, numpy==1.25.0, huggingface_hub<0.25, silero-vad-lite (без пина), moonshine git-пин 2f62823; ctranslate2/onnxruntime — транзитивно; default STT service = Moonshine (Whisper — второй вариант)
+- License: Mantella AGPL-3.0 (копировать код нельзя, только архитектуру/параметры); зависимости MIT
+- Главные риски интеграции в Electron: Python-рантайм+CTranslate2 (~сотни МБ, IPC+изоляция крашей), внешний Silero-VAD обязателен (fail-fast ONNX = класс 0xC0000409), первый запуск тянет модель с HF Hub (нужен свой download_root/integrity-гейт), CUDA-ветка нестабильна (дефолт Mantella — CPU)
+- Отчёт: /home/z/my-project/MANTELLA_STT_RESEARCH.md (16 разделов, каждый факт = URL + вербатим)
+
+---
+Task ID: 2
+Agent: stt-audit
+Task: Phase 2 — полный аудит текущего STT-стека AVC-Anime
+
+Work Log:
+- Прочитан worklog (краши 0xC0000409, дефолт GigaAM v3, упаковка ai-pack, require-урок v1.0.21)
+- Прочитаны ЦЕЛИКОМ: ai/ai-worker.cjs, ai/voice-pipeline.cjs, ai/stt-engines.cjs, ai/stt-service.cjs, ai/model-manager.cjs, ai/model-integrity.cjs, ai/models-manifest.json, preload.cjs (ai-объект), tests/ai-selftest.cjs, tools/ai-{stt,model,main,sha-update}-selftest.cjs, scripts/assemble-ai-pack.mjs, electron-builder.json, api/voice/asr
+- main.cjs (1595 строк) — целевые части: startAiWorker (734–863), NATIVE_CRASH_CODES/safe-mode/карантин (580–611, 799–854), IPC-мост setupAiIpc (878–1001), models-dir конфиг+миграция (653–708), boot (1412–1469), --ai-selftest (1484–1516), killProcessTree/before-quit/will-quit (1541–1569)
+- Рендерер: use-voice.ts (локальная сессия 588–661, подписки 664–723, PTT 725–857), settings-dialog.tsx (MicSettings, AiSettingsPanel, SttCatalogCard, SttLiveTestCard, AiWorkerStatusCard), ai-setup-dialog.tsx (предвыбор по железу), voice-panel.tsx, api.ts bridge-типы, types.ts (SttEngine/AiProfile)
+- ГЛАВНОЕ: микрофон захватывается В РЕНДЕРЕРЕ (getUserMedia → AudioContext 16 кГц → ScriptProcessor 2048 = 128 мс → Int16 mono → ai.feedAudio → avc:ai:stt-feed → fork-IPC (serialization advanced) → pipeline.feedAudio → движок). Sherpa Microphone не используется; замена движка захват не трогает
+- Два движка сегодня: T-One = стриминг CTC 8 кГц (VAD 16 кГц окна 512, кольцо 1.2 с, ресемпл усреднением пар, partial каждые ≥120 мс, endpoint rule2); GigaAM = офлайн-декод фразы целиком (без partial), хвост 200 мс, кулдаун 250 мс, min 300 мс. Все тайминги выверены релизом 1.0.15
+- Инвентаризация: 24 invoke-канала avc:ai:*/avc:debug:*, 5 event-каналов main→renderer, 16 типов запросов main↔worker; найдена потеря события worker-fatal (нет в AI_EVENT_CHANNELS)
+- Модельный слой: манифест v4 (3 STT+VAD, реальные sha256), скачивание mirrors/retry×3/Range-resume/416-фикс, маркер avcVersion 2 c files{}, integrity (min-size + ONNX-header + protobuf-walk), карантин .corrupt-*, safe-mode ai-safe-mode.json — всё переиспользуемо для Whisper; требуют адаптации: multi-file CTranslate2 (сейчас tar.bz2 или один файл), новые MIN_FILE_BYTES/CATALOG_FILES, ONNX-walk не применим к model.bin
+- Selftest: ai-main-selftest.cjs УЖЕ сломан (строка 26 требует удалённые tts/llm); реальный интеграционный — main.cjs --ai-selftest; tests/ai-selftest кейсы A/B/D привязаны к удаляемым модулям, инвариант B (битый файл → процесс жив) обязательно перенести на Python
+- Отчёт создан: /home/z/my-project/AVC_STT_AUDIT.md (9 разделов + приложение, все факты с путями и строками)
+
+Stage Summary:
+- Путь аудио одним абзацем: рендерер getUserMedia(buildAudioConstraints) → AudioContext(16000) → ScriptProcessor(2048,1,1) → soft-limiter+micGain → Int16Array(16кГц mono, 128 мс) → ipcRenderer.invoke('avc:ai:stt-feed') → main (aiWorkerRequest 'feed', serialization advanced) → воркер ai-worker.cjs 'feed' → pipeline.feedAudio → движок: окна 512 (32 мс) → Silero VAD (16 кГц) → T-One: 16→8 кГц усреднением пар, стриминговый CTC, partial ≥120 мс; GigaAM: накопление Float32-фразы, офлайн-декод по endpoint (хвост 200 мс) → события partial/final (+earlyCommand) → 'avc:ai:stt-partial/final' → use-voice: interimText, ранние команды, executeText(correlationId). PTT: setCaptureMode(true/false)+flush
+- Переиспользуем полностью: ai-worker.cjs, voice-pipeline.cjs (оркестрация/карантин/early-команды), main.cjs AI-слой, preload, api.ts, use-voice.ts, model-manager (скачивание/маркер/резюме), model-integrity (концепция+VAD), selftest-инфраструктура (--ai-selftest, model-selftest, sha-update, validate-ai-assets)
+- Удаляем: GigaamOfflineEngine (stt-engines 85–354), STTService/T-One (stt-service 48–387), sherpa-onnx-* из ai-pack; SttLiveTestCard и SttCatalogCard выживают как есть
+- Точка подсадки Python-сервиса: реестр ENGINES в stt-engines.cjs (373–408) — новый адаптер WhisperPythonEngine (JSON-lines over stdio: feed base64 Int16LE 16кГц → partial/final), спавн из воркера, python.exe по паттерну findSystemNode; Node оставляет оркестрацию/IPC/скачивание/карантин, Python забирает VAD+инференс (+ эмуляция partial для ранних команд — иначе деградация UX)
+- Топ-риски: (1) потеря partial → мёртвые early-команды, (2) краш-политика NATIVE_CRASH_CODES не видит смерть Python, (3) ONNX-integrity не покрывает CTranslate2, (4) multi-file модель не лезет в загрузчик, (5) хардкоды id/движков в UI + миграция дефолта; полный список топ-10 в AVC_STT_AUDIT.md §8
+
+---
+Task ID: 3-9
+Agent: Z.ai Code (main)
+Task: Полная замена STT на faster-whisper (верифицированная архитектура Mantella) — реализация и песочница
+
+Work Log:
+- Phase 1 (агент mantella-research): MANTELLA_STT_RESEARCH.md — Mantella v0.14/main@c0c1ae6: faster-whisper==1.0.3, дефолт base, CPU→float32, внешний Silero-VAD (512/0.4/0.25с/30с), beam 5, vad_filter=False, язык явный; AGPL → код не копируем
+- Phase 2 (агент stt-audit): AVC_STT_AUDIT.md — микрофон в рендерере (16к Int16 → avc:ai:stt-feed), шов замены = ENGINES/createSttEngine, переиспользование model-manager/integrity
+- Phase 3: STT_IMPLEMENTATION_PLAN.md + STT_MODEL_CONFIGURATION.md (все параметры и отклонения)
+- Phase 4: stt-python/stt_service.py (JSON-lines stdio; VAD sherpa/v4/v5-варианты; partial-эмуляция beam1; selftest --wav; игнор-лист галлюцинаций) + requirements.txt (пины)
+- Phase 5: whisper-python-engine.cjs (spawn python, resourcesPath-резолв, честный failed при смерти python) + stt-engines.cjs переписан (только whisper-python, DEFAULT=faster-whisper-base, легаси удалены) + удалён stt-service.cjs (wav-утилиты → audio-wav.cjs) + main.cjs миграция легаси-дефолтов
+- Phase 6: models-manifest.json v5 (5 whisper-моделей multiFile с пиновыми ревизиями HF и реальными sha256 model.bin из x-linked-etag) + multiFile в model-manager (per-file mirrors/retry/Range/SHA) + whisper-ветка integrity + validate-ai-assets multiFile-режим (21/21 URL PASS)
+- Phase 7: UI-адаптация (ai-setup предвыбор default/tiny для слабых ПК, лейблы Whisper, карточка STT)
+- Phase 8: CI: шаг «Assemble bundled Python runtime» (embeddable 3.11.9 + pip пины) + «STT service selftest (Windows, bundled runtime)» ДО публикации + extraResources python-runtime + страж раскладки проверяет python.exe/stt_service.py; scripts/ci-stt-selftest.mjs
+- Phase 9 (песочница): pip-стек установлен (execstack-фикс ctranslate2 для Linux); датасет 7 ru-фраз edge-tts ru-RU-DmitryNeural 16к (первый TTS-голос отбракован облачным ASR-контролем); tests/ai-selftest.cjs PASS=4; tests/stt-whisper-selftest.cjs (полный live-путь) PASS=14 FAIL=0: 7/7 фраз, partial, тишина, 2 фразы подряд, decode; float32 ~1.2с/2.7с-фраза; pre-roll 12×512 (отклонение от 5×512 — бенчмарком показан срез начал слов); int8-сравнение для отчёта; multiFile-установка tiny через собственный загрузчик — SHA256+маркер OK
+
+Stage Summary:
+- Один авторитетный STT: whisper-python (faster-whisper + внешний Silero-VAD в изолированном Python-процессе); sherpa-onnx удалён из пака
+- Классы крашей sherpa (0xC0000409) закрыты конструктивно: Python-исключения + pre-flight integrity + изоляция
+- Ограничения честно: live-микрофон 30+/1-часовая стабильность BLOCKED (нет микрофона в песочнице); Windows-EXE проверяется CI-selftest'ом; CUDA NOT TESTED

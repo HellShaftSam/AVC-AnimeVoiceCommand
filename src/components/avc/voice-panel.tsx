@@ -173,7 +173,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
             )}
             {isExe && localStt?.ready && (
               <span className="text-[10px] leading-tight text-emerald-400" role="status">
-                Локальный STT готов ({localStt.engine === 'gigaam-offline' ? 'GigaAM' : 'T-One'})
+                Локальный STT готов (Whisper)
               </span>
             )}
           </div>

@@ -43,6 +43,10 @@
         "ai/**",
         "runtime-node/**"
       ]
+    },
+    {
+      "from": "python-runtime",
+      "to": "python-runtime"
     }
   ],
   "win": {

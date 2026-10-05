@@ -20,7 +20,7 @@ const MODELS_DIR = process.env.AVC_MODELS_DIR || path.join(__dirname, '..', 'mod
 /** Активная модель STT сохраняется main-процессом (models-dir.json) и приходит сюда.
  *  Релиз 1.0.15: по умолчанию GigaAM v3 (точная); pipeline сам делает fallback на
  *  установленную модель, если файлов дефолта нет (например, только T-One). */
-const ACTIVE_MODEL = process.env.AVC_STT_MODEL || 'gigaam-v3-russian'
+const ACTIVE_MODEL = process.env.AVC_STT_MODEL || 'faster-whisper-base'
 
 let pipeline = null
 try {

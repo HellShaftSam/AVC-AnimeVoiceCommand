@@ -138,6 +138,9 @@ class AIModelManager extends EventEmitter {
       recommendedFor: m.recommendedFor || null,
       required: !!m.required,
       defaultModel: !!m.default,
+      // v1.0.22: мультифайловые модели (CTranslate2: model.bin + config + tokenizer + vocabulary)
+      multiFile: !!m.multiFile,
+      files: m.files || null,
     }
   }
 
@@ -332,8 +335,27 @@ class AIModelManager extends EventEmitter {
         throw new DownloadError('DISK_FULL', `Недостаточно места на диске: доступно ${fmtBytes(free)}, требуется ${fmtBytes(spec.sizeBytes)}`)
       }
 
-      const archivePath = await this._downloadWithMirrors(spec, controller, opts)
-      const { shaActual } = await this._verifyAndExtract(spec, archivePath)
+      let shaActual = null
+      if (spec.multiFile) {
+        // v1.0.22: мультифайловая модель (CTranslate2) — каждый файл отдельно:
+        // mirrors/retry/Range-resume/SHA-256 работают per-file, распаковки нет
+        for (const f of spec.files || []) {
+          const fspec = {
+            ...spec,
+            url: f.url,
+            sizeBytes: f.sizeBytes || null,
+            sha256: f.sha256 || null,
+            dir: spec.dir,
+            archive: null,
+          }
+          const filePath = await this._downloadWithMirrors(fspec, controller, opts)
+          await this._verifyAndExtract(fspec, filePath) // голый файл: sha + rename к basename(url)
+          this.emit('progress', { key: componentKey, id: spec.id, phase: 'file-done', file: f.name, percent: Math.round(((spec.files.indexOf(f) + 1) / spec.files.length) * 100) })
+        }
+      } else {
+        const archivePath = await this._downloadWithMirrors(spec, controller, opts)
+        shaActual = (await this._verifyAndExtract(spec, archivePath)).shaActual
+      }
 
       // маркер установки — только после успешной верификации (§56).
       // files{} — размеры каждого ожидаемого файла: по ним пред-полётная проверка
