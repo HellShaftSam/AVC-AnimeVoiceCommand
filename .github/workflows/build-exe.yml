@@ -98,6 +98,12 @@ jobs:
             --config.extraMetadata.version="$VERSION" --publish never
           ls -la dist
 
+      # --- Страж упаковки (урок v1.0.20): main.cjs пакуется в app.asar, а папка ai/ ---
+      # --- живёт рядом в resources/ai (extraResources). «Голый» require('./ai/...') ---
+      # --- из asar-файла крашит EXE при старте. Проверяем реальную раскладку сборки ---
+      - name: Verify packaged AI layer layout
+        run: node scripts/check-packaged-layout.mjs
+
       # --- Контрольные суммы релиза: EXE-обновлятор сверяет SHA-256 перед установкой ---
 
       - name: Generate SHA256SUMS.txt
