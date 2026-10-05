@@ -476,7 +476,9 @@ def run_selftest(args):
     if args.expect:
         norm = lambda s: "".join(c for c in s.lower() if c.isalnum() or c.isspace())  # noqa: E731
         result["expect"] = args.expect
-        result["pass"] = norm(args.expect) in norm(text)
+        # мульти-варианты через |: достаточно ЛЮБОГО (например «наруто|нарута|рута»)
+        variants = [v.strip() for v in args.expect.split('|') if v.strip()]
+        result["pass"] = any(norm(v) in norm(text) for v in variants)
     else:
         result["pass"] = len(text) > 0
     print(json.dumps(result, ensure_ascii=False))

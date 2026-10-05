@@ -23,7 +23,7 @@ const SERVICE = process.env.AVC_SERVICE || path.join('electron-app', 'ai', 'stt-
 const FIXTURE = process.env.AVC_FIXTURE || path.join('electron-app', 'ai', 'stt-python', 'fixtures', 'benchmark-ru.wav')
 const HF_MODEL = process.env.AVC_HF_MODEL || 'Systran/faster-whisper-base'
 const HF_REVISION = process.env.AVC_HF_REVISION || 'ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66'
-const EXPECT = process.env.AVC_EXPECT || 'нар'
+const EXPECT = process.env.AVC_EXPECT || 'наруто|нарута|рута'
 
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: opts.timeout || 600000, ...opts.spawnOpts })
