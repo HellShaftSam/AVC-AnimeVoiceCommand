@@ -416,6 +416,13 @@ class VoicePipeline extends EventEmitter {
     } catch { /* движок без поддержки — работаем как раньше */ }
   }
 
+  /** Порог VAD в рантайме (ползунок чувствительности микрофона) */
+  setVadThreshold(threshold) {
+    try {
+      this.stt.setVadThreshold && this.stt.setVadThreshold(threshold)
+    } catch { /* движок без поддержки — дефолт Mantella 0.4 */ }
+  }
+
   shutdown() {
     try {
       this.stt.shutdown()

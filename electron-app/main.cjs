@@ -934,6 +934,8 @@ function setupAiIpc() {
   ipcMain.handle('avc:ai:stt-flush', () => aiWorkerRequest('flush'))
   // Режим рации: пока кнопка PTT удерживается — аудио без VAD-гейта
   ipcMain.handle('avc:ai:stt-capture', (_e, args) => aiWorkerRequest('set-capture-mode', { enabled: !!args?.enabled }))
+  // Порог VAD в рантайме (ползунок чувствительности микрофона, 0.1..0.9)
+  ipcMain.handle('avc:ai:stt-vad-threshold', (_e, args) => aiWorkerRequest('set-vad-threshold', { threshold: Number(args?.threshold ?? 0.4) }))
 
   // --- Фаза 5 (аудит №4): каталог AI-моделей — выбор, миграция, открытие ---
 

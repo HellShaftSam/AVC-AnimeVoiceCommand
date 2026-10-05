@@ -199,7 +199,7 @@ class WhisperPythonEngine extends EventEmitter {
     }
     if (msg.event === 'partial') {
       this.metrics.lastPartialMs = msg.ms ?? null
-      this.emit('partial', { utteranceId: msg.utteranceId, text: msg.text || '', ms: msg.ms || 0 })
+      this.emit('partial', { utteranceId: msg.utteranceId, text: msg.text || '', ms: msg.ms || 0, confidence: typeof msg.confidence === 'number' ? msg.confidence : null })
       return
     }
     if (msg.event === 'final') {
@@ -212,6 +212,7 @@ class WhisperPythonEngine extends EventEmitter {
         text: msg.text || '',
         reason: msg.reason || 'endpoint',
         ms: msg.ms || 0,
+        confidence: typeof msg.confidence === 'number' ? msg.confidence : null,
       })
       return
     }
@@ -324,6 +325,13 @@ class WhisperPythonEngine extends EventEmitter {
   setCaptureMode(on) {
     if (!this.isReady()) return
     this.child.stdin.write(JSON.stringify({ type: 'capture-mode', on: !!on }) + '\n')
+  }
+
+  /** Порог Silero-VAD в рантайме (0.1..0.9): маппинг ползунка чувствительности */
+  setVadThreshold(threshold) {
+    if (!this.isReady()) return
+    const th = Math.min(0.9, Math.max(0.1, Number(threshold) || 0.4))
+    this.child.stdin.write(JSON.stringify({ type: 'set-vad-threshold', threshold: th }) + '\n')
   }
 
   /** Прямое декодирование файла (selftest/бенчмарк) — НЕ путь живого микрофона */

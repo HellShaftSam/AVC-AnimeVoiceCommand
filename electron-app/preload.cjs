@@ -113,6 +113,8 @@ contextBridge.exposeInMainWorld('avcElectron', {
     flushStt: () => ipcRenderer.invoke('avc:ai:stt-flush'),
     /** Режим рации: аудио при удержании PTT без VAD-гейта (детерминированный PTT) */
     setCaptureMode: (enabled) => ipcRenderer.invoke('avc:ai:stt-capture', { enabled }),
+    /** Порог VAD в рантайме: маппинг ползунка чувствительности (0.1..0.9) */
+    setVadThreshold: (threshold) => ipcRenderer.invoke('avc:ai:stt-vad-threshold', { threshold }),
 
     /** Частичная транскрипция { utteranceId, text, ms, earlyCommand? } (§11–§12) */
     onSttPartial: (cb) => {

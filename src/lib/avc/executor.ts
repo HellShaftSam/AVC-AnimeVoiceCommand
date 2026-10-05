@@ -577,13 +577,24 @@ async function executeSearchAnime(cmd: VoiceCommand): Promise<CommandResult> {
   useAvcStore
     .getState()
     .setPendingOptions({ query, items: candidates, episode: episode ?? undefined })
+  pendingOptionsAt = Date.now()
   return ok('Найдено несколько вариантов. Скажите номер.', candidates)
 }
+
+/** Метка создания списка вариантов: выбор номера по мусорной фразе через
+ * минуты после поиска открывал случайное аниме (цепочка наложения аудио v1.0.27) */
+let pendingOptionsAt = 0
+const PENDING_OPTIONS_TTL_MS = 30000
 
 async function executeSelectOption(cmd: VoiceCommand): Promise<CommandResult> {
   const st = useAvcStore.getState()
   const opts = st.pendingOptions
   if (!opts) return fail('Нет вариантов для выбора — сначала выполните поиск')
+  if (pendingOptionsAt > 0 && Date.now() - pendingOptionsAt > PENDING_OPTIONS_TTL_MS) {
+    st.setPendingOptions(null)
+    pendingOptionsAt = 0
+    return fail('Время выбора номера истекло — выполните поиск заново')
+  }
   const index = paramNumber(cmd, 'index')
   if (index === null) return fail('Не указан номер варианта')
   const item = opts.items[index - 1]
@@ -591,6 +602,7 @@ async function executeSelectOption(cmd: VoiceCommand): Promise<CommandResult> {
     return fail(`Вариант ${index} не найден. Доступно вариантов: ${opts.items.length}`)
   }
   st.setPendingOptions(null)
+  pendingOptionsAt = 0
   const navResult = await navigateToAnime(item, false)
   // доигрываем запрошенную серию, если она была в исходной команде
   if (opts.episode && navResult.success) {

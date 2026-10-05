@@ -88,6 +88,10 @@ const handlers = {
     pipeline.setCaptureMode(!!args?.enabled)
     return true
   },
+  'set-vad-threshold': (args) => {
+    pipeline.setVadThreshold(Number(args?.threshold ?? 0.4))
+    return true
+  },
 }
 
 if (process.parentPort) {

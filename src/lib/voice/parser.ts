@@ -873,10 +873,15 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
     words.length <= 6 &&
     !isSectionWord(words[0]) &&
     !words.some((w) => EPISODE_NOUNS.some((n) => w.startsWith(n.slice(0, 5)))) &&
-    words.every((w) => !/^\d+$/.test(w))
+    words.every((w) => !/^\d+$/.test(w)) &&
+    // Урок v1.0.27 (issue #3): мусор Whisper («Народом тут.», «Селилия до два
+    // вас ослубить») долетал до этого правила и становился поиском аниме.
+    // Требуем слова не короче 3 букв («наруто» проходит, «до»/«тут»/«два» — нет)
+    // и общий запрос от 5 символов.
+    words.every((w) => w.length >= 3)
   ) {
     const query = words.join(' ').trim()
-    if (query.length >= 2) {
+    if (query.length >= 5) {
       return {
         type: VoiceCommandType.SearchAnime,
         params: { query, open: true },

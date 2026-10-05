@@ -202,6 +202,9 @@ export function useVoice(): VoiceApi {
   /** Эхо-глик: до этой метки не кормим STT (не в удержании рации) — защита от
    *  самозахвата эха команды из колонок → призрачных повторов */
   const echoGuardUntilRef = useRef(0)
+  /** Последняя активность STT (partial/final): capTick глушит только реально
+   *  молчащую сессию, а не режет длинную фразу посередине (урок v1.0.27) */
+  const lastSttActivityAtRef = useRef(0)
   /** Последняя исполненная финальная фраза — дедупликация дублей (эхо/двойные потоки) */
   const lastExecutedFinalRef = useRef<{ text: string; at: number } | null>(null)
   /** Флаг «стоп по мёртвому микрофону» — такой стоп обязан обойти guard always-listening */
@@ -694,6 +697,12 @@ export function useVoice(): VoiceApi {
       processor.connect(mute)
       mute.connect(ctx.destination)
       localSessionRef.current = { ctx, processor, source }
+      // Порог Silero-VAD из ползунка чувствительности (issue #3: чувствительность
+      // 88/100 + micGain 3.25 → VAD срабатывал на шум и музыку из колонок).
+      // Маппинг: 0 → 0.6 (строго), 100 → 0.3 (чутко), 50 → 0.45; дефолт Mantella 0.4 ≈ 67.
+      const sens = Math.min(100, Math.max(0, Number(settings.vadSensitivity) || 50))
+      const vadThreshold = 0.6 - (sens / 100) * 0.3
+      void ai.setVadThreshold?.(vadThreshold).catch(() => undefined)
       setBrowserEngine(true) // «браузероподобный» движок с interim-результатами
       setEngineName('local')
       useAvcStore.getState().setVoiceStatus('listening', 'Слушаю (локально)...')
@@ -703,8 +712,15 @@ export function useVoice(): VoiceApi {
       // сессия продолжает жить (следующий кап через capMs), в PTT — завершаем захват.
       if (maxTimerRef.current) clearTimeout(maxTimerRef.current)
       const capMs = Math.min(60000, Math.max(4000, settings.maxUtteranceMs || DEFAULT_MAX_UTTERANCE_MS))
+      lastSttActivityAtRef.current = Date.now()
       maxTimerRef.current = setTimeout(function capTick() {
-        void ai.flushStt().catch(() => undefined)
+        // Урок v1.0.27 (issue #3): flush завершает VAD-фразу КАК ЕСТЬ. Если STT
+        // активно выдаёт partial/final — пользователь ещё говорит, и flush резал
+        // фразу посередине, плодя фантомные полуфиналы. Глушим только реально
+        // молчащую capMs сессию (зависший воркер/потерянный захват).
+        if (Date.now() - lastSttActivityAtRef.current >= capMs) {
+          void ai.flushStt().catch(() => undefined)
+        }
         if (alwaysRef.current && mountedRef.current && localSessionRef.current) {
           maxTimerRef.current = setTimeout(capTick, capMs)
         } else {
@@ -722,6 +738,7 @@ export function useVoice(): VoiceApi {
     const ai = getElectronBridge()?.ai
     if (!ai?.available) return
     const offPartial = ai.onSttPartial((p) => {
+      lastSttActivityAtRef.current = Date.now()
       if (p.text) setInterimText(p.text)
       // §12: безопасное раннее исполнение ещё до финала; §14 — один раз на фразу.
       // УРОК v1.0.26: ранние команды — ТОЛЬКО в удержании рации. В always-listening
@@ -743,6 +760,7 @@ export function useVoice(): VoiceApi {
       }
     })
     const offFinal = ai.onSttFinal((p) => {
+      lastSttActivityAtRef.current = Date.now()
       // §14: финал не исполняется второй раз, если раннее исполнение РЕАЛЬНО
       // произошло в рендерере (удержание рации). Голая метка earlyCommandType от
       // пайплайна (когда рендерер early сознательно не исполнял — always-listening)
@@ -781,9 +799,27 @@ export function useVoice(): VoiceApi {
           }
           return
         }
+        // ГЕЙТ КАЧЕСТВА (урок v1.0.27, issue #3): в always-listening Whisper
+        // распознавал музыку/диалоги из колонок («ДИНАМИЧНАЯ МУЗЫКА»), парсер
+        // превращал мусор в «поиск аниме» → открывалось чужое аниме поверх
+        // играющего («наложение аудио»). Финалы с низкой уверенностью Whisper
+        // в фоновом режиме НЕ исполняются; в рации пользователь говорит
+        // намеренно — там гейт не действует.
+        const conf = typeof p.confidence === 'number' ? p.confidence : null
+        // Эффективный гейт = min(0.45, ползунок): калибровка по фикстурам — чистая
+        // речь 0.52..0.80, фантомы на музыке/шуме < 0.45. Ползунок ниже 0.45
+        // дополнительно ослабляет гейт для тихих микрофонов.
+        const noiseGate = Math.min(0.45, useAvcStore.getState().settings.confidenceThreshold)
+        if (!captureHeldRef.current && conf !== null && conf < noiseGate) {
+          const cur = useAvcStore.getState().voiceStatus
+          if (cur === 'listening' || cur === 'recognizing') {
+            useAvcStore.getState().setVoiceStatus('idle', 'Фоновый шум — команда пропущена')
+          }
+          return
+        }
         if (norm) lastExecutedFinalRef.current = { text: norm, at: now }
         // Эхо-глик после команды: колонки могут «дочитать» эхо в микрофон
-        if (!captureHeldRef.current) echoGuardUntilRef.current = Date.now() + 1500
+        if (!captureHeldRef.current) echoGuardUntilRef.current = Date.now() + 2000
         useAvcStore.getState().setVoiceStatus('recognizing', 'Обрабатываю...')
         void handleRecognizedText(p.text)
       } else if (!alwaysRef.current) {

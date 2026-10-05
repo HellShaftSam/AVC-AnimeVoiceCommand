@@ -26,7 +26,10 @@ if (isStaleClient(globalForPrisma.prisma)) {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ['query'],
+    // Урок v1.0.27 (issue #3): query-лог в проде заливал avc.log тысячами
+    // «prisma:query» строк — diagnostics в issue обрезались ДО реальных
+    // голосовых событий. В проде — только ошибки/предупреждения.
+    log: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : ['query', 'error', 'warn'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

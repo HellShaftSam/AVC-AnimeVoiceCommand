@@ -235,8 +235,10 @@ export interface AvcElectronBridge {
     flushStt(): Promise<void>
     /** Режим рации: аудио при удержании PTT без VAD-гейта */
     setCaptureMode(enabled: boolean): Promise<boolean>
-    onSttPartial(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommand?: string | null }) => void): () => void
-    onSttFinal(cb: (p: { utteranceId: number; text: string; ms: number; earlyCommandType?: string | null }) => void): () => void
+    /** Порог VAD в рантайме: маппинг ползунка чувствительности (0.1..0.9) */
+    setVadThreshold(threshold: number): Promise<boolean>
+    onSttPartial(cb: (p: { utteranceId: number; text: string; ms: number; confidence?: number | null; earlyCommand?: string | null }) => void): () => void
+    onSttFinal(cb: (p: { utteranceId: number; text: string; ms: number; confidence?: number | null; earlyCommandType?: string | null }) => void): () => void
     onModelProgress(cb: (p: AiModelProgress) => void): () => void
     onServicesStatus(cb: (p: Record<string, string>) => void): () => void
     /** Каталог AI-моделей: текущий путь + конфиг (фаза 5 аудита) */

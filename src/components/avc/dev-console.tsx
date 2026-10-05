@@ -97,7 +97,13 @@ export function DevConsole({ open, onClose }: { open: boolean; onClose: () => vo
     parts.push(`\n--- PIPELINE (последние шаги) ---\n${st.pipeline.map((p) => `${p.stage}: ${p.detail}`).join('\n') || '—'}`)
     parts.push(`\n--- VOICE/STT НАСТРОЙКИ ---\n${JSON.stringify({ sttEngine: st.settings.sttEngine, aiProfile: st.settings.aiProfile, micGain: st.settings.micGain, vadSensitivity: st.settings.vadSensitivity, micDeviceId: st.settings.micDeviceId }, null, 1)}`)
     if (logLines.length > 0) {
-      parts.push(`\n--- LOG TAIL (${logFile ?? 'avc.log'}) ---\n${logLines.join('\n')}`)
+      // Урок issue #3: prisma:query-шум занимал весь хвост лога — отчёт обрезался
+      // до реальных голосовых событий. Шум фильтруем, объём честно указываем.
+      const noise = /(prisma:query|sqlite_master|PRAGMA|table_info)/
+      const kept = logLines.filter((l) => !noise.test(l))
+      const dropped = logLines.length - kept.length
+      const tail = dropped > 0 ? [`… отфильтровано ${dropped} prisma/SQL-строк …`, ...kept] : kept
+      parts.push(`\n--- LOG TAIL (${logFile ?? 'avc.log'}) ---\n${tail.join('\n')}`)
     }
     return parts.join('\n')
   }, [appInfo, logLines, logFile, playback, pipeline, lastExecuted, settings])

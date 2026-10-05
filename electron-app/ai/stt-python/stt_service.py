@@ -66,7 +66,24 @@ HALLUCINATION_IGNORE = {
     "thank you for watching", "subscribe", "подпишитесь", "спасибо за просмотр",
     "спасибо, что посмотрели", "продолжение следует", "до свидания",
     "перевод и озвучка", "смотрите далее",
+    # Наблюдения v1.0.27 (issue #3): Whisper на музыке/шуме из колонок выдаёт
+    # «ДИНАМИЧНАЯ МУЗЫКА», «СИГНАЛЬНАЯ ЗАСТАВКА» и т.п.; парсер превращал их
+    # в поиск аниме -> открывалось чужое аниме поверх играющего (наложение аудио).
+    "динамичная музыка", "музыка", "музыка стихает", "музыка затихает",
+    "музыка играет", "сигнальная заставка", "заставка", "титры", "реклама",
+    "аплодисменты", "смех в студии", "звенит будильник", "нет субтитров",
+    "субтитры", "приятного просмотра", "всем приятного просмотра",
+    "смотрите в следующей серии", "конец серии",
+    "осталось меньше минуты", "продолжайте смотреть", "вы смотрите",
+    "перевод", "озвучка",
 }
+
+# Гейт качества сегмента Whisper (галлюцинации на музыке/шуме):
+# no_speech_prob - собственная оценка Whisper «речи тут нет»;
+# avg_logprob - средняя лог-вероятность токенов (у мусора сильно отрицательная).
+SEGMENT_NO_SPEECH_DROP = 0.65
+SEGMENT_LOGPROB_DROP = -1.0
+
 
 _IGNORE_NORM = None
 
@@ -204,12 +221,17 @@ def whisper_load():
 
 
 def transcribe_samples(samples_f32, beam_size):
-    """Декодировать float32 16кГц → текст (параметры Mantella: beam 5, vad_filter=False)."""
+    """Декодировать float32 16кГц -> (текст, уверенность 0..1).
+
+    Параметры Mantella: beam 5, vad_filter=False (VAD внешний - наш).
+    Уверенность = exp(взвешенного по длине avg_logprob) - честная метка качества;
+    рендерер в always-listening не исполняет команды с низкой уверенностью.
+    """
     if samples_f32.size == 0:
-        return ""
+        return "", 0.0
     rms = float(np.sqrt(np.mean(np.square(samples_f32))))
     if rms < 1e-4:
-        return ""  # быстрая тишина без дорогого вызова
+        return "", 0.0  # быстрая тишина без дорогого вызова
     segments, _info = WHISPER_MODEL.transcribe(
         samples_f32,
         language=ARGS.language,
@@ -219,14 +241,35 @@ def transcribe_samples(samples_f32, beam_size):
     )
     ign = _ignore_norm()
     parts = []
+    logprob_sum = 0.0
+    weight_sum = 0.0
     for seg in segments:
         t = (seg.text or "").strip()
         if not t:
             continue
         if t.lower().strip(".!? ,") in ign:
-            continue  # известная галлюцинация на тишине — сегмент отбрасывается
+            continue  # известная галлюцинация на тишине - сегмент отбрасывается
+        # Гейт качества: сегмент-фантом на музыке/шуме отбрасываем целиком.
+        nsp = float(getattr(seg, "no_speech_prob", 0.0) or 0.0)
+        alp = float(getattr(seg, "avg_logprob", 0.0) or 0.0)
+        if nsp > SEGMENT_NO_SPEECH_DROP or alp < SEGMENT_LOGPROB_DROP:
+            emit_log("info", f"сегмент отброшен гейтом качества: {t[:60]!r} (no_speech={nsp:.2f}, logprob={alp:.2f})")
+            continue
         parts.append(t)
-    return " ".join(parts).strip()
+        try:
+            w = max(1, len(getattr(seg, "tokens", None) or []))
+        except Exception:  # noqa: BLE001
+            w = max(1, len(t))
+        logprob_sum += alp * w
+        weight_sum += w
+    text = " ".join(parts).strip()
+    if not text or weight_sum <= 0:
+        return "", 0.0
+    confidence = float(np.clip(np.exp(logprob_sum / weight_sum), 0.0, 1.0))
+    return text, confidence
+
+
+
 
 
 # --- поток инференса --------------------------------------------------------------
@@ -242,14 +285,16 @@ def inference_worker():
         reason = job[4] if len(job) > 4 else "endpoint"
         try:
             t0 = time.time()
-            text = transcribe_samples(samples, beam_size=(1 if kind == "partial" else 5))
+            text, confidence = transcribe_samples(samples, beam_size=(1 if kind == "partial" else 5))
             ms = int((time.time() - t0) * 1000)
             if kind == "partial":
                 if text:
-                    emit({"event": "partial", "utteranceId": utterance_id, "text": text, "ms": ms})
+                    emit({"event": "partial", "utteranceId": utterance_id, "text": text, "ms": ms,
+                          "confidence": round(confidence, 3)})
             else:
                 emit({"event": "final", "utteranceId": utterance_id, "text": text,
-                      "reason": reason, "ms": int((time.time() * 1000) - started_ms)})
+                      "reason": reason, "ms": int((time.time() * 1000) - started_ms),
+                      "confidence": round(confidence, 3)})
         except Exception as e:  # noqa: BLE001 — ошибка инференса не должна убивать сервис
             if kind == "final":
                 emit({"event": "final", "utteranceId": utterance_id, "text": "",
@@ -298,6 +343,9 @@ class Session:
                     self.speech_ms = 0
                 self.buffer.append(window)
                 self.buffer_len += 512
+                # кап рации: при зажатой/залипшей кнопке буфер не растёт бесконечно
+                if self.buffer_len >= ARGS.listen_timeout * 16000:
+                    self._finalize("timeout")
                 continue
 
             ended = False
@@ -413,11 +461,21 @@ def handle_request(msg):
         if mtype == "capture-mode":
             on = bool(msg.get("on"))
             if on and not SESSION.capture_mode:
+                # Урок v1.0.27 (issue #3): до нажатия рации VAD мог уже набирать
+                # «фразу» из окружающего шума/музыки из колонок. Без сброса она
+                # смешалась бы с речью пользователя в один final («нарууу-рутуол»).
+                SESSION.reset()
                 SESSION.capture_mode = True
             if not on and SESSION.capture_mode:
                 SESSION.capture_mode = False
-                SESSION.flush()  # выключение рации завершает фразу
+                # выключение рации завершает фразу с честной причиной 'capture'
+                SESSION._finalize("capture")
             return {"ok": True}
+        if mtype == "set-vad-threshold":
+            th = float(msg.get("threshold", ARGS.threshold))
+            th = min(0.9, max(0.1, th))
+            SESSION.vad.threshold = th
+            return {"ok": True, "result": {"threshold": th}}
         if mtype == "decode":
             raw = base64.b64decode(msg.get("audio", ""))
             sr = int(msg.get("sampleRate", 16000))
@@ -425,8 +483,9 @@ def handle_request(msg):
                 raise ValueError(f"Поддерживается только 16 кГц, получено {sr}")
             f32 = np.frombuffer(raw, dtype=np.float32)
             t0 = time.time()
-            text = transcribe_samples(f32, beam_size=5)
-            return {"ok": True, "result": {"text": text, "ms": int((time.time() - t0) * 1000)}}
+            text, confidence = transcribe_samples(f32, beam_size=5)
+            return {"ok": True, "result": {"text": text, "ms": int((time.time() - t0) * 1000),
+                                           "confidence": round(confidence, 3)}}
         if mtype == "reset":
             SESSION.reset()
             return {"ok": True}
@@ -470,9 +529,10 @@ def run_selftest(args):
     samples = read_wav_f32(args.wav)
     result["audioMs"] = int(samples.size / 16000 * 1000)
     t1 = time.time()
-    text = transcribe_samples(samples, beam_size=5)
+    text, confidence = transcribe_samples(samples, beam_size=5)
     result["transcribeMs"] = int((time.time() - t1) * 1000)
     result["text"] = text
+    result["confidence"] = round(confidence, 3)
     if args.expect:
         norm = lambda s: "".join(c for c in s.lower() if c.isalnum() or c.isspace())  # noqa: E731
         result["expect"] = args.expect
