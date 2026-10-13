@@ -20,6 +20,7 @@ import { AnimeGrid, AnimeGridSkeleton } from './anime-grid'
 import { AnimeView } from './anime-view'
 import { ScheduleView } from './schedule-view'
 import { RecommendationsView } from './recommendations-view'
+import { CompanionView } from './companion-view'
 import { executeText } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
 import { AnimeCard, BrowserTab, SectionPage } from '@/lib/avc/types'
@@ -38,6 +39,7 @@ const HINT_CHIPS: string[] = [
   'Покажи онгоинги',
   'Найди Берсерк',
   'Следующая серия',
+  'Сохрани этот момент',
 ]
 
 function HomeView() {
@@ -406,6 +408,8 @@ export function TabContent({ tab }: { tab: BrowserTab }) {
       return <AnimeView tab={tab} />
     case 'recommendations':
       return <RecommendationsView />
+    case 'companion':
+      return <CompanionView tab={tab} />
     default:
       return <HomeView />
   }

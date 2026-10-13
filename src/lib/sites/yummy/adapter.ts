@@ -26,6 +26,7 @@ import {
   VideoEntry,
   VideoSkips,
 } from '@/lib/avc/types'
+import { genreLabel } from '@/lib/voice/genre-aliases'
 
 const NAMED_ENTITIES: Record<string, string> = {
   mdash: '—', ndash: '–', hellip: '…', laquo: '«', raquo: '»',
@@ -76,7 +77,12 @@ const SELECTORS = {
   /** УРОК: ссылки пагинации бывают и «/catalog?page=N» (без подкатегории), и
    *  «/catalog/ongoing?page=N» — прежний шаблон требовал слеш после catalog,
    *  из-за чего в главном каталоге totalPages всегда был 1 (нет страниц в UI). */
-  pagination: /catalog(?:\/[a-z0-9_-]+)?\/?\?page=(\d+)/gi,
+  /**
+   * Пагинация: /catalog?page=N, /catalog/ongoing?page=N, а у жанров
+   * /catalog/category/{slug}?sort=name&page=N (живая проверка task 17-a) —
+   * допускаем произвольную глубину пути и промежуточные query-параметры.
+   */
+  pagination: /catalog(?:\/[a-z0-9_-]+)*\/?\?(?:[^"'>&]*&)*page=(\d+)/gi,
   /** Unix-время следующей серии в карточке расписания: <local-time data-time="1792375200" class="time-left"> */
   scheduleTime: /data-time="(\d{9,12})"/,
   animeIdOnPage: /data-anime-id="(\d+)"/,
@@ -359,6 +365,18 @@ function parseSkips(v: ApiVideoItem): VideoSkips | null {
 
 // --- адаптер -----------------------------------------------------------------
 
+/** Страница жанр-категории (/catalog/category/{slug}) — Компас настроений (task 17-a) */
+export interface CategoryPage {
+  /** Нормализованный слаг жанра */
+  genre: string
+  /** Заголовок с человеческой подписью жанра («Жанр: комедия») */
+  title: string
+  page: number
+  totalPages: number | null
+  items: AnimeCard[]
+  source: 'live' | 'cache'
+}
+
 export class YummyAnimeAdapter implements IAnimeSiteAdapter {
   readonly siteName = 'YummyAnime'
   readonly baseUrl: string
@@ -577,6 +595,37 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       }
       return demoSection(section, page)
     }
+  }
+
+  /**
+   * Страница жанра (/catalog/category/{slug}) — Компас настроений (task 17-a).
+   *
+   * ОТЛИЧИЕ от getSection: демо-фолбэка НЕТ — выдумывать тайтлы жанра нельзя
+   * (ТЗ: только честные данные). Пусто/неизвестный жанр/сеть → throw,
+   * роут /api/site/category сам разрулит 404/500.
+   */
+  async getCategoryPage(slug: string, page = 1): Promise<CategoryPage> {
+    const clean = slug.trim().toLowerCase()
+    if (!/^[a-z0-9-]{1,64}$/.test(clean)) throw new Error('Некорректный слаг жанра')
+    if (!Number.isInteger(page) || page < 1 || page > 500) throw new Error('Некорректная страница')
+    const key = `category:${this.baseUrl}:${clean}:${page}`
+    const cached = cacheGet<CategoryPage>(key)
+    if (cached) return { ...cached, source: 'cache' }
+    const url =
+      page > 1
+        ? `${this.baseUrl}/catalog/category/${clean}?page=${page}`
+        : `${this.baseUrl}/catalog/category/${clean}`
+    const html = await fetchText(url)
+    const items = parseCards(html)
+    if (items.length === 0) throw new Error('Жанр не найден или пуст')
+    return cacheSet(key, {
+      genre: clean,
+      title: `Жанр: ${genreLabel(clean)}`,
+      page,
+      totalPages: parseTotalPages(html),
+      items,
+      source: 'live',
+    })
   }
 
   async getRandom(): Promise<AnimeDetails | null> {

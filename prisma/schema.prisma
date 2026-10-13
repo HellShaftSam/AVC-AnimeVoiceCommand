@@ -109,3 +109,41 @@ model RecFeedback {
 
   @@unique([accountKey, animeId, action])
 }
+
+// Хроники зрителя (Anime Companion): заметки, цитаты, впечатления и закладки моментов.
+// Одна таблица на все виды записей (ТЗ §19: не создавать таблицу на каждую кнопку).
+// accountKey = userId сайта либо 'anon' (изоляция аккаунтов, как у RecFeedback).
+model ViewerNote {
+  id          String   @id @default(cuid())
+  accountKey  String   @default("anon")
+  kind        String   @default("note") // note | quote | moment | impression
+  animeId     Int
+  slug        String   @default("")
+  title       String
+  poster      String?
+  episode     Int?
+  text        String
+  positionSec Float?   // позиция воспроизведения для kind='moment'
+  durationSec Float?
+  tags        String   @default("") // через запятую
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([accountKey, animeId])
+  @@index([accountKey, kind, createdAt])
+}
+
+// Пользовательские цели просмотра (Anime Companion, ТЗ §17). Статические
+// достижения БЕЗ таблицы — детерминированный расчёт из реальных событий.
+model UserQuest {
+  id         String   @id @default(cuid())
+  accountKey String   @default("anon")
+  title      String
+  metric     String   // episodes | titles | notes | ratings | favorites
+  target     Int
+  archived   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([accountKey, archived])
+}

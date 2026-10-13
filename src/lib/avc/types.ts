@@ -21,6 +21,20 @@ export enum VoiceCommandType {
   OpenRandom = 'OpenRandom',
   /** «открой рекомендации» — вкладка персональных рекомендаций */
   OpenRecommendations = 'OpenRecommendations',
+  /** «открой компаньон/хроники/заметки» — вкладка Anime Companion (payload.sub) */
+  OpenCompanion = 'OpenCompanion',
+  /** «сохрани/запомни этот момент» — закладка позиции воспроизведения */
+  SaveMoment = 'SaveMoment',
+  /** «напомни, что происходило» — честное резюме из своих заметок (без выдумок) */
+  RecapRequest = 'RecapRequest',
+  /** «покажи незаконченные аниме» — список начатых и не завершённых */
+  ShowUnfinished = 'ShowUnfinished',
+  /** «покажи порядок просмотра» — скролл к таймлайну франшизы открытого аниме */
+  ShowWatchOrder = 'ShowWatchOrder',
+  /** «сколько серий осталось» — арифметика по трекингу просмотра */
+  HowManyEpisodesLeft = 'HowManyEpisodesLeft',
+  /** «найди что-нибудь мрачное с сильным героем» — лексикон настроений → компас */
+  MoodSearch = 'MoodSearch',
   SearchAnime = 'SearchAnime',
   OpenAnime = 'OpenAnime',
   SelectEpisode = 'SelectEpisode',
@@ -631,7 +645,23 @@ export interface YummyAnimeActionResponse {
 // Вкладки (Browser layer)
 // ---------------------------------------------------------------------------
 
-export type TabKind = 'home' | 'section' | 'search' | 'anime' | 'help' | 'recommendations'
+export type TabKind =
+  | 'home'
+  | 'section'
+  | 'search'
+  | 'anime'
+  | 'help'
+  | 'recommendations'
+  | 'companion'
+
+/** Подразделы вкладки Anime Companion (payload.sub) */
+export type CompanionSub =
+  | 'overview'
+  | 'compass'
+  | 'chronicles'
+  | 'taste'
+  | 'quests'
+  | 'characters'
 
 export interface BrowserTab {
   id: string

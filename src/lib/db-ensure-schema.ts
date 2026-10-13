@@ -19,8 +19,34 @@ import { db } from './db'
  * `bun run db:push` локально → сверь вывод sqlite_master.
  */
 
-/** Снапшот DDL (получен из sqlite_master после prisma db push, 2026-10-04) */
+/** Снапшот DDL (получен из sqlite_master после prisma db push, 2026-10-04; +ViewerNote/UserQuest — 2026-10-14, task 17-a) */
 const DDL_TABLES: Record<string, string> = {
+  UserQuest: `CREATE TABLE IF NOT EXISTS "UserQuest" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "accountKey" TEXT NOT NULL DEFAULT 'anon',
+  "title" TEXT NOT NULL,
+  "metric" TEXT NOT NULL,
+  "target" INTEGER NOT NULL,
+  "archived" BOOLEAN NOT NULL DEFAULT false,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+)`,
+  ViewerNote: `CREATE TABLE IF NOT EXISTS "ViewerNote" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "accountKey" TEXT NOT NULL DEFAULT 'anon',
+  "kind" TEXT NOT NULL DEFAULT 'note',
+  "animeId" INTEGER NOT NULL,
+  "slug" TEXT NOT NULL DEFAULT '',
+  "title" TEXT NOT NULL,
+  "poster" TEXT,
+  "episode" INTEGER,
+  "text" TEXT NOT NULL,
+  "positionSec" REAL,
+  "durationSec" REAL,
+  "tags" TEXT NOT NULL DEFAULT '',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+)`,
   AppSetting: `CREATE TABLE IF NOT EXISTS "AppSetting" (
   "key" TEXT NOT NULL PRIMARY KEY,
   "value" TEXT NOT NULL,
@@ -92,6 +118,13 @@ const TABLE_COLUMNS: Record<string, Record<string, string>> = {
   },
 }
 
+/** Обычные индексы Prisma (@@index) — не уникальные, но нужны для скорости запросов */
+const PLAIN_INDEXES: Array<{ name: string; table: string; columns: string }> = [
+  { name: 'ViewerNote_accountKey_animeId_idx', table: 'ViewerNote', columns: '"accountKey", "animeId"' },
+  { name: 'ViewerNote_accountKey_kind_createdAt_idx', table: 'ViewerNote', columns: '"accountKey", "kind", "createdAt"' },
+  { name: 'UserQuest_accountKey_archived_idx', table: 'UserQuest', columns: '"accountKey", "archived"' },
+]
+
 /** Уникальные индексы Prisma (@@unique) */
 const UNIQUE_INDEXES: Array<{ name: string; table: string; columns: string }> = [
   { name: 'SkipMark_accountKey_animeId_dubbing_type_key', table: 'SkipMark', columns: '"accountKey", "animeId", "dubbing", "type"' },
@@ -130,7 +163,19 @@ async function runEnsure() {
     }
   }
 
-  // 3) уникальные индексы
+  // 3) обычные индексы (Anime Companion, task 17-a)
+  for (const idx of PLAIN_INDEXES) {
+    const exists = await db.$queryRawUnsafe<Array<{ name: string }>>(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+      idx.name,
+    )
+    if (!exists || exists.length === 0) {
+      await db.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "${idx.name}" ON "${idx.table}"(${idx.columns})`)
+      createdIndexes.push(idx.name)
+    }
+  }
+
+  // 4) уникальные индексы
   for (const idx of UNIQUE_INDEXES) {
     const exists = await db.$queryRawUnsafe<Array<{ name: string }>>(
       `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,

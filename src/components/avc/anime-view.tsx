@@ -449,7 +449,7 @@ function ViewingOrderRow({ items }: { items: RelatedAnime[] }) {
   }
 
   return (
-    <section aria-label="Франшиза и порядок просмотра" className="mt-6">
+    <section id="franchise-timeline" aria-label="Франшиза и порядок просмотра" className="mt-6">
       <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         <Layers className="h-4 w-4 text-gold-300" aria-hidden />
         Франшиза и порядок просмотра

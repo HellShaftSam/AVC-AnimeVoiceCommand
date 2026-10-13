@@ -6,6 +6,7 @@
  *           alias matching / извлечение параметров → VoiceCommand[]
  */
 import { BrowserContext, VoiceCommand, VoiceCommandType } from '@/lib/avc/types'
+import { resolveMoodQuery } from '@/lib/companion/mood'
 import { COMMAND_ALIASES, COMMAND_ALIAS_PARAMS, OPEN_TRIGGERS, SEARCH_TRIGGERS } from './aliases'
 import { normalizeCommandText, stripFillers } from './normalizer'
 import { consumeLeadingNumber, knownNumberWords, parseRussianNumber } from './russian-numbers'
@@ -133,6 +134,14 @@ export const LABELS: Record<VoiceCommandType, string> = {
   [VoiceCommandType.UndoSkip]: 'Вернуть пропущенное',
   [VoiceCommandType.SetAutoSkip]: 'Автопропуск',
   [VoiceCommandType.MarkSegment]: 'Запомнить таймкод',
+  // --- Task 17-c: Anime Companion ---
+  [VoiceCommandType.OpenCompanion]: 'Открыть Anime Companion',
+  [VoiceCommandType.SaveMoment]: 'Сохранить момент',
+  [VoiceCommandType.RecapRequest]: 'Напомнить происходившее',
+  [VoiceCommandType.ShowUnfinished]: 'Незаконченные аниме',
+  [VoiceCommandType.ShowWatchOrder]: 'Порядок просмотра',
+  [VoiceCommandType.HowManyEpisodesLeft]: 'Сколько серий осталось',
+  [VoiceCommandType.MoodSearch]: 'Поиск по настроению',
   [VoiceCommandType.Unknown]: 'Не распознано',
 }
 
@@ -344,9 +353,17 @@ function extractFavorite(text: string): VoiceCommand | null {
   return null
 }
 
-/** «продолжить просмотр» — продолжение с сохранённой позиции */
+/**
+ * «продолжить просмотр» — продолжение с сохранённой позиции.
+ * Task 17-c: + «продолжи то что смотрел», «продолжи вчерашнее»,
+ * «продолжи то аниме которое я смотрел» (тот же обработчик continueWatchingFromLast).
+ */
 function extractContinueWatching(text: string): VoiceCommand | null {
-  if (/продолжи(?:ть)?\s+просмотр|продолж\s+с\s+того\s+места|с\s+того\s+(?:самого\s+)?места|вернись\s+к\s+просмотру|где\s+я\s+остановился/.test(text)) {
+  if (
+    /продолжи(?:ть)?\s+просмотр|продолжи\s+то\s+что\s+смотр|продолжи\s+вчерашнее|продолжи\s+то\s+аниме\s+которое\s+я\s+смотр|продолж\s+с\s+того\s+места|с\s+того\s+(?:самого\s+)?места|вернись\s+к\s+просмотру|где\s+я\s+остановился/.test(
+      text,
+    )
+  ) {
     return { type: VoiceCommandType.ContinueWatching, params: {}, confidence: 0.9, label: 'Продолжить просмотр' }
   }
   return null
@@ -464,6 +481,136 @@ function extractAccountLogout(text: string): VoiceCommand | null {
     return { type: VoiceCommandType.AccountLogout, params: {}, confidence: 0.85, label: 'Выйти из аккаунта' }
   }
   return null
+}
+
+// --- Anime Companion: голосовые команды волны v1.0.33 (Task 17-c) -------------
+// Все правила стоят ДО extractSearch/extractOpen/голого тайтла, чтобы навигация
+// по компаньону не превращалась в мусорный поиск. Порядок внутри блока детерминирован.
+
+/**
+ * «сохрани/запомни (этот) момент» — закладка позиции воспроизведения.
+ * КОНФЛИКТ-ГВАРДИЯ (проверено selftest в обоих порядках): extractMarkSegment
+ * требует «начал/конец» + noun опенинга/эндинга/рекапа и отрабатывает РАНЬШЕ,
+ * поэтому «запомни начало опенинга» = MarkSegment, а «запомни этот момент» =
+ * SaveMoment (у MarkSegment без «начал/конец» kind=null → null).
+ */
+function extractSaveMoment(text: string): VoiceCommand | null {
+  if (/(?:сохранить|сохрани|запомни)\s+(?:этот\s+)?момент/.test(text)) {
+    return { type: VoiceCommandType.SaveMoment, params: {}, confidence: 0.9, label: 'Сохранить момент' }
+  }
+  return null
+}
+
+/**
+ * «напомни что происходило», «что было в предыдущих сериях» — честное резюме
+ * из СВОИХ заметок тайтла (executor не выдумывает содержание серий).
+ */
+function extractRecap(text: string): VoiceCommand | null {
+  if (
+    /напомни\s+что\s+(?:происходило|произошло)|что\s+(?:происходило|произошло)\s+в\s+предыдущих\s+сери|напомни\s+предыдущие\s+сери|что\s+было\s+в\s+предыдущих\s+сери/.test(
+      text,
+    )
+  ) {
+    return { type: VoiceCommandType.RecapRequest, params: {}, confidence: 0.9, label: 'Напомнить происходившее' }
+  }
+  return null
+}
+
+/** «покажи незаконченные аниме», «что я не досмотрел», «мои недосмотренные» */
+function extractShowUnfinished(text: string): VoiceCommand | null {
+  // «не досмотрел» только с отрицанием: «я это досмотрел» — НЕ unfinished
+  if (/незаконченн|недосмотр|не\s+досмотрел/.test(text)) {
+    return { type: VoiceCommandType.ShowUnfinished, params: {}, confidence: 0.9, label: 'Незаконченные аниме' }
+  }
+  return null
+}
+
+/** «покажи порядок просмотра (франшизы)», «какой порядок просмотра» */
+function extractWatchOrder(text: string): VoiceCommand | null {
+  if (/порядок\s+просмотра/.test(text)) {
+    return { type: VoiceCommandType.ShowWatchOrder, params: {}, confidence: 0.9, label: 'Порядок просмотра' }
+  }
+  return null
+}
+
+/** «сколько серий осталось», «сколько осталось серий», «сколько мне осталось».
+ *  Без числа → SelectEpisode не срабатывает (там нужны цифры/числительные). */
+function extractEpisodesLeft(text: string): VoiceCommand | null {
+  if (
+    /сколько\s+(?:мне\s+)?(?:серий|эпизодов)\s+осталось|сколько\s+(?:мне\s+)?осталось\s+(?:серий|эпизодов)|сколько\s+мне\s+осталось/.test(
+      text,
+    )
+  ) {
+    return { type: VoiceCommandType.HowManyEpisodesLeft, params: {}, confidence: 0.9, label: 'Сколько серий осталось' }
+  }
+  return null
+}
+
+/**
+ * «открой компаньон/хроники/заметки/цитаты/карту вкусов/квесты/компас/персонажей»,
+ * «мои заметки/цитаты/квесты/достижения», «карта вкусов», «аниме компас» →
+ * вкладка Anime Companion (payload.sub).
+ * ВАЖНО: «аниме компас» приходит сюда как «компас» — wake-word «аниме» срезан
+ * upstream, поэтому compass ловится и голым словом.
+ */
+function extractOpenCompanion(text: string): VoiceCommand | null {
+  if (/компаньон/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: {}, confidence: 0.9, label: 'Открыть Anime Companion' }
+  }
+  if (/компас/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: { sub: 'compass' }, confidence: 0.9, label: 'Компас настроений' }
+  }
+  // остальные подразделы — только при явном интенте (глагол/притяжательное/название блока)
+  if (!/(?:^|\s)(?:открой|откройте|открыть|покажи|покажите|перейди|мои|мою)(?:\s|$)|карта\s+вкусов/.test(text)) return null
+  if (/хроник|заметк|цитат/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: { sub: 'chronicles' }, confidence: 0.9, label: 'Хроники компаньона' }
+  }
+  if (/вкусов/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: { sub: 'taste' }, confidence: 0.9, label: 'Карта вкусов' }
+  }
+  if (/квест|достижени/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: { sub: 'quests' }, confidence: 0.9, label: 'Квесты компаньона' }
+  }
+  if (/персонаж/.test(text)) {
+    return { type: VoiceCommandType.OpenCompanion, params: { sub: 'characters' }, confidence: 0.9, label: 'Персонажи компаньона' }
+  }
+  return null
+}
+
+/**
+ * «найди что-нибудь мрачное с сильным героем», «хочу что-нибудь уютное»,
+ * «посоветуй что-нибудь трагичное», «что посмотреть мрачное», «ищу что-нибудь
+ * напряжённое» → MoodSearch{q=вся нормализованная фраза} (лексикон настроений
+ * src/lib/companion/mood.ts → вкладка Компас).
+ *
+ * КОНФЛИКТ-ГВАРДИИ (проверены selftest):
+ *  - «найди берсерк» → здесь оси НЕ найдено → null → обычный SearchAnime;
+ *  - «что посмотреть» БЕЗ настроения → null → alias OpenRecommendations;
+ *  - «что я смотрю» → перехвачен РАНЬШЕ extractWhatAmIWatching.
+ * «хочу» обычно срезан stripFillers → остаётся «что нибудь …» (ветка ниже).
+ */
+const MOOD_LEAD_RE =
+  /^(?:найди[те]?|поищи[те]?|ищу|подбери[те]?|посоветуй(?:те)?|что\s+посмотреть|что\s+посмотеть|хочу)\s+(.+)$/
+
+function extractMoodSearch(text: string): VoiceCommand | null {
+  // «хочу посмотреть что-нибудь …»: «хочу» срезан stripFillers, ведущий
+  // «посмотреть/смотреть/аниме» срезаем здесь — до сопоставления триггера
+  const t = text.replace(/^(?:посмотреть|смотреть|аниме)\s+/, '')
+  const m =
+    t.match(MOOD_LEAD_RE) ??
+    (t.startsWith('что нибудь ') ? [t, t.slice('что нибудь '.length)] : null)
+  if (!m) return null
+  // «посмотреть/аниме» между триггером и настроением — не часть запроса
+  const rest = m[1].replace(/^(?:посмотреть|смотреть|аниме)\s+/, '')
+  if (!rest) return null
+  const { axis } = resolveMoodQuery(rest)
+  if (!axis) return null // не настроение → голый тайтл/поиск/рекомендации как раньше
+  return {
+    type: VoiceCommandType.MoodSearch,
+    params: { q: text },
+    confidence: 0.85,
+    label: `Поиск по настроению: ${axis.label}`,
+  }
 }
 
 /**
@@ -836,6 +983,29 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
   const logout = extractAccountLogout(text)
   if (logout) return logout
 
+  // --- Anime Companion (Task 17-c): ДО поиска/открытия, чтобы «открой хроники»
+  // и «найди что-нибудь мрачное» не превращались в SearchAnime
+  const companionSub = extractOpenCompanion(text)
+  if (companionSub) return companionSub
+
+  const saveMoment = extractSaveMoment(text)
+  if (saveMoment) return saveMoment
+
+  const recap = extractRecap(text)
+  if (recap) return recap
+
+  const unfinished = extractShowUnfinished(text)
+  if (unfinished) return unfinished
+
+  const watchOrder = extractWatchOrder(text)
+  if (watchOrder) return watchOrder
+
+  const episodesLeft = extractEpisodesLeft(text)
+  if (episodesLeft) return episodesLeft
+
+  const mood = extractMoodSearch(text)
+  if (mood) return mood
+
   // 1. Озвучка: "озвучка anidub", "переключи на анилибрию", "следующая озвучка"
   const dub = extractSelectVoice(words)
   if (dub) return dub
@@ -1016,5 +1186,46 @@ export function parserSelfTest(): Array<{ input: string; expect: string }> {
     { input: 'продолжить просмотр', expect: 'ContinueWatching' },
     { input: 'открой библиотеку', expect: 'ShowLibrary' },
     { input: 'добавь ани либрия как команду для anilibria', expect: 'AddVoiceAlias(ани либрия->anilibria)' },
+    // --- Task 17-c: Anime Companion ---
+    { input: 'сохрани этот момент', expect: 'SaveMoment()' },
+    { input: 'запомни этот момент', expect: 'SaveMoment()' },
+    { input: 'сохранить момент', expect: 'SaveMoment()' },
+    { input: 'запомни начало опенинга', expect: 'MarkSegment(start,op)' }, // конфликт-гвардия SaveMoment
+    { input: 'запомни конец эндинга', expect: 'MarkSegment(end,ed)' }, // конфликт-гвардия SaveMoment
+    { input: 'напомни что происходило', expect: 'RecapRequest()' },
+    { input: 'что происходило в предыдущих сериях', expect: 'RecapRequest()' },
+    { input: 'что было в предыдущих сериях', expect: 'RecapRequest()' },
+    { input: 'напомни предыдущие серии', expect: 'RecapRequest()' },
+    { input: 'покажи незаконченные аниме', expect: 'ShowUnfinished()' },
+    { input: 'что я не досмотрел', expect: 'ShowUnfinished()' },
+    { input: 'мои недосмотренные', expect: 'ShowUnfinished()' },
+    { input: 'что я недосмотрел', expect: 'ShowUnfinished()' },
+    { input: 'хочу посмотреть что-нибудь мрачное', expect: 'MoodSearch(q=посмотреть что нибудь мрачное)' }, // q = вся нормализованная фраза
+    { input: 'покажи порядок просмотра', expect: 'ShowWatchOrder()' },
+    { input: 'порядок просмотра франшизы', expect: 'ShowWatchOrder()' },
+    { input: 'сколько серий осталось', expect: 'HowManyEpisodesLeft()' }, // без числа ≠ SelectEpisode
+    { input: 'сколько мне осталось', expect: 'HowManyEpisodesLeft()' },
+    { input: 'открой компаньон', expect: 'OpenCompanion()' },
+    { input: 'открой хроники', expect: 'OpenCompanion(sub=chronicles)' },
+    { input: 'мои заметки', expect: 'OpenCompanion(sub=chronicles)' },
+    { input: 'покажи заметки', expect: 'OpenCompanion(sub=chronicles)' },
+    { input: 'мои цитаты', expect: 'OpenCompanion(sub=chronicles)' },
+    { input: 'карта вкусов', expect: 'OpenCompanion(sub=taste)' },
+    { input: 'открой карту вкусов', expect: 'OpenCompanion(sub=taste)' },
+    { input: 'мои квесты', expect: 'OpenCompanion(sub=quests)' },
+    { input: 'мои достижения', expect: 'OpenCompanion(sub=quests)' },
+    { input: 'аниме компас', expect: 'OpenCompanion(sub=compass)' },
+    { input: 'открой персонажей', expect: 'OpenCompanion(sub=characters)' },
+    { input: 'найди что-нибудь мрачное с сильным героем', expect: 'MoodSearch(q=найди что нибудь мрачное с сильным героем)' },
+    { input: 'хочу что-нибудь уютное', expect: 'MoodSearch(q=что нибудь уютное)' }, // «хочу» срезан stripFillers
+    { input: 'посоветуй что-нибудь трагичное', expect: 'MoodSearch(q=посоветуй что нибудь трагичное)' },
+    { input: 'что посмотреть мрачное', expect: 'MoodSearch(q=что посмотреть мрачное)' },
+    { input: 'ищу что-нибудь напряженное', expect: 'MoodSearch(q=ищу что нибудь напряженное)' },
+    // конфликт-гварды MoodSearch
+    { input: 'что посмотреть', expect: 'OpenRecommendations' }, // без настроения — рекомендации
+    { input: 'что я смотрю', expect: 'WhatAmIWatching' }, // не MoodSearch
+    { input: 'продолжи то что смотрел', expect: 'ContinueWatching' },
+    { input: 'продолжи вчерашнее', expect: 'ContinueWatching' },
+    { input: 'продолжи то аниме которое я смотрел', expect: 'ContinueWatching' },
   ]
 }

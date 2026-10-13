@@ -46,6 +46,7 @@ import {
   YummyAnimeActionRequest,
 } from './types'
 import { makeTabSnapshot, useAvcStore } from './store'
+import { resolveMoodQuery } from '@/lib/companion/mood'
 
 // --- кэш деталей (модульный, переживает переключения вкладок) ------------------
 
@@ -479,6 +480,37 @@ export function openRecommendations(): CommandResult {
   }
   st.addTab({ kind: 'recommendations', title: 'Рекомендации', payload: {} })
   return ok('Открываю рекомендации')
+}
+
+/** Подписи подразделов Anime Companion (для заголовка вкладки) */
+export const COMPANION_SUB_LABELS: Record<string, string> = {
+  overview: 'Обзор',
+  compass: 'Компас',
+  chronicles: 'Хроники',
+  taste: 'Карта вкусов',
+  quests: 'Квесты',
+  characters: 'Персонажи',
+}
+
+/** Открыть вкладку Anime Companion (создать/переиспользовать), опционально подраздел */
+export function openCompanionTab(sub?: string, q?: string): CommandResult {
+  const st = useAvcStore.getState()
+  const payload: Record<string, unknown> = {}
+  if (sub) payload.sub = sub
+  if (q) payload.q = q
+  const label = sub ? COMPANION_SUB_LABELS[sub] ?? sub : null
+  const active = st.tabs.find((t) => t.id === st.activeTabId)
+  if (active && active.kind === 'companion') {
+    // та же вкладка: патчим payload (поднавигация внутри) + заголовок, без дублей
+    st.patchTab(active.id, {
+      payload,
+      title: label ? `Компаньон · ${label}` : 'Компаньон',
+    })
+    st.bumpReload(active.id)
+    return ok(label ? `Anime Companion — ${label}` : 'Anime Companion')
+  }
+  st.addTab({ kind: 'companion', title: label ? `Компаньон · ${label}` : 'Компаньон', payload })
+  return ok(label ? `Открываю: ${label}` : 'Открываю Anime Companion')
 }
 
 function openSectionTab(sectionId: SiteSectionId): CommandResult {
@@ -961,15 +993,33 @@ async function continueFromEntry(entry: {
  */
 export async function continueWatchingFromLast(): Promise<CommandResult> {
   const last = getLastWatched()
-  if (!last) return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
-  return continueFromEntry({
-    animeId: last.animeId,
-    slug: last.slug,
-    title: last.title,
-    poster: last.poster,
-    episode: last.episode,
-    dubbing: last.currentDub,
-  })
+  if (last) {
+    return continueFromEntry({
+      animeId: last.animeId,
+      slug: last.slug,
+      title: last.title,
+      poster: last.poster,
+      episode: last.episode,
+      dubbing: last.currentDub,
+    })
+  }
+  // Фолбэк (ТЗ «продолжи то, что смотрел вчера»): серверный трекинг просмотра
+  // переживает очистку localStorage/переустановку — берём самый свежий тайтл с серией
+  try {
+    const progress = await avcApi.watchProgressList(companionAccountKey())
+    const item = progress.items.find((i) => i.episode != null)
+    if (!item) return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
+    return continueFromEntry({
+      animeId: item.animeId,
+      slug: item.slug,
+      title: item.title,
+      poster: item.poster,
+      episode: item.episode,
+      dubbing: item.dubbing,
+    })
+  } catch {
+    return fail('Нет недавних тайтлов — скажи «найди ...» чтобы начать')
+  }
 }
 
 /** Продолжить конкретный тайтл из локального трекинга (кнопка в библиотеке) */
@@ -1246,6 +1296,246 @@ async function executeMarkSegment(cmd: VoiceCommand): Promise<CommandResult> {
   return ok(`${which} ${SKIP_TYPE_TITLES[type]} отмечено на ${Math.round(t)} с`)
 }
 
+// --- Anime Companion (Task 17-c): компаньон/моменты/резюме/трекинг ---------------
+
+/** мм:сс из секунд (закладка момента) */
+function formatTime(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const m = Math.floor(s / 60)
+  return `${m}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** Обрезать текст заметки для голосового резюме */
+function truncateNote(text: string, max: number): string {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`
+}
+
+/** Безопасный слот аккаунта (тот же путь, что в трекинге прогресса) */
+function companionAccountKey(): string {
+  const acc = useAvcStore.getState().yummyAccount
+  const id = acc.state === 'loggedIn' ? acc.user?.userId : null
+  return id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon'
+}
+
+/** Запись Хроник, как её отдаёт GET /api/companion/notes (нужные поля) */
+interface CompanionNoteDto {
+  kind: string
+  episode: number | null
+  text: string
+}
+
+/**
+ * «сохрани/запомни этот момент» — закладка позиции воспроизведения в Хроники.
+ * Без активного playback (аниме + серия + позиция > 0) — честный отказ.
+ */
+async function executeSaveMoment(): Promise<CommandResult> {
+  const pb = useAvcStore.getState().playback
+  if (pb.animeId === null || pb.currentEpisode === null || pb.currentTime <= 0) {
+    return fail('Сейчас ничего не воспроизводится — закладка момента недоступна')
+  }
+  const title = pb.animeTitle ?? ''
+  const body = {
+    kind: 'moment',
+    animeId: pb.animeId,
+    slug: pb.animeSlug ?? '',
+    title,
+    episode: pb.currentEpisode,
+    text: `Момент на ${formatTime(pb.currentTime)} (серия ${pb.currentEpisode})`,
+    positionSec: Math.round(pb.currentTime * 10) / 10,
+    durationSec: pb.duration > 0 ? Math.round(pb.duration * 10) / 10 : null,
+  }
+  try {
+    const res = await fetch('/api/companion/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      let detail = ''
+      try {
+        detail = ((await res.json()) as { error?: string }).error ?? ''
+      } catch {
+        /* тело не JSON — остаёмся с общей фразой */
+      }
+      return fail(detail ? `Момент не сохранён: ${detail}` : 'Момент не сохранён — сервер Хроник недоступен')
+    }
+    return ok(
+      `Момент сохранён: ${title || 'аниме'}, серия ${pb.currentEpisode}, ${formatTime(pb.currentTime)} — смотрите «Хроники → Моменты»`,
+    )
+  } catch (e) {
+    return fail('Момент не сохранён — сеть недоступна', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
+ * «напомни что происходило» — ЧЕСТНОЕ резюме: тайтл, позиция просмотра и СВОИ
+ * заметки пользователя. Содержания серий у приложения нет — не выдумываем.
+ */
+async function executeRecapRequest(): Promise<CommandResult> {
+  const st = useAvcStore.getState()
+  const pb = st.playback
+  const last = pb.animeId !== null ? null : getLastWatched()
+  const animeId = pb.animeId ?? last?.animeId ?? null
+  const title = pb.animeTitle ?? last?.title ?? null
+  if (animeId === null) {
+    return fail('Не знаю, какой тайтл резюмировать — откройте аниме или скажите «что я смотрю»')
+  }
+  let episode = pb.currentEpisode ?? last?.episode ?? null
+  let total: number | null = null
+  const progress = await avcApi.watchProgressList(companionAccountKey())
+  if (progress.available) {
+    const entry = progress.items.find((i) => i.animeId === animeId)
+    if (entry) {
+      if (episode === null) episode = entry.episode
+      total = entry.episodesTotal
+    }
+  }
+  let notes: CompanionNoteDto[] = []
+  let notesTotal = 0
+  let notesError = false
+  try {
+    const res = await fetch(`/api/companion/notes?animeId=${encodeURIComponent(String(animeId))}&limit=10`)
+    if (res.ok) {
+      const data = (await res.json()) as { items?: CompanionNoteDto[]; total?: number }
+      notes = data.items ?? []
+      notesTotal = typeof data.total === 'number' ? data.total : notes.length
+    } else {
+      notesError = true
+    }
+  } catch {
+    notesError = true
+  }
+  if (notesError || notes.length === 0) {
+    // Гостю/при ошибке — честно: проверенного содержания серий нет; при ошибке
+    // чтения Хроник количество заметок тоже неизвестно (не рисуем «0»).
+    const countPart = notesError ? 'не удалось прочитать (Хроники недоступны)' : String(notesTotal)
+    return fail(
+      `Проверенного содержания серий у приложения нет — резюме не выдумываю. Ваши заметки: ${countPart}. Сохраняйте моменты и заметки — соберу из них напоминание`,
+    )
+  }
+  const epPart =
+    episode !== null ? `вы остановились на серии ${episode}${total ? ` из ${total}` : ''}` : 'серия не включалась'
+  const items = notes
+    .slice(0, 3)
+    .map((n, i) => {
+      const ep = n.episode !== null ? `[серия ${n.episode}] ` : ''
+      return `${i + 1}. ${ep}${truncateNote(n.text, 100)}`
+    })
+    .join('\n')
+  return ok(
+    `«${title ?? 'Тайтл'}» — ${epPart}.\nИз ваших заметок:\n${items}\nРезюме построено только из ваших заметок — содержание серий приложению не известно`,
+    { notesCount: notesTotal },
+  )
+}
+
+/**
+ * «покажи незаконченные аниме» — список начатых и не завершённых тайтлов из
+ * локального трекинга (тот же источник, что считает «незаконченные» в обзоре
+ * компаньона: /api/watch-progress, items с episode/episodesTotal).
+ */
+async function executeShowUnfinished(): Promise<CommandResult> {
+  const progress = await avcApi.watchProgressList(companionAccountKey())
+  if (!progress.available) {
+    return fail('История просмотра недоступна — незаконченные тайтлы посчитать не могу')
+  }
+  const unfinished = progress.items.filter(
+    (i) => i.episodesTotal !== null && i.episode !== null && i.episode < i.episodesTotal,
+  )
+  const listed = unfinished
+    .slice(0, 6)
+    .map((i) => `${i.title} — серия ${i.episode} из ${i.episodesTotal}`)
+  const rest = unfinished.length - listed.length
+  const listText =
+    listed.length > 0
+      ? ` ${listed.join('; ')}.${rest > 0 ? ` И ещё ${rest}.` : ''}`
+      : ' Начатых незавершённых нет (или трекинг пуст).'
+  openCompanionTab('overview')
+  return ok(`Незаконченных тайтлов: ${unfinished.length}.${listText}`)
+}
+
+/**
+ * «покажи порядок просмотра» — скролл к таймлайну франшизы открытого аниме
+ * (id="franchise-timeline" в anime-view.tsx; блок рисуется только когда сайт
+ * отдал viewing_order).
+ */
+function executeShowWatchOrder(): CommandResult {
+  const pb = useAvcStore.getState().playback
+  if (pb.animeId === null) {
+    return fail('Откройте аниме — покажу порядок просмотра его франшизы')
+  }
+  const el = document.getElementById('franchise-timeline')
+  if (!el) {
+    return fail('У этого тайтла нет данных о франшизе — порядок просмотра сайтом не передан')
+  }
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  return ok('Показываю порядок просмотра франшизы')
+}
+
+/**
+ * «сколько серий осталось» — арифметика по трекингу: цель = активный playback,
+ * иначе последняя метка «последнее открытое»; недостающие серия/total добираются
+ * из локального трекинга.
+ */
+async function executeHowManyEpisodesLeft(): Promise<CommandResult> {
+  const pb = useAvcStore.getState().playback
+  let animeId = pb.animeId
+  let title = pb.animeTitle
+  let episode = pb.currentEpisode
+  let total = pb.episodesTotal
+  if (animeId === null) {
+    const last = getLastWatched()
+    if (last) {
+      animeId = last.animeId
+      title = last.title
+      episode = last.episode
+    }
+  }
+  if (animeId === null) {
+    return fail('Я не знаю, что вы смотрите — скажите «что я смотрю» или откройте аниме')
+  }
+  if (episode === null || total === null) {
+    const progress = await avcApi.watchProgressList(companionAccountKey())
+    const entry = progress.available ? progress.items.find((i) => i.animeId === animeId) : undefined
+    if (entry) {
+      if (episode === null) episode = entry.episode
+      if (total === null) total = entry.episodesTotal
+    }
+  }
+  if (episode !== null && total !== null && total > 0) {
+    const left = Math.max(0, total - episode)
+    return ok(`Осталось серий: ${left} (серия ${episode} из ${total})`)
+  }
+  if (episode !== null) {
+    return ok(`Всего серий не известно — вышло ${episode} серий`)
+  }
+  return fail(`«${title ?? 'Тайтл'}» открыт, но серии не включались — прогресса нет`)
+}
+
+/** «открой компаньон/хроники/заметки…» — вкладка Anime Companion с подразделом */
+function executeOpenCompanion(cmd: VoiceCommand): CommandResult {
+  const sub = typeof cmd.params.sub === 'string' ? cmd.params.sub : undefined
+  return openCompanionTab(sub)
+}
+
+/**
+ * «найди что-нибудь мрачное с сильным героем» — ось настроения из лексикона
+ * (src/lib/companion/mood.ts) → вкладка Компас с запросом. Жанр НЕ дублируется
+ * кодом: берём axis.genre/axis.label из лексикона. Оси нет (парсер такое уже
+ * отфильтровал) — честный отказ, без выдуманных категорий.
+ */
+function executeMoodSearch(cmd: VoiceCommand): CommandResult {
+  const q = paramString(cmd, 'q')
+  if (!q) {
+    return fail('Не указано настроение — скажите, например, «найди что-нибудь мрачное»')
+  }
+  const { axis } = resolveMoodQuery(q)
+  if (!axis) {
+    return fail('Не понял настроение — уточните: мрачное, уютное, напряжённое, романтика…')
+  }
+  openCompanionTab('compass', q)
+  return ok(`Компас: ${axis.label} — подбираю по категории «${axis.genre}»`, { axis: axis.id, genre: axis.genre })
+}
 function executeMuteUnmute(cmd: VoiceCommand): CommandResult {
   const st = useAvcStore.getState()
   const pb = st.playback
@@ -1493,6 +1783,20 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
       return accountLogout()
     case VoiceCommandType.AddVoiceAlias:
       return executeAddVoiceAlias(cmd)
+    case VoiceCommandType.OpenCompanion:
+      return executeOpenCompanion(cmd)
+    case VoiceCommandType.SaveMoment:
+      return executeSaveMoment()
+    case VoiceCommandType.RecapRequest:
+      return executeRecapRequest()
+    case VoiceCommandType.ShowUnfinished:
+      return executeShowUnfinished()
+    case VoiceCommandType.ShowWatchOrder:
+      return executeShowWatchOrder()
+    case VoiceCommandType.HowManyEpisodesLeft:
+      return executeHowManyEpisodesLeft()
+    case VoiceCommandType.MoodSearch:
+      return executeMoodSearch(cmd)
     case VoiceCommandType.Unknown:
       return fail('Команда не распознана')
     default:
