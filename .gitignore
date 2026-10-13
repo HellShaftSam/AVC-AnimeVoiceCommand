@@ -73,3 +73,6 @@ electron-app/runtime-node/
 electron-app/ai-pack/
 node.exe
 node.zip
+
+# Старые локальные сборки (2.4 ГБ) — релизы только через GitHub Releases
+public/releases/

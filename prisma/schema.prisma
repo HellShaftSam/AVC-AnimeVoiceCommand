@@ -93,3 +93,19 @@ model SkipMark {
 
   @@unique([accountKey, animeId, dubbing, type])
 }
+
+// Обратная связь по рекомендациям («Не интересно» / «Уже видел»).
+// accountKey = числовой userId сайта (изоляция аккаунтов) либо 'anon'.
+// action: hide — скрыть тайтл из рекомендаций; seen — пометить просмотренным.
+// Отзыв кнопкой «вернуть» = удаление строки (профиль не портится одним кликом).
+model RecFeedback {
+  id         String   @id @default(cuid())
+  accountKey String   @default("anon")
+  animeId    Int
+  action     String // hide | seen
+  /** Название тайтла на момент отметки — для кнопки «вернуть» в UI */
+  title      String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@unique([accountKey, animeId, action])
+}
