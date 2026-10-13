@@ -215,4 +215,10 @@ contextBridge.exposeInMainWorld('avcElectron', {
     ipcRenderer.on('avc:update:result', handler)
     return () => ipcRenderer.removeListener('avc:update:result', handler)
   },
+  /** Тихая авто-проверка при старте: приходит ТОЛЬКО если есть новая версия */
+  onUpdateAutoCheck: (cb) => {
+    const handler = (_event, payload) => cb(payload)
+    ipcRenderer.on('avc:update:auto-check', handler)
+    return () => ipcRenderer.removeListener('avc:update:auto-check', handler)
+  },
 })

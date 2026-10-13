@@ -363,6 +363,23 @@ export interface VideoEntry {
   skips: VideoSkips | null
 }
 
+/** Элемент франшизы (порядок просмотра с сайта, поле viewing_order /api/anime/{id}) */
+export interface RelatedAnime {
+  animeId: number
+  slug: string
+  title: string
+  poster: string | null
+  year: number | null
+  type: string | null
+  status: string | null
+  /** Связь с текущим тайтлом: «1 сезон», «фильм 2», «адаптация манги», «после 141 серии»… */
+  relation: string | null
+  /** Порядок просмотра, как на сайте (data.index) */
+  order: number
+  /** Это то самое аниме, страница которого открыта (не кликается) */
+  isCurrent?: boolean
+}
+
 export interface AnimeDetails extends AnimeCard {
   description: string | null
   genres: string[]
@@ -373,6 +390,8 @@ export interface AnimeDetails extends AnimeCard {
   videos: VideoEntry[]
   /** MAL ID (MyAnimeList) с сайта — для Aniskip; null если сайт не отдал */
   malId?: number | null
+  /** Франшиза в порядке просмотра (LIVE-VERIFY: /api/anime/{id} → viewing_order); пусто/нет — блок не показывается */
+  viewingOrder?: RelatedAnime[]
   /** Откуда данные: live — реальный сайт; demo — сетевой fallback (честный бейдж в UI) */
   source?: 'live' | 'demo'
 }
@@ -384,6 +403,35 @@ export interface SectionPage {
   totalPages: number | null
   items: AnimeCard[]
   source: 'live' | 'cache' | 'demo'
+}
+
+// ---------------------------------------------------------------------------
+// Расписание онгоингов по дням недели (/catalog/schedule)
+// ---------------------------------------------------------------------------
+
+/** Карточка расписания: аниме + время выхода следующей серии */
+export interface ScheduleEntry extends AnimeCard {
+  /** Unix-время выхода следующей серии, СЕКУНДЫ (site local-time[data-time]); null — не распознано */
+  releaseAt: number | null
+}
+
+/** Один день недели с онгоингами */
+export interface ScheduleDay {
+  /** «Понедельник» … «Воскресенье» (метка «(сегодня)» убрана) */
+  day: string
+  /** 1..7, Пн=1 … Вс=7 */
+  dayIndex: number
+  /** Сайт пометил день как сегодняшний */
+  isToday: boolean
+  items: ScheduleEntry[]
+}
+
+export interface SchedulePage {
+  days: ScheduleDay[]
+  /** live — реальный сайт; demo — сайт недоступен */
+  source: 'live' | 'demo'
+  /** Момент загрузки (Date.now()) — для пересчёта «через N минут» */
+  fetchedAt: number
 }
 
 // ---------------------------------------------------------------------------

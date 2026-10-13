@@ -17,6 +17,10 @@ import {
   AnimeCard,
   AnimeDetails,
   DubOption,
+  RelatedAnime,
+  ScheduleDay,
+  ScheduleEntry,
+  SchedulePage,
   SectionPage,
   SiteSectionId,
   VideoEntry,
@@ -69,7 +73,12 @@ const SELECTORS = {
   cardTitle: /class="anime-title"[^>]*>([^<]+)</i,
   cardPoster: /<img[^>]+src="([^"]+posters[^"]+)"/i,
   cardType: /anime-column-info[\s\S]*?anime-title[^>]*>[^<]+<\/a>\s*<div>([^<]+)<\/div>/i,
-  pagination: /catalog\/(?:[^/?]+)\/?\?page=(\d+)/g,
+  /** УРОК: ссылки пагинации бывают и «/catalog?page=N» (без подкатегории), и
+   *  «/catalog/ongoing?page=N» — прежний шаблон требовал слеш после catalog,
+   *  из-за чего в главном каталоге totalPages всегда был 1 (нет страниц в UI). */
+  pagination: /catalog(?:\/[a-z0-9_-]+)?\/?\?page=(\d+)/gi,
+  /** Unix-время следующей серии в карточке расписания: <local-time data-time="1792375200" class="time-left"> */
+  scheduleTime: /data-time="(\d{9,12})"/,
   animeIdOnPage: /data-anime-id="(\d+)"/,
   slugFromUrl: /\/catalog\/item\/([a-z0-9-]+)/i,
 }
@@ -245,6 +254,74 @@ interface ApiAnimeDetails {
   episodes: { count: number; aired: number }
   /** Внешние ID тайтла (формат не документирован — парсим защитно) */
   remote_ids?: { myanimelist_id?: unknown; mal?: unknown; [k: string]: unknown }
+  /** Франшиза в порядке просмотра (LIVE-VERIFY: Naruto id 111 → 30 записей;
+   *  каждая: anime_id, anime_url, title, year, poster, type, anime_status, data:{text,index}) */
+  viewing_order?: unknown
+}
+
+interface ApiViewingOrderItem {
+  anime_id?: unknown
+  anime_url?: unknown
+  title?: unknown
+  year?: unknown
+  poster?: { small?: unknown; medium?: unknown; big?: unknown; fullsize?: unknown } | null
+  type?: { shortname?: unknown; name?: unknown } | null
+  anime_status?: { title?: unknown } | null
+  data?: { text?: unknown; index?: unknown } | null
+}
+
+/**
+ * Защитный разбор viewing_order (LIVE-VERIFY: формат см. ApiAnimeDetails).
+ * Возвращает карточки франшизы в порядке просмотра; мусор/не-массив — [].
+ */
+function parseViewingOrder(raw: unknown, currentAnimeId: number): RelatedAnime[] {
+  if (!Array.isArray(raw)) return []
+  const out: RelatedAnime[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const v = item as ApiViewingOrderItem
+    const animeId = typeof v.anime_id === 'number' && Number.isFinite(v.anime_id) ? v.anime_id : null
+    const slug = typeof v.anime_url === 'string' && v.anime_url.trim() ? v.anime_url.trim() : null
+    const title = typeof v.title === 'string' && v.title.trim() ? decodeHtmlEntities(v.title.trim()) : null
+    if (animeId === null || !slug || !title) continue
+    const posterRaw = [v.poster?.medium, v.poster?.big, v.poster?.small, v.poster?.fullsize].find(
+      (p) => typeof p === 'string' && p.length > 0,
+    )
+    const indexRaw = v.data?.index
+    const order =
+      typeof indexRaw === 'number' && Number.isFinite(indexRaw)
+        ? indexRaw
+        : typeof indexRaw === 'string' && /^\d+$/.test(indexRaw.trim())
+          ? parseInt(indexRaw.trim(), 10)
+          : out.length
+    const yearRaw = v.year
+    out.push({
+      animeId,
+      slug,
+      title,
+      poster:
+        typeof posterRaw === 'string'
+          ? posterRaw.startsWith('//')
+            ? `https:${posterRaw}`
+            : posterRaw
+          : null,
+      year: typeof yearRaw === 'number' && Number.isFinite(yearRaw) && yearRaw > 1900 ? yearRaw : null,
+      type:
+        typeof v.type?.shortname === 'string' && v.type.shortname.trim()
+          ? v.type.shortname.trim()
+          : typeof v.type?.name === 'string' && v.type.name.trim()
+            ? v.type.name.trim()
+            : null,
+      status: typeof v.anime_status?.title === 'string' ? v.anime_status.title : null,
+      relation:
+        typeof v.data?.text === 'string' && v.data.text.trim()
+          ? decodeHtmlEntities(v.data.text.trim())
+          : null,
+      order,
+      isCurrent: animeId === currentAnimeId,
+    })
+  }
+  return out.sort((a, b) => a.order - b.order)
 }
 
 interface ApiVideoItem {
@@ -375,6 +452,73 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
     }
   }
 
+  /**
+   * Расписание онгоингов по дням недели (LIVE-VERIFY /catalog/schedule):
+   * 7 блоков <div class="accordion-item">День</div><div class="accordion-content">…
+   * внутри — карточки anime-column schedule с <local-time data-time="unix">
+   * (время выхода следующей серии).
+   */
+  async getSchedule(): Promise<SchedulePage> {
+    const key = `schedule:${this.baseUrl}`
+    const cached = cacheGet<SchedulePage>(key)
+    if (cached) return { ...cached, source: 'live' }
+    const DAY_ORDER: Record<string, number> = {
+      'понедельник': 1, 'вторник': 2, 'среда': 3, 'среду': 3, 'четверг': 4,
+      'пятница': 5, 'пятницу': 5, 'суббота': 6, 'субботу': 6, 'воскресенье': 7,
+    }
+    try {
+      const html = await fetchText(`${this.baseUrl}/catalog/schedule`)
+      const days: ScheduleDay[] = []
+      // Дни идут строго последовательно: режем по accordion-item, до следующего — контент дня
+      const parts = html.split(/<div class="accordion-item">/i).slice(1)
+      for (const part of parts) {
+        const header = part.slice(0, part.indexOf('</div>') >= 0 ? part.indexOf('</div>') : 120)
+        const dayRaw = decodeHtmlEntities(header.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+        const isToday = /сегодня/i.test(dayRaw)
+        const dayName = dayRaw.replace(/\(сегодня\)/i, '').replace(/\s+/g, ' ').trim()
+        const dayIndex = DAY_ORDER[dayName.toLowerCase()] ?? days.length + 1
+        const items: ScheduleEntry[] = []
+        // Карточки внутри дня — те же anime-column, но с data-time Unix в additional-info
+        const cardRe = /<div class="anime-column[^"]*" data-anime-id="(\d+)">([\s\S]*?)(?=<div class="anime-column[^"]*" data-anime-id=|$)/g
+        let cm: RegExpExecArray | null
+        while ((cm = cardRe.exec(part)) !== null) {
+          const id = parseInt(cm[1], 10)
+          const block = cm[2]
+          const slug = block.match(SELECTORS.cardSlug)?.[1]
+          const title = decodeHtmlEntities(block.match(SELECTORS.cardTitle)?.[1]?.trim() ?? '')
+          if (!slug || !title || items.some((i) => i.slug === slug)) continue
+          const timeRaw = block.match(SELECTORS.scheduleTime)?.[1]
+          const releaseAt = timeRaw ? parseInt(timeRaw, 10) : null
+          items.push({
+            animeId: id,
+            slug,
+            title,
+            poster: (() => {
+              const p = block.match(SELECTORS.cardPoster)?.[1] ?? null
+              return p ? (p.startsWith('//') ? `https:${p}` : p) : null
+            })(),
+            year: null,
+            rating: null,
+            status: null,
+            type: block.match(SELECTORS.cardType)?.[1]?.trim() ?? null,
+            releaseAt: releaseAt !== null && Number.isFinite(releaseAt) && releaseAt > 1_000_000_000 ? releaseAt : null,
+          })
+        }
+        days.push({ day: dayName || `День ${days.length + 1}`, dayIndex, isToday, items })
+      }
+      const parsed = days.filter((d) => d.items.length > 0)
+      if (parsed.length === 0) throw new Error('расписание не распознано (нет карточек)')
+      parsed.sort((a, b) => a.dayIndex - b.dayIndex)
+      const result: SchedulePage = { days: parsed, source: 'live', fetchedAt: Date.now() }
+      return cacheSet(key, result)
+    } catch (e) {
+      if (process.env.AVC_DEBUG) {
+        console.error('[adapter] getSchedule failed:', e)
+      }
+      return { days: [], source: 'demo', fetchedAt: Date.now() }
+    }
+  }
+
   async getSection(section: SiteSectionId, page = 1): Promise<SectionPage> {
     if (section === 'home') {
       return {
@@ -480,9 +624,12 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       const s = await this.getSection('top100')
       return `${s.items.length} тайтлов (${s.source})`
     })
-    await check('Секция Расписание', async () => {
-      const s = await this.getSection('schedule')
-      return `${s.items.length} тайтлов (${s.source})`
+    await check('Расписание по дням', async () => {
+      const s = await this.getSchedule()
+      if (s.source === 'demo') throw new Error('сайт недоступен')
+      const total = s.days.reduce((n, d) => n + d.items.length, 0)
+      const today = s.days.find((d) => d.isToday)
+      return `${s.days.length} дней, ${total} онгоингов${today ? `, сегодня ${today.items.length}` : ''}`
     })
     await check('Случайное аниме', async () => {
       const d = await this.getRandom()
@@ -545,6 +692,7 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       dubs,
       videos,
       malId: parseMalId(d.remote_ids),
+      viewingOrder: parseViewingOrder(d.viewing_order, d.anime_id),
     }
   }
 }

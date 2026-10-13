@@ -18,9 +18,11 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AnimeGrid, AnimeGridSkeleton } from './anime-grid'
 import { AnimeView } from './anime-view'
+import { ScheduleView } from './schedule-view'
 import { executeText } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
 import { AnimeCard, BrowserTab, SectionPage } from '@/lib/avc/types'
+import { cn } from '@/lib/utils'
 
 // --- Главная -----------------------------------------------------------------
 
@@ -142,6 +144,88 @@ function HomeView() {
 
 const PAGE_SIZE_FALLBACK = 1
 
+/**
+ * Окно страниц для пагинации: 1, последняя, ±1 вокруг текущей; «…» в разрывах.
+ * Пример (стр. 6 из 435): 1 … 5 6 7 … 435
+ */
+function pageWindow(current: number, total: number): Array<number | '…'> {
+  const uniq = new Set<number>([1, total, current - 1, current, current + 1])
+  const pages = [...uniq].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b)
+  const out: Array<number | '…'> = []
+  let prev = 0
+  for (const p of pages) {
+    if (p - prev > 1) out.push('…')
+    out.push(p)
+    prev = p
+  }
+  return out
+}
+
+/** Нумерованная пагинация вкладки-секции (как на сайте: страниц может быть сотни) */
+function SectionPagination({
+  page,
+  totalPages,
+  onGo,
+}: {
+  page: number
+  totalPages: number
+  onGo: (p: number) => void
+}) {
+  return (
+    <nav aria-label="Страницы секции" className="flex flex-wrap items-center justify-center gap-1.5">
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label="Предыдущая страница"
+        disabled={page <= 1}
+        onClick={() => onGo(page - 1)}
+        className="h-11 w-11 border-border bg-card/60"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </Button>
+      {pageWindow(page, totalPages).map((p, i) =>
+        p === '…' ? (
+          <span key={`gap-${i}`} aria-hidden className="px-1 text-sm text-muted-foreground">
+            …
+          </span>
+        ) : (
+          <Button
+            key={p}
+            variant={p === page ? 'default' : 'outline'}
+            aria-label={`Страница ${p}`}
+            aria-current={p === page ? 'page' : undefined}
+            data-testid={`page-${p}`}
+            onClick={() => {
+              if (p !== page) onGo(p)
+            }}
+            className={cn(
+              'h-11 min-w-11 px-2 text-sm tabular-nums',
+              p === page
+                ? 'font-bold'
+                : 'border-border bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-300',
+            )}
+          >
+            {p}
+          </Button>
+        ),
+      )}
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label="Следующая страница"
+        disabled={page >= totalPages}
+        onClick={() => onGo(page + 1)}
+        className="h-11 w-11 border-border bg-card/60"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </Button>
+      <span className="ml-1 hidden min-w-20 text-center text-sm text-muted-foreground sm:inline">
+        {page} из {totalPages}
+      </span>
+    </nav>
+  )
+}
+
 function SectionView({ tab }: { tab: BrowserTab }) {
   const patchTab = useAvcStore((s) => s.patchTab)
   const pushBackStack = useAvcStore((s) => s.pushBackStack)
@@ -157,6 +241,9 @@ function SectionView({ tab }: { tab: BrowserTab }) {
   const loading = loadedKey !== requestKey
 
   useEffect(() => {
+    // Расписание рендерится отдельным видом (ScheduleView c своей загрузкой) —
+    // здесь данные секции для него не нужны
+    if (section === 'schedule') return
     let cancelled = false
     fetch(`/api/site/section/${encodeURIComponent(section)}?page=${page}`)
       .then(async (r) => {
@@ -192,6 +279,13 @@ function SectionView({ tab }: { tab: BrowserTab }) {
     patchTab(tab.id, { payload: { ...tab.payload, page: next } })
   }
 
+  // Расписание — отдельный вид: плитки по дням недели с временем выхода серий.
+  // ВАЖНО: стоит ПОСЛЕ всех хуков (Rules of Hooks): openSectionTab патчит payload
+  // активной вкладки, поэтому catalog → schedule возможно без перемонтирования.
+  if (section === 'schedule') {
+    return <ScheduleView />
+  }
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -203,31 +297,9 @@ function SectionView({ tab }: { tab: BrowserTab }) {
             </Badge>
           )}
           {data?.totalPages != null && data.totalPages > 1 && (
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Предыдущая страница"
-                disabled={page <= 1}
-                onClick={() => goToPage(page - 1)}
-                className="h-11 w-11 border-border bg-card/60"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-              <span className="min-w-14 text-center text-sm text-muted-foreground">
-                {page} / {data.totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Следующая страница"
-                disabled={data.totalPages !== null && page >= data.totalPages}
-                onClick={() => goToPage(page + 1)}
-                className="h-11 w-11 border-border bg-card/60"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </Button>
-            </div>
+            <span className="text-sm text-muted-foreground">
+              Страница {page} из {data.totalPages}
+            </span>
           )}
         </div>
       </div>
@@ -250,6 +322,13 @@ function SectionView({ tab }: { tab: BrowserTab }) {
       {!loading && !error && data && <AnimeGrid items={data.items} />}
       {!loading && !error && data && data.items.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">Секция пуста</p>
+      )}
+
+      {/* Полная нумерованная пагинация под сеткой (как на сайте: 1 … 5 6 7 … 435) */}
+      {!loading && !error && data && data.totalPages != null && data.totalPages > 1 && (
+        <div className="mt-6 border-t border-border pt-4">
+          <SectionPagination page={page} totalPages={data.totalPages} onGo={goToPage} />
+        </div>
       )}
     </div>
   )

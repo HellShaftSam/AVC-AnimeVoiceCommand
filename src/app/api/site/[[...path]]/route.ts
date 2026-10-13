@@ -59,6 +59,11 @@ export async function GET(
         if (!details) return NextResponse.json({ error: 'Аниме не найдено' }, { status: 404 })
         return NextResponse.json(details)
       }
+      case 'schedule': {
+        // Расписание онгоингов по дням недели (с временем выхода серий)
+        const data = await adapter.getSchedule()
+        return NextResponse.json(data)
+      }
       case 'random': {
         const details = await adapter.getRandom()
         if (!details) return NextResponse.json({ error: 'Сайт недоступен' }, { status: 502 })

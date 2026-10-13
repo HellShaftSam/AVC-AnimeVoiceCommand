@@ -73,6 +73,8 @@ export function HeaderBar() {
   const [loggingOut, setLoggingOut] = useState(false)
   const [devGateOpen, setDevGateOpen] = useState(false)
   const [devConsoleOpen, setDevConsoleOpen] = useState(false)
+  /** Авто-проверка при старте нашла новую версию — янтарный бейдж на кнопке обновления */
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null)
 
   /**
    * ОбНОВЛЕНИЕ (§3.5): EXE открывает диалог с полной state-машиной (проверка версий
@@ -141,8 +143,24 @@ export function HeaderBar() {
         })
       }
     })
+    // Авто-проверка обновления при старте (main шлёт ТОЛЬКО если есть новая версия)
+    const offAuto = bridge?.onUpdateAutoCheck?.((info) => {
+      setUpdateAvailable(info.latest)
+      toast({
+        description: `Доступна новая версия AVC-Anime: ${info.latest} (у вас ${info.current}). Нажмите кнопку обновления ⟳ в шапке.`,
+        action: (
+          <ToastAction
+            altText="Открыть обновление"
+            onClick={() => setUpdateDialogOpen(true)}
+          >
+            Обновить
+          </ToastAction>
+        ),
+      })
+    })
     return () => {
       offResult?.()
+      offAuto?.()
     }
   }, [])
 
@@ -318,16 +336,32 @@ export function HeaderBar() {
         >
           <Settings className="h-5 w-5" />
         </Button>
-        {/* Обновление: EXE — диалог state-машины; web — скачать EXE */}
+        {/* Обновление: EXE — диалог state-машины; web — скачать EXE.
+            Янтарная точка — авто-проверка при старте нашла новую версию. */}
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Обновление приложения"
-          title="Обновление приложения"
-          className="h-11 w-11"
+          aria-label={
+            updateAvailable
+              ? `Доступно обновление ${updateAvailable}`
+              : 'Обновление приложения'
+          }
+          title={
+            updateAvailable
+              ? `Доступно обновление: ${updateAvailable}`
+              : 'Обновление приложения'
+          }
+          className="relative h-11 w-11"
           onClick={() => void runUpdate()}
         >
           <RefreshCw className="h-5 w-5" />
+          {updateAvailable && (
+            <span
+              aria-hidden
+              data-testid="update-badge"
+              className="absolute right-1.5 top-1.5 h-2.5 w-2.5 animate-pulse rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]"
+            />
+          )}
         </Button>
       </nav>
 

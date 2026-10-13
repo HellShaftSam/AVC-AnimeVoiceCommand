@@ -309,6 +309,18 @@ export interface AvcElectronBridge {
   onUpdateProgress?(cb: (p: UpdateProgress) => void): () => void
   /** Итог прошлого обновления после перезапуска (§3.12) */
   onUpdateResult?(cb: (r: UpdateResult) => void): () => void
+  /** Тихая авто-проверка при старте: приходит ТОЛЬКО если есть новая версия */
+  onUpdateAutoCheck?(
+    cb: (info: {
+      current: string
+      latest: string
+      releaseName?: string | null
+      releasedAt?: string | null
+      assetName?: string | null
+      assetSizeBytes?: number | null
+      releasesUrl: string
+    }) => void,
+  ): () => void
 }
 
 /** Есть ли мост EXE-сборки (в обычном браузере отсутствует) */

@@ -12,7 +12,7 @@
  * серии командами «вниз» (голос-скролл) и «серия N».
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ExternalLink, Film, Heart, Play, RotateCw, Star } from 'lucide-react'
+import { Check, ExternalLink, Film, Heart, Layers, Play, RotateCw, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -24,12 +24,13 @@ import {
   executeCommand,
   getCachedDetails,
   maxEpisodeOf,
+  openAnimeCard,
   syncPlaybackToDetails,
 } from '@/lib/avc/executor'
 import { avcApi } from '@/lib/avc/api'
 import { useAvcStore } from '@/lib/avc/store'
 import { LIBRARY_STATUSES } from '@/lib/avc/types'
-import type { AnimeDetails, BrowserTab, WatchProgressItem, YummyAnimeOwnState } from '@/lib/avc/types'
+import type { AnimeDetails, BrowserTab, RelatedAnime, WatchProgressItem, YummyAnimeOwnState } from '@/lib/avc/types'
 import { VoiceCommandType } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
@@ -375,6 +376,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
         </div>
       </div>
 
+      {/* Франшиза в порядке просмотра (как на сайте: сезон/филмы/ONA с указанием связи) */}
+      {details.viewingOrder && details.viewingOrder.length > 0 && (
+        <ViewingOrderRow items={details.viewingOrder} />
+      )}
+
       {maxEp > 0 && (
         <div className="mt-6">
           <EpisodeGrid
@@ -393,6 +399,114 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 
       <EpisodesDialog details={details} maxEp={maxEp} />
     </div>
+  )
+}
+
+// --- франшиза / порядок просмотра -----------------------------------------------
+
+/**
+ * Горизонтальная лента франшизы (viewing_order сайта): сезоны, фильмы, ONA —
+ * с подписью связи («1 сезон», «после 141 серии», «адаптация манги»). Текущий
+ * тайтл помечен и не кликается; клик по соседнему открывает его в этой же
+ * вкладке (back-stack сохраняется — голос «назад» вернётся).
+ */
+function ViewingOrderRow({ items }: { items: RelatedAnime[] }) {
+  const openRelated = (item: RelatedAnime) => {
+    if (item.isCurrent) return
+    void openAnimeCard(
+      {
+        animeId: item.animeId,
+        slug: item.slug,
+        title: item.title,
+        poster: item.poster,
+        year: item.year,
+        rating: null,
+        status: item.status,
+        type: item.type,
+      },
+      false, // в этой же вкладке: навигация как на сайте, «назад» работает
+    )
+  }
+
+  return (
+    <section aria-label="Франшиза и порядок просмотра" className="mt-6">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <Layers className="h-4 w-4" aria-hidden />
+        Франшиза и порядок просмотра
+        <span className="text-xs font-normal normal-case">· {items.length} тайтлов</span>
+      </h3>
+      <div className="avc-scroll flex gap-3 overflow-x-auto pb-2">
+        {items.map((item) => (
+          <button
+            key={`${item.animeId}-${item.slug}`}
+            data-testid="franchise-card"
+            onClick={() => openRelated(item)}
+            disabled={item.isCurrent}
+            aria-label={
+              item.isCurrent
+                ? `Текущее аниме: ${item.title}`
+                : `Открыть: ${item.title}${item.relation ? ` (${item.relation})` : ''}`
+            }
+            aria-current={item.isCurrent ? 'true' : undefined}
+            className={cn(
+              'group w-28 shrink-0 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:w-32',
+              item.isCurrent
+                ? 'cursor-default'
+                : 'cursor-pointer transition-transform hover:-translate-y-0.5',
+            )}
+          >
+            <div
+              className={cn(
+                'relative aspect-[3/4] w-full overflow-hidden rounded-lg border',
+                item.isCurrent
+                  ? 'border-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.25)]'
+                  : 'border-border group-hover:border-sky-400/50',
+              )}
+            >
+              {item.poster ? (
+                <img
+                  src={item.poster}
+                  alt=""
+                  loading="lazy"
+                  className={cn(
+                    'h-full w-full object-cover transition-opacity',
+                    !item.isCurrent && 'group-hover:opacity-85',
+                    item.status === 'анонс' && 'opacity-80 saturate-50',
+                  )}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-card text-muted-foreground">
+                  <Film className="h-6 w-6" aria-hidden />
+                </div>
+              )}
+              <span
+                className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums"
+                aria-hidden
+              >
+                №{item.order + 1}
+              </span>
+              {item.isCurrent && (
+                <span className="absolute right-1.5 top-1.5 rounded-md bg-sky-400 px-1.5 py-0.5 text-[10px] font-bold text-black">
+                  сейчас
+                </span>
+              )}
+              {item.status === 'анонс' && (
+                <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-amber-300">
+                  анонс
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-snug text-foreground">
+              {item.title}
+            </p>
+            <p className="mt-0.5 line-clamp-1 text-[11px] text-sky-300/90">
+              {item.relation ?? item.type ?? ''}
+              {item.year !== null && item.relation ? ` · ${item.year}` : ''}
+            </p>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 

@@ -1463,6 +1463,33 @@ async function boot() {
     })
   }
 
+  // Фоновая авто-проверка обновления при старте (одна тихая проверка, без поллинга).
+  // Сообщаем ТОЛЬКО если есть новая версия — рендерер покажет бейдж на кнопке обновления.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        fetchLatestReleaseInfo()
+          .then((info) => {
+            try {
+              if (info && info.available && mainWindow && !mainWindow.isDestroyed()) {
+                log(`[Update] Авто-проверка: доступно ${info.latest} (текущая ${info.current})`)
+                mainWindow.webContents.send('avc:update:auto-check', {
+                  current: info.current,
+                  latest: info.latest,
+                  releaseName: info.releaseName,
+                  releasedAt: info.releasedAt,
+                  assetName: info.assetName,
+                  assetSizeBytes: info.assetSizeBytes,
+                  releasesUrl: info.releasesUrl,
+                })
+              }
+            } catch { /* окно могли закрыть */ }
+          })
+          .catch(() => undefined)
+      }, 4000)
+    })
+  }
+
   // Фоновая сверка состояния аккаунта при старте (одна проверка, без поллинга)
   void authService.verify().catch(() => undefined)
 
