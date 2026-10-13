@@ -59,7 +59,7 @@ const STATUS_BADGE: Record<YummySelfTestStatus, string> = {
   PASS: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   FAIL: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
   SKIP: 'border-border bg-accent/60 text-muted-foreground',
-  BLOCKED: 'border-amber-500/40 bg-amber-500/10 text-sky-300',
+  BLOCKED: 'border-amber-500/40 bg-amber-500/10 text-gold-300',
 }
 
 /** Крупные итоги отчёта: ключ + русская подпись */
@@ -225,7 +225,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Stethoscope className="h-5 w-5 text-sky-400" aria-hidden />
+              <Stethoscope className="h-5 w-5 text-gold-400" aria-hidden />
               Диагностика входа YummyAnime
             </DialogTitle>
             <DialogDescription>
@@ -291,7 +291,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
                 variant="outline"
                 disabled={voiceRestartBusy}
                 onClick={() => void restartVoice()}
-                className="min-h-11 gap-2 border-border bg-card/60 text-sky-300 hover:border-sky-400/50 hover:bg-sky-400/10 hover:text-sky-200"
+                className="min-h-11 gap-2 border-border bg-card/60 text-gold-300 hover:border-gold-400/50 hover:bg-gold-400/10 hover:text-gold-200"
               >
                 {voiceRestartBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -400,7 +400,7 @@ export function DiagnosticsDialog({ open, onOpenChange }: DiagnosticsDialogProps
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={resetBusy}
-              className="border-border bg-card text-foreground hover:text-sky-300"
+              className="border-border bg-card text-foreground hover:text-gold-300"
             >
               Отмена
             </AlertDialogCancel>

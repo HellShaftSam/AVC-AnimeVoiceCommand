@@ -70,7 +70,7 @@ export function HistoryPanel() {
   return (
     <aside
       aria-label="История команд"
-      className="glass hidden w-72 shrink-0 flex-col border-l border-cyan-200/10 md:flex"
+      className="glass hidden w-72 shrink-0 flex-col border-l border-gold-200/10 md:flex"
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <h2 className="text-sm font-semibold text-foreground">История команд</h2>
@@ -121,7 +121,7 @@ export function HistoryPanel() {
               <span
                 className={cn(
                   'tabular-nums',
-                  item.confidence >= 0.7 ? 'text-emerald-400/80' : 'text-sky-400/40',
+                  item.confidence >= 0.7 ? 'text-emerald-400/80' : 'text-gold-400/40',
                 )}
               >
                 {Math.round(item.confidence * 100)}%

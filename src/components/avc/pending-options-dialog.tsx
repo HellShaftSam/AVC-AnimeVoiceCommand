@@ -46,9 +46,9 @@ export function PendingOptionsDialog() {
             <li key={`${item.animeId}-${i}`}>
               <button
                 onClick={() => select(i + 1)}
-                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-all hover:border-sky-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-all hover:border-gold-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-sky-400/40 text-sm font-bold text-sky-300">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-400/40 text-sm font-bold text-gold-300">
                   {i + 1}
                 </span>
                 {item.poster ? (
@@ -68,7 +68,7 @@ export function PendingOptionsDialog() {
                   <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                     {item.year !== null && <span>{item.year}</span>}
                     {item.rating !== null && item.rating > 0 && (
-                      <Badge className="border border-sky-400/40 bg-sky-400/40 text-[10px] text-sky-300">
+                      <Badge className="border border-gold-400/40 bg-gold-400/40 text-[10px] text-gold-300">
                         ★ {item.rating.toFixed(1)}
                       </Badge>
                     )}

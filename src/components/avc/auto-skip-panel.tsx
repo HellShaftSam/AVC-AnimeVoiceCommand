@@ -27,7 +27,7 @@ import type { AppSettings } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 
 const SKY_SLIDER =
-  '[&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400'
+  '[&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400'
 
 export function AutoSkipControls() {
   const settings = useAvcStore((s) => s.settings)
@@ -58,7 +58,7 @@ export function AutoSkipControls() {
   const edActive = settings.autoSkipEnding || settings.autoSkipIntros
 
   const barBtn =
-    'h-11 w-11 rounded-full text-foreground hover:bg-accent hover:text-sky-300 focus-visible:ring-ring/60 relative'
+    'h-11 w-11 rounded-full text-foreground hover:bg-accent hover:text-gold-300 focus-visible:ring-ring/60 relative'
 
   return (
     <div className="flex items-center gap-0.5">
@@ -75,7 +75,7 @@ export function AutoSkipControls() {
         }
         className={cn(
           barBtn,
-          settings.autoplayNext && 'bg-sky-400/90 text-sky-950 hover:bg-sky-300 hover:text-sky-950',
+          settings.autoplayNext && 'bg-gold-400/90 text-night-900 hover:bg-gold-300 hover:text-night-900',
         )}
         onClick={() => change({ autoplayNext: !settings.autoplayNext })}
       >
@@ -92,13 +92,13 @@ export function AutoSkipControls() {
             title="Автопропуск опенинга и эндинга (секунды — слайдерами)"
             className={cn(
               barBtn,
-              (opActive || edActive) && 'text-sky-300',
+              (opActive || edActive) && 'text-gold-300',
             )}
           >
             <SlidersHorizontal className="h-5 w-5" />
             {(opActive || edActive) && (
               <span
-                className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.9)]"
+                className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-gold-400 shadow-[0_0_6px_rgba(229,188,94,0.9)]"
                 aria-hidden
               />
             )}
@@ -107,7 +107,7 @@ export function AutoSkipControls() {
         <PopoverContent
           align="end"
           sideOffset={8}
-          className="z-[70] w-[19rem] glass border-cyan-200/10 p-4"
+          className="z-[70] w-[19rem] glass border-gold-200/10 p-4"
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-foreground">Автопропуск</p>
@@ -141,7 +141,7 @@ export function AutoSkipControls() {
                 Пропускать опенинг
               </Label>
               <p className="text-[11px] text-muted-foreground">
-                Первые <span className="tabular-nums font-semibold text-sky-300">{settings.autoSkipOpeningSec}</span> сек серии
+                Первые <span className="tabular-nums font-semibold text-gold-300">{settings.autoSkipOpeningSec}</span> сек серии
               </p>
             </div>
             <Switch
@@ -173,7 +173,7 @@ export function AutoSkipControls() {
                 Пропускать эндинг
               </Label>
               <p className="text-[11px] text-muted-foreground">
-                Последние <span className="tabular-nums font-semibold text-sky-300">{settings.autoSkipEndingSec}</span> сек серии
+                Последние <span className="tabular-nums font-semibold text-gold-300">{settings.autoSkipEndingSec}</span> сек серии
               </p>
             </div>
             <Switch

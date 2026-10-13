@@ -424,7 +424,7 @@ export function Player() {
   }
 
   const iconBtn =
-    'h-11 w-11 rounded-full text-foreground hover:bg-accent hover:text-sky-300 focus-visible:ring-ring/60'
+    'h-11 w-11 rounded-full text-foreground hover:bg-accent hover:text-gold-300 focus-visible:ring-ring/60'
   /** Кнопка ±30: иконка с маленьким бейджем «30» в углу */
   const seekBtn = cn(iconBtn, 'relative')
 
@@ -503,7 +503,7 @@ export function Player() {
               tabIndex={-1}
               aria-hidden
               className={cn(
-                'flex items-center justify-center rounded-full bg-sky-400 text-sky-950 shadow-[0_0_40px_rgba(56, 189, 248,0.55)] transition-transform hover:scale-105',
+                'flex items-center justify-center rounded-full bg-gold-400 text-night-900 shadow-[0_0_40px_rgba(229, 188, 94,0.55)] transition-transform hover:scale-105',
                 fullscreen ? 'h-28 w-28' : 'h-[88px] w-[88px]',
               )}
             >
@@ -514,7 +514,7 @@ export function Player() {
                 Скажите «запусти» или нажмите
               </p>
               <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-muted-foreground sm:text-sm">
-                <Mic className="h-3.5 w-3.5 text-sky-300" aria-hidden />
+                <Mic className="h-3.5 w-3.5 text-gold-300" aria-hidden />
                 {hasStickyActivation()
                   ? 'Голосовой запуск активен — серия стартует автоматически'
                   : 'Один клик (или старт микрофона) включает голосовое управление'}
@@ -531,7 +531,7 @@ export function Player() {
             <Button
               size="sm"
               onClick={() => ctrl(VoiceCommandType.SkipSegment, { type: activeSkipSeg.type })}
-              className="min-h-11 gap-2 rounded-lg bg-sky-400 px-4 text-sm font-semibold text-sky-950 shadow-[0_2px_16px_rgba(0,0,0,0.6)] hover:bg-sky-300"
+              className="min-h-11 gap-2 rounded-lg bg-gold-400 px-4 text-sm font-semibold text-night-900 shadow-[0_2px_16px_rgba(0,0,0,0.6)] hover:bg-gold-300"
               aria-label={`${SKIP_LABELS[activeSkipSeg.type]} (осталось ${Math.max(0, Math.ceil(activeSkipSeg.end - currentTime))} с)`}
             >
               <SkipForward className="h-4 w-4" aria-hidden />
@@ -565,7 +565,7 @@ export function Player() {
         <Button
           size="icon"
           aria-label={isPlaying ? 'Пауза' : 'Воспроизведение'}
-          className="h-12 w-12 rounded-full bg-sky-400 text-sky-950 shadow-[0_0_18px_rgba(56, 189, 248,0.4)] hover:bg-sky-300"
+          className="h-12 w-12 rounded-full bg-gold-400 text-night-900 shadow-[0_0_18px_rgba(229, 188, 94,0.4)] hover:bg-gold-300"
           onClick={() => ctrl(VoiceCommandType.TogglePlayPause)}
         >
           {executing ? (
@@ -602,7 +602,7 @@ export function Player() {
             size="icon"
             aria-label={volume > 0 ? 'Выключить звук' : 'Включить звук'}
             title={volume > 0 ? 'Выключить звук' : 'Включить звук'}
-            className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:bg-accent hover:text-sky-300"
+            className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:bg-accent hover:text-gold-300"
             onClick={() => ctrl(volume > 0 ? VoiceCommandType.Mute : VoiceCommandType.Unmute)}
           >
             {volume > 0 ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4 text-rose-400" />}
@@ -624,7 +624,7 @@ export function Player() {
                 })
               }
             }}
-            className="w-full [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+            className="w-full [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
           />
         </div>
 

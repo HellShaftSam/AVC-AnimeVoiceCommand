@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { avcApi, getElectronBridge } from '@/lib/avc/api'
-import { SeaBackground } from '@/components/avc/sea-background'
+import { CosmosBackground } from '@/components/avc/cosmos-background'
 import { AuthDialog } from '@/components/avc/auth-dialog'
 import { AiSetupDialog } from '@/components/avc/ai-setup-dialog'
 import { DebugPanel } from '@/components/avc/debug-panel'
@@ -154,12 +154,12 @@ export default function Page() {
   return (
     <div
       className={cn(
-        'relative flex h-screen flex-col overflow-hidden text-foreground selection:bg-sky-400/40',
+        'relative flex h-screen flex-col overflow-hidden text-foreground selection:bg-gold-400/40',
         couchMode ? 'text-[17px] lg:text-[21px]' : 'text-sm',
       )}
     >
-      {/* Морской фон позади интерфейса: статичный градиент, ноль GPU-нагрузки */}
-      <SeaBackground />
+      {/* Звёздное небо позади интерфейса: статичные слои, ноль GPU-нагрузки */}
+      <CosmosBackground />
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <HeaderBar />
@@ -178,7 +178,7 @@ export default function Page() {
           {!couchMode && <HistoryPanel />}
         </div>
 
-        <footer className="glass mt-auto flex flex-col gap-2 border-t border-cyan-200/10 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
+        <footer className="glass mt-auto flex flex-col gap-2 border-t border-gold-300/15 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
           <VoicePanel voice={voice} />
           <MiniPlayer />
         </footer>

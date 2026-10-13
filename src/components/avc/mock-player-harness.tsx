@@ -197,7 +197,7 @@ export function MockPlayerHarness() {
   return (
     <div className="min-h-screen bg-[#07111f] p-4 text-foreground">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
-        <div className="glass rounded-xl border border-cyan-200/10 p-4">
+        <div className="glass rounded-xl border border-gold-200/10 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-base font-semibold">Стенд автопропуска (?mockplayer=1)</h1>
@@ -208,7 +208,7 @@ export function MockPlayerHarness() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" className="bg-sky-400 text-sky-950 hover:bg-sky-300" onClick={start} disabled={running}>
+              <Button size="sm" className="bg-gold-400 text-night-900 hover:bg-gold-300" onClick={start} disabled={running}>
                 <Play className="mr-1 h-4 w-4" /> Запустить серию 1
               </Button>
               <Button size="sm" variant="outline" onClick={reset}>
@@ -217,17 +217,17 @@ export function MockPlayerHarness() {
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-muted-foreground sm:grid-cols-4">
-            <span>серия: <b className="text-sky-300">{pb.currentEpisode ?? '—'}</b></span>
-            <span>время: <b className="text-sky-300">{Math.floor(pb.currentTime)}с</b> / {Math.floor(pb.duration)}с</span>
+            <span>серия: <b className="text-gold-300">{pb.currentEpisode ?? '—'}</b></span>
+            <span>время: <b className="text-gold-300">{Math.floor(pb.currentTime)}с</b> / {Math.floor(pb.duration)}с</span>
             <span>авто-серия: <b className={settings.autoplayNext ? 'text-emerald-400' : 'text-rose-400'}>{settings.autoplayNext ? 'вкл' : 'выкл'}</b></span>
-            <span>слайдеры: <b className="text-sky-300">OP {settings.autoSkipOpeningSec}с</b> / <b className="text-sky-300">ED {settings.autoSkipEndingSec}с</b> ({settings.autoSkipOpening ? 'вкл' : 'выкл'}/{settings.autoSkipEnding ? 'вкл' : 'выкл'})</span>
+            <span>слайдеры: <b className="text-gold-300">OP {settings.autoSkipOpeningSec}с</b> / <b className="text-gold-300">ED {settings.autoSkipEndingSec}с</b> ({settings.autoSkipOpening ? 'вкл' : 'выкл'}/{settings.autoSkipEnding ? 'вкл' : 'выкл'})</span>
           </div>
         </div>
 
         <Player />
 
-        <div className="glass rounded-xl border border-cyan-200/10 p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-sky-400/60">Журнал стенда</p>
+        <div className="glass rounded-xl border border-gold-200/10 p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gold-400/60">Журнал стенда</p>
           <div className="max-h-40 overflow-y-auto font-mono text-[11px] leading-relaxed text-muted-foreground">
             {log.length === 0 ? <p>— пусто —</p> : log.map((l, i) => <p key={i}>{l}</p>)}
           </div>

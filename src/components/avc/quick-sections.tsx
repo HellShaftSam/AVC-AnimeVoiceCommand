@@ -47,12 +47,22 @@ function RecommendationsButton() {
       aria-label="Открыть: Рекомендации"
       aria-current={activeBtn ? 'page' : undefined}
       className={cn(
-        'flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        'group flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         activeBtn
-          ? 'border-sky-400/40 bg-sky-400/40 text-sky-300 shadow-[0_0_18px_rgba(56, 189, 248,0.15)]'
-          : 'border-border bg-card/60 text-foreground hover:border-border hover:text-foreground',
+          ? 'border-gold-400/60 bg-gold-400/15 text-gold-200 shadow-[0_0_16px_rgba(229,188,94,0.22)]'
+          : 'border-border bg-card/60 text-foreground hover:border-gold-400/35 hover:text-gold-200',
       )}
     >
+      {/* узел-созвездие слева (референс: круглые светящиеся узлы на золотой линии) */}
+      <span
+        aria-hidden
+        className={cn(
+          'h-1.5 w-1.5 shrink-0 rounded-full transition-colors',
+          activeBtn
+            ? 'bg-gold-200 shadow-[0_0_8px_rgba(242,221,164,0.9)]'
+            : 'bg-night-500 group-hover:bg-gold-400/70',
+        )}
+      />
       <Compass className="h-5 w-5" aria-hidden />
       Рекомендации
     </button>
@@ -77,7 +87,7 @@ export function QuickSections() {
   }
 
   return (
-    <div className="avc-scroll glass overflow-x-auto border-b border-cyan-200/10 px-3 py-2 sm:px-4">
+    <div className="avc-scroll glass overflow-x-auto border-b border-gold-300/15 px-3 py-2 sm:px-4">
       <div className="flex gap-2">
         <RecommendationsButton />
         {SECTIONS.map(({ id, label, icon: Icon }) => {
@@ -91,10 +101,19 @@ export function QuickSections() {
               className={cn(
                 'flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                 activeBtn
-                  ? 'border-sky-400/40 bg-sky-400/40 text-sky-300 shadow-[0_0_18px_rgba(56, 189, 248,0.15)]'
-                  : 'border-border bg-card/60 text-foreground hover:border-border hover:text-foreground',
+                  ? 'border-gold-400/60 bg-gold-400/15 text-gold-200 shadow-[0_0_16px_rgba(229,188,94,0.22)]'
+                  : 'border-border bg-card/60 text-foreground hover:border-gold-400/35 hover:text-gold-200',
               )}
             >
+              <span
+                aria-hidden
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full transition-colors',
+                  activeBtn
+                    ? 'bg-gold-200 shadow-[0_0_8px_rgba(242,221,164,0.9)]'
+                    : 'bg-night-500',
+                )}
+              />
               <Icon className="h-5 w-5" aria-hidden />
               {label}
             </button>

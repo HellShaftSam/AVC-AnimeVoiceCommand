@@ -240,7 +240,13 @@ def transcribe_samples(samples_f32, beam_size):
         vad_filter=False,  # VAD внешний (наш), как в Mantella
     )
     ign = _ignore_norm()
+    # Урок v1.0.32 (issue: «Озвучка <название>» не распознаётся): Whisper часто
+    # бьёт фразу на сегменты по паузам («Озвучка» + «Анилибрия»). Старый код
+    # выбрасывал сегмент-игнор ДО просмотра остальных — от команды оставался
+    # голый «анилибрия», парсер превращал его в мусорный поиск. Теперь сначала
+    # собираем ВСЁ, игнор применяем только к фразе-состоящей-из-фантомов.
     parts = []
+    ignored_parts = []
     logprob_sum = 0.0
     weight_sum = 0.0
     for seg in segments:
@@ -248,7 +254,8 @@ def transcribe_samples(samples_f32, beam_size):
         if not t:
             continue
         if t.lower().strip(".!? ,") in ign:
-            continue  # известная галлюцинация на тишине - сегмент отбрасывается
+            ignored_parts.append(t)
+            continue
         # Гейт качества: сегмент-фантом на музыке/шуме отбрасываем целиком.
         nsp = float(getattr(seg, "no_speech_prob", 0.0) or 0.0)
         alp = float(getattr(seg, "avg_logprob", 0.0) or 0.0)
@@ -262,6 +269,9 @@ def transcribe_samples(samples_f32, beam_size):
             w = max(1, len(t))
         logprob_sum += alp * w
         weight_sum += w
+    if not parts and ignored_parts:
+        # вся фраза — известный фантом тишины/шума («перевод и озвучка» и т.п.)
+        return "", 0.0
     text = " ".join(parts).strip()
     if not text or weight_sum <= 0:
         return "", 0.0

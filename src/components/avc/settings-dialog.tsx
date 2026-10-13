@@ -58,7 +58,7 @@ import { cn } from '@/lib/utils'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
+    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gold-400/40">
       {children}
     </h3>
   )
@@ -121,16 +121,16 @@ export function SettingsDialog() {
 
         <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col gap-3">
           <TabsList className="shrink-0 bg-card/60">
-            <TabsTrigger value="general" className="data-[state=active]:text-sky-300">
+            <TabsTrigger value="general" className="data-[state=active]:text-gold-300">
               Общие
             </TabsTrigger>
-            <TabsTrigger value="mic" className="data-[state=active]:text-sky-300">
+            <TabsTrigger value="mic" className="data-[state=active]:text-gold-300">
               Микрофон
             </TabsTrigger>
-            <TabsTrigger value="voices" className="data-[state=active]:text-sky-300">
+            <TabsTrigger value="voices" className="data-[state=active]:text-gold-300">
               Озвучки
             </TabsTrigger>
-            <TabsTrigger value="ai" className="data-[state=active]:text-sky-300">
+            <TabsTrigger value="ai" className="data-[state=active]:text-gold-300">
               AI
             </TabsTrigger>
           </TabsList>
@@ -197,7 +197,7 @@ export function SettingsDialog() {
                 <div className="py-2">
                   <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Порог уверенности</span>
-                    <span className="tabular-nums text-sky-300">
+                    <span className="tabular-nums text-gold-300">
                       {Math.round(settings.confidenceThreshold * 100)}%
                     </span>
                   </div>
@@ -207,7 +207,7 @@ export function SettingsDialog() {
                     max={0.9}
                     step={0.05}
                     aria-label="Порог уверенности распознавания"
-                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
                     onValueChange={(v: number[]) => {
                       const val = Array.isArray(v) ? v[0] : undefined
                       if (typeof val === 'number') change({ confidenceThreshold: val })
@@ -260,7 +260,7 @@ export function SettingsDialog() {
                 <div className="py-2">
                   <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Громкость по умолчанию</span>
-                    <span className="tabular-nums text-sky-300">{settings.defaultVolume}%</span>
+                    <span className="tabular-nums text-gold-300">{settings.defaultVolume}%</span>
                   </div>
                   <Slider
                     value={[settings.defaultVolume]}
@@ -268,7 +268,7 @@ export function SettingsDialog() {
                     max={100}
                     step={5}
                     aria-label="Громкость по умолчанию"
-                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
                     onValueChange={(v: number[]) => {
                       const val = Array.isArray(v) ? v[0] : undefined
                       if (typeof val === 'number') change({ defaultVolume: val })
@@ -354,7 +354,7 @@ export function SettingsDialog() {
                 <div className="py-2">
                   <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Порог уверенности автопропуска</span>
-                    <span className="tabular-nums text-sky-300">{Math.round(settings.skipConfidence * 100)}%</span>
+                    <span className="tabular-nums text-gold-300">{Math.round(settings.skipConfidence * 100)}%</span>
                   </div>
                   <Slider
                     value={[settings.skipConfidence]}
@@ -362,7 +362,7 @@ export function SettingsDialog() {
                     max={1}
                     step={0.05}
                     aria-label="Порог уверенности автопропуска"
-                    className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+                    className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
                     onValueChange={(v: number[]) => {
                       const val = Array.isArray(v) ? v[0] : undefined
                       if (typeof val === 'number') change({ skipConfidence: val })
@@ -558,7 +558,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
 
   const levelPct = Math.round(Math.min(1, Math.max(0, liveLevel)) * 100)
   const levelColor =
-    levelPct < 30 ? 'bg-zinc-600' : levelPct < 70 ? 'bg-sky-400' : 'bg-rose-500'
+    levelPct < 30 ? 'bg-zinc-600' : levelPct < 70 ? 'bg-gold-400' : 'bg-rose-500'
 
   return (
     <div>
@@ -620,7 +620,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
               aria-label="Обновить список микрофонов"
               title="Обновить список"
               onClick={() => void refreshDevices()}
-              className="h-9 w-9 shrink-0 border-border bg-card hover:border-sky-400/40 hover:text-sky-300"
+              className="h-9 w-9 shrink-0 border-border bg-card hover:border-gold-400/40 hover:text-gold-300"
             >
               {refreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -634,7 +634,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         <div className="py-2">
           <div className="flex items-center justify-between text-sm text-foreground">
             <span>Усиление микрофона</span>
-            <span className="tabular-nums text-sky-300">×{settings.micGain}</span>
+            <span className="tabular-nums text-gold-300">×{settings.micGain}</span>
           </div>
           <Slider
             value={[settings.micGain]}
@@ -642,7 +642,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={4}
             step={0.25}
             aria-label="Усиление микрофона"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ micGain: val })
@@ -656,7 +656,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         <div className="py-2">
           <div className="flex items-center justify-between text-sm text-foreground">
             <span>Чувствительность</span>
-            <span className="tabular-nums text-sky-300">{settings.vadSensitivity}</span>
+            <span className="tabular-nums text-gold-300">{settings.vadSensitivity}</span>
           </div>
           <Slider
             value={[settings.vadSensitivity]}
@@ -664,7 +664,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={100}
             step={1}
             aria-label="Чувствительность к тишине"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ vadSensitivity: val })
@@ -676,7 +676,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
         <div className="py-2">
           <div className="flex items-center justify-between text-sm text-foreground">
             <span>Максимальная длительность фразы</span>
-            <span className="tabular-nums text-sky-300">
+            <span className="tabular-nums text-gold-300">
               {Math.round(settings.maxUtteranceMs / 1000)} с
             </span>
           </div>
@@ -686,7 +686,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
             max={30000}
             step={1000}
             aria-label="Максимальная длительность фразы"
-            className="mt-3 [&_[data-slot=slider-range]]:bg-sky-400 [&_[data-slot=slider-thumb]]:border-sky-400"
+            className="mt-3 [&_[data-slot=slider-range]]:bg-gold-400 [&_[data-slot=slider-thumb]]:border-gold-400"
             onValueChange={(v: number[]) => {
               const val = Array.isArray(v) ? v[0] : undefined
               if (typeof val === 'number') change({ maxUtteranceMs: val })
@@ -731,7 +731,7 @@ function MicSettings({ change }: { change: (partial: Partial<AppSettings>) => vo
               onClick={() => void runMicTest()}
               disabled={testState !== 'idle'}
               aria-label="Проверить микрофон"
-              className="min-h-11 shrink-0 gap-1.5 border-border bg-card hover:border-sky-400/40 hover:text-sky-300"
+              className="min-h-11 shrink-0 gap-1.5 border-border bg-card hover:border-gold-400/40 hover:text-gold-300"
             >
               {testState !== 'idle' ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -822,7 +822,7 @@ function VoiceAliasesSettings() {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-gold-400/40">
           Мои алиасы озвучек
         </h3>
         <p className="text-xs text-muted-foreground">
@@ -840,7 +840,7 @@ function VoiceAliasesSettings() {
               <span className="min-w-0 truncate text-sm">
                 <span className="text-foreground">«{row.alias}»</span>
                 <span className="mx-1.5 text-muted-foreground">→</span>
-                <span className="text-sky-300">{row.targetName}</span>
+                <span className="text-gold-300">{row.targetName}</span>
               </span>
               <Button
                 variant="ghost"
@@ -897,7 +897,7 @@ function VoiceAliasesSettings() {
       )}
 
       <Collapsible open={openList} onOpenChange={setOpenList}>
-        <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-2.5 text-xs font-medium text-foreground hover:border-sky-400/40 hover:text-sky-300">
+        <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-2.5 text-xs font-medium text-foreground hover:border-gold-400/40 hover:text-gold-300">
           <ChevronDown
             className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180"
             aria-hidden
@@ -908,7 +908,7 @@ function VoiceAliasesSettings() {
           <ul className="mt-2 space-y-1.5 rounded-lg border border-border bg-card/60 p-3">
             {Object.entries(DEFAULT_VOICE_ALIASES).map(([target, aliases]) => (
               <li key={target} className="text-xs leading-relaxed">
-                <span className="font-medium text-sky-300">{target}</span>
+                <span className="font-medium text-gold-300">{target}</span>
                 <span className="text-muted-foreground"> — </span>
                 <span className="text-muted-foreground">{aliases.join(', ')}</span>
               </li>
@@ -1033,7 +1033,7 @@ function AiSettingsPanel({ change }: { change: (partial: Partial<AppSettings>) =
               {status.models.map((m) => (
                 <div key={m.key} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
                   <span className="truncate text-foreground">{m.name}</span>
-                  <span className={m.installed ? 'text-emerald-400' : 'text-sky-400'}>
+                  <span className={m.installed ? 'text-emerald-400' : 'text-gold-400'}>
                     {m.installed ? 'Установлено' : 'Не установлено'}
                   </span>
                 </div>
@@ -1274,7 +1274,7 @@ function SttCatalogCard({
             const rowProgress = progress?.id === m.id ? progress : null
             const rowError = installErrors[m.id]
             return (
-              <div key={m.key} className={cn('rounded-lg border border-border bg-card/60 p-2.5 text-xs', isActive && 'border-sky-400/60')}>
+              <div key={m.key} className={cn('rounded-lg border border-border bg-card/60 p-2.5 text-xs', isActive && 'border-gold-400/60')}>
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="min-w-0 truncate font-medium text-foreground">{m.name}</span>
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -1282,13 +1282,13 @@ function SttCatalogCard({
                       <span className="rounded bg-emerald-900 px-1.5 py-0.5 text-[11px] font-medium text-emerald-300">по умолчанию</span>
                     )}
                     {m.profile === 'ru-fast' && (
-                      <span className="rounded bg-sky-950 px-1.5 py-0.5 text-[11px] text-sky-300">быстрая</span>
+                      <span className="rounded bg-night-900 px-1.5 py-0.5 text-[11px] text-gold-300">быстрая</span>
                     )}
                     {m.profile === 'ru-accurate' && (
                       <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-300">точная</span>
                     )}
                     {isActive && (
-                      <span className="rounded bg-sky-400 px-1.5 py-0.5 text-[11px] font-semibold text-sky-950">АКТИВНА</span>
+                      <span className="rounded bg-gold-400 px-1.5 py-0.5 text-[11px] font-semibold text-night-900">АКТИВНА</span>
                     )}
                     {m.damaged ? (
                       <span
@@ -1309,7 +1309,7 @@ function SttCatalogCard({
                   {m.sizeHuman} · лицензия: {m.license ?? '—'}
                 </p>
                 {m.recommendedFor && (
-                  <p className="mt-0.5 text-[11px] text-sky-300/80">{m.recommendedFor}</p>
+                  <p className="mt-0.5 text-[11px] text-gold-300/80">{m.recommendedFor}</p>
                 )}
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {!m.installed && (
@@ -1328,7 +1328,7 @@ function SttCatalogCard({
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-8 border-border px-2 text-[11px] hover:text-sky-300"
+                      className="min-h-8 border-border px-2 text-[11px] hover:text-gold-300"
                       disabled={busyKey !== null}
                       onClick={() => void action(m.key, 'activate')}
                     >
@@ -1363,11 +1363,11 @@ function SttCatalogCard({
                   <div className="mt-2">
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={Math.round(rowProgress.percent ?? 0)} aria-valuemin={0} aria-valuemax={100}>
                       <div
-                        className="h-full rounded-full bg-sky-400 transition-[width] duration-300"
+                        className="h-full rounded-full bg-gold-400 transition-[width] duration-300"
                         style={{ width: `${Math.min(100, Math.max(2, rowProgress.percent ?? 0))}%` }}
                       />
                     </div>
-                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-sky-300">
+                    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-gold-300">
                       <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
                       {rowProgress.phase === 'downloading'
                         ? `${Math.round(rowProgress.percent ?? 0)}% · ${fmtMb(rowProgress.receivedBytes)} из ${fmtMb(rowProgress.totalBytes)}${rowProgress.speedBps ? ` · ${fmtMb(rowProgress.speedBps)}/с` : ''}`
@@ -1413,7 +1413,7 @@ function SttCatalogCard({
               <span className="tabular-nums text-foreground">{status.benchmark.decodeMs}</span> мс за{' '}
               <span className="tabular-nums text-foreground">{status.benchmark.audioMs}</span> мс аудио
             </p>
-            <p className="text-sky-300/80">{status.benchmark.recommendation}</p>
+            <p className="text-gold-300/80">{status.benchmark.recommendation}</p>
           </div>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -1609,7 +1609,7 @@ function SttLiveTestCard({
 
       {(recording || phase === 'finishing') && (
         <div className="mt-2 space-y-1.5">
-          <div className="flex items-center gap-2 text-xs text-sky-300">
+          <div className="flex items-center gap-2 text-xs text-gold-300">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-rose-500" aria-hidden />
             Слушаю… {elapsed.toFixed(1)} с (автостоп 10 с)
           </div>

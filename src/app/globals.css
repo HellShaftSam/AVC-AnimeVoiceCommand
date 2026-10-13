@@ -41,97 +41,122 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Celestial Dark Fantasy (§20 ТЗ): тёплое золото + ночная синева */
+  --color-gold-50: #fbf7ea;
+  --color-gold-100: #f7edd1;
+  --color-gold-200: #f2dda4;
+  --color-gold-300: #eccd7f;
+  --color-gold-400: #e5bc5e;
+  --color-gold-500: #d9a848;
+  --color-gold-600: #bd8b36;
+  --color-gold-700: #976c2b;
+  --color-gold-800: #755325;
+  --color-gold-900: #573e20;
+  --color-gold-950: #332412;
+
+  --color-night-50: #eef2fc;
+  --color-night-100: #dde5f7;
+  --color-night-200: #b9c8ec;
+  --color-night-300: #92a6d8;
+  --color-night-400: #6f85bd;
+  --color-night-500: #52669f;
+  --color-night-600: #3d4d7e;
+  --color-night-700: #2c3860;
+  --color-night-800: #1e2847;
+  --color-night-900: #141c36;
+  --color-night-950: #0a1126;
 }
 
 /*
- * AVC-Anime — морская тема в морских тонах (урок релиза 1.0.11).
+ * AVC-Anime — Celestial Dark Fantasy (ТЗ §20, референс владельца: ночное
+ * звёздное небо, золотая линия, светящиеся круглые узлы, созвездия).
  *
- * Палитра (ТЗ §7.1, морские тона):
- *   фон основной   #07111F   фон вторичный  #0B1728   панель   #10223A
- *   приподнятая    #142B46   teal primary   #0D9488   тёмный   #0F766E
- *   cyan-акцент    #38BDF8   мягкий голубой #7DD3FC   текст    #E6F0FF
- *   втор. текст    #A8BCD4   приглушённый   #7187A3   граница  #203A57
- *   успех #34D399  предупреждение #FBBF24  ошибка #FB7185
+ * Палитра (§20.1):
+ *   очень тёмный синий  #060B1A  фон основной
+ *   ночная синева       #0D1730  панели/карточки
+ *   тёплое золото       #E5BC5E  активные элементы (primary)
+ *   светящееся золото   #F2DDA4  выбранные узлы/важный прогресс
+ *   приглушённый голубой #92A6D8 вторичная информация
+ *   мягкий белый        #EFF3FF  основной текст
  *
- * УРОК РЕЛИЗА 1.0.11 («лагающее говно»): анимированная аквариумная тема с
- * blur(70px) × 4 слоя + mix-blend-mode: screen + backdrop-filter на всех
- * панелях превращала рендерер в слайдшоу на слабых GPU — и в браузерном
- * превью, и в EXE (первая отрисовка окна растягивалась на десятки секунд).
- * НОВАЯ ТЕМА: статичные CSS-градиенты (рисуются один раз, ноль анимаций),
- * никаких filter/mix-blend/backdrop-filter. Выглядит по-прежнему «море»:
- * глубина, свет у поверхности, свечение панелей — но цена рендера нулевая.
+ * УРОК РЕЛИЗА 1.0.11 (действует): анимированные многослойные blur-фоны +
+ * backdrop-filter превращали рендерер в слайдшоу на слабых GPU. Тема
+ * СТАТИЧНА: CSS-градиенты рисуются один раз, ноль filter/mix-blend/
+ * backdrop-filter, анимации — только opacity/transform и только на hover.
  *
- * Морская — тема по умолчанию (:root). Светлой темы в приложении нет,
- * поэтому .dark зеркалит :root (переключатель не предусмотрен — честно).
+ * Золото — АКЦЕНТ, а не цвет каждого текста (§20.1): тексты — мягкий белый,
+ * вторичный — приглушённый голубой; золотом подсвечены узлы, активные
+ * состояния, таймлайны и важный прогресс.
  */
 :root {
   --radius: 0.625rem;
-  --background: #07111f;
-  --foreground: #e6f0ff;
-  /* Карточки полупрозрачные — сквозь них проступает морской градиент фона */
-  --card: #10223ad9;
-  --card-foreground: #e6f0ff;
-  --popover: #142b46f2;
-  --popover-foreground: #e6f0ff;
-  --primary: #0d9488;
-  --primary-foreground: #eefcff;
-  --secondary: #0b1728;
-  --secondary-foreground: #e6f0ff;
-  --muted: #0b1728;
-  --muted-foreground: #a8bcd4;
-  --accent: #142b46;
-  --accent-foreground: #7dd3fc;
+  --background: #060b1a;
+  --foreground: #eff3ff;
+  /* Карточки полупрозрачные — сквозь них мерцают звёзды фона */
+  --card: #0d1730d9;
+  --card-foreground: #eff3ff;
+  --popover: #101b38f2;
+  --popover-foreground: #eff3ff;
+  --primary: #e5bc5e;
+  --primary-foreground: #1c1305;
+  --secondary: #0c1631;
+  --secondary-foreground: #dde5f7;
+  --muted: #0c1631;
+  --muted-foreground: #92a6d8;
+  --accent: #16224a;
+  --accent-foreground: #f2dda4;
   --destructive: #fb7185;
-  --border: #203a57;
-  --input: #203a57;
-  --ring: #38bdf8;
-  --chart-1: #38bdf8;
+  --border: #1e2b52;
+  --input: #1e2b52;
+  --ring: #e5bc5e;
+  --chart-1: #e5bc5e;
   --chart-2: #34d399;
-  --chart-3: #14b8a6;
+  --chart-3: #92a6d8;
   --chart-4: #fbbf24;
   --chart-5: #fb7185;
-  --sidebar: #0b1728;
-  --sidebar-foreground: #e6f0ff;
-  --sidebar-primary: #0d9488;
-  --sidebar-primary-foreground: #eefcff;
-  --sidebar-accent: #142b46;
-  --sidebar-accent-foreground: #7dd3fc;
-  --sidebar-border: #203a57;
-  --sidebar-ring: #38bdf8;
+  --sidebar: #0c1631;
+  --sidebar-foreground: #eff3ff;
+  --sidebar-primary: #e5bc5e;
+  --sidebar-primary-foreground: #1c1305;
+  --sidebar-accent: #16224a;
+  --sidebar-accent-foreground: #f2dda4;
+  --sidebar-border: #1e2b52;
+  --sidebar-ring: #e5bc5e;
 }
 
 .dark {
-  --background: #07111f;
-  --foreground: #e6f0ff;
-  --card: #10223ad9;
-  --card-foreground: #e6f0ff;
-  --popover: #142b46f2;
-  --popover-foreground: #e6f0ff;
-  --primary: #0d9488;
-  --primary-foreground: #eefcff;
-  --secondary: #0b1728;
-  --secondary-foreground: #e6f0ff;
-  --muted: #0b1728;
-  --muted-foreground: #a8bcd4;
-  --accent: #142b46;
-  --accent-foreground: #7dd3fc;
+  --background: #060b1a;
+  --foreground: #eff3ff;
+  --card: #0d1730d9;
+  --card-foreground: #eff3ff;
+  --popover: #101b38f2;
+  --popover-foreground: #eff3ff;
+  --primary: #e5bc5e;
+  --primary-foreground: #1c1305;
+  --secondary: #0c1631;
+  --secondary-foreground: #dde5f7;
+  --muted: #0c1631;
+  --muted-foreground: #92a6d8;
+  --accent: #16224a;
+  --accent-foreground: #f2dda4;
   --destructive: #fb7185;
-  --border: #203a57;
-  --input: #203a57;
-  --ring: #38bdf8;
-  --chart-1: #38bdf8;
+  --border: #1e2b52;
+  --input: #1e2b52;
+  --ring: #e5bc5e;
+  --chart-1: #e5bc5e;
   --chart-2: #34d399;
-  --chart-3: #14b8a6;
+  --chart-3: #92a6d8;
   --chart-4: #fbbf24;
   --chart-5: #fb7185;
-  --sidebar: #0b1728;
-  --sidebar-foreground: #e6f0ff;
-  --sidebar-primary: #0d9488;
-  --sidebar-primary-foreground: #eefcff;
-  --sidebar-accent: #142b46;
-  --sidebar-accent-foreground: #7dd3fc;
-  --sidebar-border: #203a57;
-  --sidebar-ring: #38bdf8;
+  --sidebar: #0c1631;
+  --sidebar-foreground: #eff3ff;
+  --sidebar-primary: #e5bc5e;
+  --sidebar-primary-foreground: #1c1305;
+  --sidebar-accent: #16224a;
+  --sidebar-accent-foreground: #f2dda4;
+  --sidebar-border: #1e2b52;
+  --sidebar-ring: #e5bc5e;
 }
 
 @layer base {
@@ -142,15 +167,15 @@
     @apply bg-background text-foreground;
   }
   ::selection {
-    background: rgba(56, 189, 248, 0.32); /* cyan-акцент */
-    color: #eef4ff;
+    background: rgba(229, 188, 94, 0.35); /* золотой акцент */
+    color: #fff8e6;
   }
 }
 
-/* Anime Voice Controller — кастомный скроллбар (cyan на морском, тонкий) */
+/* AVC — кастомный скроллбар (золото на ночной синеве, тонкий) */
 .avc-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(56, 189, 248, 0.35) transparent;
+  scrollbar-color: rgba(229, 188, 94, 0.32) transparent;
 }
 .avc-scroll::-webkit-scrollbar {
   width: 8px;
@@ -160,67 +185,189 @@
   background: transparent;
 }
 .avc-scroll::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.3);
+  background: rgba(229, 188, 94, 0.28);
   border-radius: 8px;
 }
 .avc-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.55);
+  background: rgba(229, 188, 94, 0.5);
 }
 .avc-scroll::-webkit-scrollbar-corner {
   background: transparent;
 }
 
 /* ============================================================
- * МОРЕ — статичный подводный градиент (урок релиза 1.0.11)
+ * КОСМОС — статичное звёздное небо (урок релиза 1.0.11 действует)
  * ============================================================
- * Один div с многослойным CSS-градиентом: глубина (свет у поверхности
- * → бездна) + мягкие свечения (teal/cyan) + виньетка. Рисуется один раз,
- * не анимируется, не содержит filter/mix-blend/backdrop-filter —
- * нулевая нагрузка на GPU в любом браузере и в EXE.
+ * Один фон + два слоя звёзд с фиксированными позициями: рисуются
+ * один раз, не анимируются, без filter/mix-blend/backdrop-filter —
+ * нулевая нагрузка на GPU в браузере и в EXE.
  */
 
-.sea-bg {
+.cosmos-bg {
   background:
-    /* свет «поверхности» сверху */
-    radial-gradient(120% 55% at 50% -8%, rgba(125, 211, 252, 0.16) 0%, rgba(125, 211, 252, 0) 60%),
-    /* мягкое teal-свечение слева */
-    radial-gradient(58% 42% at 8% 30%, rgba(20, 184, 166, 0.13) 0%, rgba(20, 184, 166, 0) 70%),
-    /* глубокое cyan-свечение справа */
-    radial-gradient(62% 48% at 94% 22%, rgba(56, 189, 248, 0.11) 0%, rgba(56, 189, 248, 0) 70%),
-    /* холодная подсветка дна */
-    radial-gradient(90% 36% at 50% 104%, rgba(13, 148, 136, 0.12) 0%, rgba(13, 148, 136, 0) 72%),
-    /* глубина: светлее у поверхности — бездна внизу */
+    /* тёплое золотое свечение «горизонта» сверху */
+    radial-gradient(120% 50% at 50% -12%, rgba(229, 188, 94, 0.10) 0%, rgba(229, 188, 94, 0) 58%),
+    /* млечная дымка наискось (мягкая туманность) */
+    radial-gradient(70% 34% at 24% 12%, rgba(96, 116, 196, 0.14) 0%, rgba(96, 116, 196, 0) 68%),
+    radial-gradient(62% 40% at 86% 20%, rgba(62, 78, 148, 0.16) 0%, rgba(62, 78, 148, 0) 70%),
+    /* глубокая синева у дна */
+    radial-gradient(95% 38% at 50% 108%, rgba(28, 38, 84, 0.45) 0%, rgba(28, 38, 84, 0) 72%),
+    /* глубина неба: чуть светлее у зенита — бездна внизу */
     linear-gradient(
       180deg,
-      #0b2c4d 0%,
-      #0a2340 14%,
-      #081a30 32%,
-      #07111f 55%,
-      #050d18 100%
+      #0b1329 0%,
+      #091022 30%,
+      #060b1a 58%,
+      #040913 100%
     );
 }
 
-/* Виньетка поверх градиента: края темнее, контент «выпрыгивает» (статично) */
-.sea-vignette {
-  background:
-    radial-gradient(120% 90% at 50% 8%, rgba(0, 0, 0, 0) 52%, rgba(3, 9, 17, 0.42) 100%),
-    linear-gradient(180deg, rgba(3, 9, 17, 0) 70%, rgba(3, 9, 17, 0.5) 100%);
+/* Слой звёзд: три плитки с точками разной крупности (статично, без JS).
+   Плитки крупные, чтобы паттерн не читался как сетка. */
+.cosmos-stars {
+  background-image:
+    /* мелкие звёзды */
+    radial-gradient(1px 1px at 24px 38px, rgba(236, 242, 255, 0.75) 50%, transparent 52%),
+    radial-gradient(1px 1px at 132px 96px, rgba(236, 242, 255, 0.55) 50%, transparent 52%),
+    radial-gradient(1px 1px at 84px 186px, rgba(242, 221, 164, 0.6) 50%, transparent 52%),
+    radial-gradient(1px 1px at 208px 152px, rgba(236, 242, 255, 0.5) 50%, transparent 52%),
+    radial-gradient(1px 1px at 252px 24px, rgba(236, 242, 255, 0.65) 50%, transparent 52%),
+    /* средние */
+    radial-gradient(1.6px 1.6px at 56px 128px, rgba(255, 248, 230, 0.85) 50%, transparent 54%),
+    radial-gradient(1.6px 1.6px at 178px 232px, rgba(236, 242, 255, 0.7) 50%, transparent 54%),
+    radial-gradient(1.6px 1.6px at 296px 66px, rgba(242, 221, 164, 0.8) 50%, transparent 54%),
+    /* редкие яркие с ореолом */
+    radial-gradient(3px 3px at 236px 196px, rgba(255, 248, 230, 0.5) 0%, rgba(255, 248, 230, 0.18) 45%, transparent 60%),
+    radial-gradient(2.4px 2.4px at 38px 236px, rgba(242, 221, 164, 0.55) 0%, rgba(242, 221, 164, 0.16) 45%, transparent 60%);
+  background-size: 320px 280px, 320px 280px, 320px 280px, 320px 280px, 320px 280px,
+    460px 420px, 460px 420px, 460px 420px, 640px 560px, 640px 560px;
 }
 
-/* «Морское стекло» для каркаса (шапка, панели, футер): полупрозрачная панель.
-   БЕЗ backdrop-filter (урок 1.0.11): фон статичен, размытие ничего не даёт,
-   а стоит дорого на слабых GPU. */
+/* Виньетка поверх неба: края темнее, контент «выпрыгивает» (статично) */
+.cosmos-vignette {
+  background:
+    radial-gradient(120% 90% at 50% 6%, rgba(0, 0, 0, 0) 52%, rgba(2, 5, 12, 0.45) 100%),
+    linear-gradient(180deg, rgba(2, 5, 12, 0) 70%, rgba(2, 5, 12, 0.5) 100%);
+}
+
+/* «Ночное стекло» для каркаса (шапка, панели, футер): полупрозрачная
+   синяя панель. БЕЗ backdrop-filter (урок 1.0.11): фон статичен,
+   размытие ничего не даёт, а стоит дорого на слабых GPU. */
 .glass {
   background: linear-gradient(
     180deg,
-    rgba(13, 30, 52, 0.72),
-    rgba(7, 17, 31, 0.82)
+    rgba(16, 27, 56, 0.78),
+    rgba(8, 14, 30, 0.86)
   );
 }
 
-/* Свечение заголовка как отражение света в воде (дешёвый text-shadow) */
+/* Тонкая золотая линия-хайрлайн (шапка/футер/разделители, референс §20.2) */
+.gold-hairline {
+  background: linear-gradient(
+    90deg,
+    rgba(229, 188, 94, 0) 0%,
+    rgba(229, 188, 94, 0.55) 18%,
+    rgba(242, 221, 164, 0.85) 50%,
+    rgba(229, 188, 94, 0.55) 82%,
+    rgba(229, 188, 94, 0) 100%
+  );
+}
+
+/* Свечение заголовка как отражение золотых узлов (дешёвый text-shadow) */
 .avc-title-glow {
   text-shadow:
-    0 0 18px rgba(56, 189, 248, 0.35),
-    0 0 42px rgba(56, 189, 248, 0.14);
+    0 0 18px rgba(229, 188, 94, 0.38),
+    0 0 44px rgba(229, 188, 94, 0.16);
+}
+
+/* ============================================================
+ * СОЗВЕЗДИЕ — таймлайн франшизы (ТЗ §20.5, референс владельца)
+ * Горизонтальная золотая линия + круглые узлы. Состояния:
+ *   просмотрено  — завершённое приглушённое золото
+ *   текущий      — яркое мягкое свечение
+ *   следующий    — заметный золотой контур
+ *   необязательный — менее яркий узел
+ *   недоступный  — нейтральное обозначение
+ * ============================================================ */
+
+/* Непрерывная линия через весь ряд (под узлами карточек) */
+.constellation-track {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(229, 188, 94, 0) 0%,
+    rgba(229, 188, 94, 0.5) 6%,
+    rgba(229, 188, 94, 0.5) 94%,
+    rgba(229, 188, 94, 0) 100%
+  );
+}
+
+/* Круглый узел на линии */
+.constellation-node {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid rgba(229, 188, 94, 0.85);
+  background: #0a1126;
+  box-shadow: 0 0 8px rgba(229, 188, 94, 0.35);
+}
+/* просмотрено — завершённое приглушённое золото */
+.constellation-node[data-state='watched'] {
+  background: rgba(229, 188, 94, 0.55);
+  border-color: rgba(189, 139, 54, 0.9);
+  box-shadow: 0 0 6px rgba(217, 168, 72, 0.3);
+}
+/* текущий — яркое мягкое свечение */
+.constellation-node[data-state='current'] {
+  background: #f2dda4;
+  border-color: #f2dda4;
+  box-shadow:
+    0 0 14px rgba(242, 221, 164, 0.85),
+    0 0 30px rgba(229, 188, 94, 0.45);
+}
+/* следующий — заметный золотой контур */
+.constellation-node[data-state='next'] {
+  background: rgba(229, 188, 94, 0.18);
+  border-color: #e5bc5e;
+  box-shadow: 0 0 10px rgba(229, 188, 94, 0.5);
+}
+/* необязательный (OVA/спешлы/рекапы) — менее яркий */
+.constellation-node[data-state='optional'] {
+  border-color: rgba(146, 166, 216, 0.6);
+  box-shadow: none;
+}
+/* недоступный/анонс — нейтральный */
+.constellation-node[data-state='unavailable'] {
+  border-color: rgba(146, 166, 216, 0.35);
+  background: rgba(20, 28, 54, 0.9);
+  box-shadow: none;
+}
+
+/* Карточка-узел таймлайна: золотая подсветка при выборе (§20.4) */
+.constellation-card {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.constellation-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45), 0 0 14px rgba(229, 188, 94, 0.18);
+}
+
+/* Карточка аниме: тонкий золотой акцент при наведении (§20.4) */
+.anime-card {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.anime-card:hover {
+  border-color: rgba(229, 188, 94, 0.55);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(229, 188, 94, 0.14);
+}
+
+/* Уважение к reduced motion (§20.6): отключаем переходы-украшения */
+@media (prefers-reduced-motion: reduce) {
+  .constellation-card,
+  .anime-card {
+    transition: none;
+  }
+  .constellation-card:hover {
+    transform: none;
+  }
 }

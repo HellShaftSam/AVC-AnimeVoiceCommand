@@ -129,7 +129,7 @@ export function AnimeHoverPreview({
 
   return (
     <div
-      className="fixed z-[60] w-80 rounded-xl border border-sky-400/30 bg-card/95 p-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)] backdrop-blur-sm"
+      className="fixed z-[60] w-80 rounded-xl border border-gold-400/30 bg-card/95 p-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)] backdrop-blur-sm"
       style={style}
       role="tooltip"
       aria-label={`Превью: ${hover.card.title}`}
@@ -160,7 +160,7 @@ export function AnimeHoverPreview({
             {hover.card.year !== null && <span>{hover.card.year}</span>}
             {hover.card.type && <span>· {hover.card.type}</span>}
             {hover.card.rating !== null && hover.card.rating > 0 && (
-              <span className="font-semibold text-sky-400">★ {hover.card.rating.toFixed(1)}</span>
+              <span className="font-semibold text-gold-400">★ {hover.card.rating.toFixed(1)}</span>
             )}
             {hover.card.status && <span>· {hover.card.status}</span>}
             {maxEp != null && maxEp > 0 && <span>· серий: {maxEp}</span>}
@@ -193,7 +193,7 @@ export function AnimeHoverPreview({
 
       <button
         type="button"
-        className="mt-2.5 min-h-9 w-full rounded-md bg-sky-400/15 px-3 text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-400/25"
+        className="mt-2.5 min-h-9 w-full rounded-md bg-gold-400/15 px-3 text-xs font-semibold text-gold-300 transition-colors hover:bg-gold-400/25"
         onClick={() => onNavigate(hover.card)}
       >
         Открыть страницу

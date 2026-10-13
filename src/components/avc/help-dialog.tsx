@@ -153,13 +153,13 @@ export function HelpDialog() {
         <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gold-400/40">
                 {group.title}
               </h3>
               <ul className="space-y-1">
                 {group.items.map((item) => (
                   <li key={item} className="flex items-start gap-2 text-sm text-foreground">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400/40" aria-hidden />
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold-400/40" aria-hidden />
                     <span>«{item}»</span>
                   </li>
                 ))}
@@ -169,7 +169,7 @@ export function HelpDialog() {
         </div>
 
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-400/40">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gold-400/40">
             Горячие клавиши
           </h3>
           <ul className="grid gap-1.5 sm:grid-cols-2">
@@ -178,7 +178,7 @@ export function HelpDialog() {
                 key={hk.keys}
                 className="flex items-center gap-2 rounded-lg border border-border bg-card/60 px-2.5 py-1.5 text-xs"
               >
-                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-sky-300">
+                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-gold-300">
                   {hk.keys}
                 </kbd>
                 <span className="text-muted-foreground">{hk.action}</span>

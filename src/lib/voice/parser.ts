@@ -488,7 +488,9 @@ function extractAddVoiceAlias(text: string): VoiceCommand | null {
 
 // --- озвучки -----------------------------------------------------------------
 
-const DUB_WORD_RE = /^(озвуч|дубляж|перевод)/
+const DUB_WORD_RE = /^(озвуч|озвук|овучк|дубляж|дублир|перевод)/
+/** Слова, после которых фраза явно про озвучку — не дают голому тайтлу превращать их в поиск */
+const DUB_INTENT_RE = /^(озвуч|озвук|овучк|дубляж|дублир|перевод|субтитр)/
 /** Глаголы смены озвучки БЕЗ слова «озвучка» («переключи на анилибрию») */
 const VOICE_SWITCH_VERBS = ['переключи', 'переключись', 'смени', 'поменяй', 'выбери']
 /** Хвосты после «переключи на», которые НЕ являются названием озвучки */
@@ -532,6 +534,13 @@ function extractSelectVoice(words: string[]): VoiceCommand | null {
       const name = tail.join(' ')
       return { type: VoiceCommandType.SelectVoice, params: { name, dub: name }, confidence: 0.9, label: `Озвучка: ${name}` }
     }
+  }
+
+  // 3.5) dub-слово есть, но названия после него нет («озвучка», «смени озвучку»):
+  //      НЕ отдавать голому тайтлу под поиск мусора — честный SelectVoice без имени,
+  //      executor ответит понятным «Не указана озвучка / Сначала откройте аниме»
+  if (dubIdx >= 0) {
+    return { type: VoiceCommandType.SelectVoice, params: {}, confidence: 0.6, label: 'Выбрать озвучку' }
   }
 
   // 4) «переключи на анилибрию» / «переключись на дрим каст» (без слова «озвучка»)
@@ -880,6 +889,9 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
     words.length >= 1 &&
     words.length <= 6 &&
     !isSectionWord(words[0]) &&
+    // Урок v1.0.32: «озвучка»/«дубляж»/«субтитры» без хвоста — не тайтл,
+    // а оборванная команда выбора озвучки; поиск по ним = мусор
+    !words.some((w) => DUB_INTENT_RE.test(w)) &&
     !words.some((w) => EPISODE_NOUNS.some((n) => w.startsWith(n.slice(0, 5)))) &&
     words.every((w) => !/^\d+$/.test(w)) &&
     // Урок v1.0.27 (issue #3): мусор Whisper («Народом тут.», «Селилия до два
@@ -892,7 +904,9 @@ function parseSegment(segment: string, ctx: ParseCtx): VoiceCommand | null {
     if (query.length >= 5) {
       return {
         type: VoiceCommandType.SearchAnime,
-        params: { query, open: true },
+        // bareTitle: голый тайтл без триггеров — executor может контекстно
+        // переписать в SelectVoice, если это название озвучки открытого аниме
+        params: { query, open: true, bareTitle: true },
         confidence: 0.7,
         label: `Открыть «${query}»`,
       }
@@ -977,6 +991,12 @@ export function parserSelfTest(): Array<{ input: string; expect: string }> {
     { input: 'включи озвучку дрим каст', expect: 'SelectVoice(дрим каст)' },
     { input: 'следующая озвучка', expect: 'SelectVoice(next)' },
     { input: 'вторая озвучка', expect: 'SelectVoice(index:2)' },
+    // --- v1.0.32: «Озвучка <название>» по фактическим названиям YummyAnime ---
+    { input: 'озвучка анилибрия', expect: 'SelectVoice(анилибрия)' },
+    { input: 'озвучка два на два', expect: 'SelectVoice(два на два)' },
+    { input: 'озвучка дублированная', expect: 'SelectVoice(дублированная)' },
+    { input: 'озвучка субтитры', expect: 'SelectVoice(субтитры)' },
+    { input: 'озвучка', expect: 'SelectVoice()' }, // без хвоста — не поиск мусора
     { input: 'перемотай на 20 секунд', expect: 'SeekForward(20)' },
     { input: 'перемотай на 2 минуты назад', expect: 'SeekBackward(120)' },
     { input: 'полторы минуты назад', expect: 'SeekBackward(90)' },

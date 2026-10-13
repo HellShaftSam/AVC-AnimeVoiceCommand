@@ -53,7 +53,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
   // Живой уровень микрофона 0..1 (обновляется ~10 раз/с, пока идёт listening)
   const micLevelPct = Math.round(Math.min(1, Math.max(0, voice.micLevel)) * 100)
   const levelColor =
-    micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-sky-400' : 'bg-rose-500'
+    micLevelPct < 30 ? 'bg-zinc-600' : micLevelPct < 70 ? 'bg-gold-400' : 'bg-rose-500'
   const interim = listening && voice.interimText.trim() ? voice.interimText.trim() : null
   const engineLabel =
     voice.engineName === 'local' ? 'Локально (офлайн)' : voice.engineName === 'browser' ? 'Браузер' : 'Сервер'
@@ -122,12 +122,12 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
               'flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-40',
               listening
                 ? 'animate-pulse border-rose-300/60 bg-rose-500 text-white shadow-[0_0_26px_rgba(244,63,94,0.55)]'
-                : 'border-sky-300/50 bg-sky-400 text-sky-950 shadow-[0_0_18px_rgba(56, 189, 248,0.35)] hover:bg-sky-300',
+                : 'border-gold-300/50 bg-gold-400 text-night-900 shadow-[0_0_18px_rgba(229, 188, 94,0.35)] hover:bg-gold-300',
             )}
           >
             <Mic className="h-6 w-6" aria-hidden />
           </button>
-          {/* Уровень микрофона: zinc-600 < 30% < sky-400 < 70% < rose-500 */}
+          {/* Уровень микрофона: zinc-600 < 30% < gold-400 < 70% < rose-500 */}
           <div
             className="h-1.5 w-14 overflow-hidden rounded-full bg-secondary"
             role="meter"
@@ -153,7 +153,7 @@ export function VoicePanel({ voice }: { voice: VoiceApi }) {
           >
             {voiceStatus === 'executing' ? (
               <span className="flex items-center gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" aria-hidden />
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-gold-400" aria-hidden />
                 {statusLine(voiceStatus, voiceMessage)}
               </span>
             ) : (

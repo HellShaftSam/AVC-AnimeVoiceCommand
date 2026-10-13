@@ -77,7 +77,7 @@ function ScheduleTile({ entry, nowMs }: { entry: ScheduleEntry; nowMs: number })
       data-testid="schedule-tile"
       className={cn(
         'group flex min-h-20 gap-3 rounded-xl border p-2.5 text-left transition-all',
-        'border-border bg-card/60 hover:border-sky-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        'border-border bg-card/60 hover:border-gold-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         released && 'opacity-60',
       )}
     >
@@ -103,7 +103,7 @@ function ScheduleTile({ entry, nowMs }: { entry: ScheduleEntry; nowMs: number })
             <span
               className={cn(
                 'inline-flex items-center gap-1 font-semibold',
-                released ? 'text-muted-foreground' : 'text-sky-300',
+                released ? 'text-muted-foreground' : 'text-gold-300',
               )}
             >
               <Clock className="h-3 w-3" aria-hidden />
@@ -169,7 +169,7 @@ export function ScheduleView() {
     return (
       <div>
         <div className="mb-4 flex items-center gap-2">
-          <CalendarDays className="h-5 w-5 text-sky-400" aria-hidden />
+          <CalendarDays className="h-5 w-5 text-gold-400" aria-hidden />
           <h2 className="text-lg font-bold">Расписание онгоингов</h2>
         </div>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -215,11 +215,11 @@ export function ScheduleView() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-lg font-bold">
-          <CalendarDays className="h-5 w-5 text-sky-400" aria-hidden />
+          <CalendarDays className="h-5 w-5 text-gold-400" aria-hidden />
           Расписание онгоингов
         </h2>
         {data.source === 'demo' && (
-          <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-300">
+          <Badge className="border border-gold-400/40 bg-gold-400/40 text-gold-300">
             Демо-данные (сайт недоступен)
           </Badge>
         )}
@@ -244,7 +244,7 @@ export function ScheduleView() {
               className={cn(
                 'flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                 active
-                  ? 'border-sky-400 bg-sky-400/40 text-sky-300 shadow-[0_0_14px_rgba(56,189,248,0.15)]'
+                  ? 'border-gold-400 bg-gold-400/40 text-gold-300 shadow-[0_0_14px_rgba(229,188,94,0.15)]'
                   : 'border-border bg-card/60 text-foreground hover:border-zinc-500',
               )}
             >
@@ -252,7 +252,7 @@ export function ScheduleView() {
               <span
                 className={cn(
                   'rounded-full px-1.5 py-0.5 text-[11px] leading-none',
-                  active ? 'bg-sky-950/60 text-sky-200' : 'bg-secondary text-muted-foreground',
+                  active ? 'bg-night-900/60 text-gold-200' : 'bg-secondary text-muted-foreground',
                 )}
               >
                 {d.items.length}

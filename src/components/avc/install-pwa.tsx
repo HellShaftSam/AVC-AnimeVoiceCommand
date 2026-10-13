@@ -78,7 +78,7 @@ export function InstallPwa() {
   return (
     <Card className="fixed bottom-3 left-3 z-50 w-72 gap-0 border-border bg-card/60 p-3 shadow-[0_8px_30px_rgba(0,0,0,0.6)] backdrop-blur">
       <div className="flex items-start gap-2.5">
-        <Download className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+        <Download className="mt-0.5 h-4 w-4 shrink-0 text-gold-400" aria-hidden />
         <p className="min-w-0 flex-1 text-xs leading-relaxed text-foreground">
           Установить AnimeVC на устройство — как приложение
         </p>

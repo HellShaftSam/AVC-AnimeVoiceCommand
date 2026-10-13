@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils'
 /** Цвет бейджа способа сопоставления резолвера */
 const VIA_STYLES: Record<VoiceProviderMatch['matchedVia'], string> = {
   exact: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  alias: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
+  alias: 'border-gold-400/40 bg-gold-400/40 text-gold-300',
   translit: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
   fuzzy: 'border-border bg-accent/60 text-foreground',
 }
@@ -65,7 +65,7 @@ export function VoiceConfirmDialog() {
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mic className="h-4 w-4 text-sky-400" aria-hidden />
+            <Mic className="h-4 w-4 text-gold-400" aria-hidden />
             Уточним озвучку
           </DialogTitle>
           <DialogDescription>
@@ -81,7 +81,7 @@ export function VoiceConfirmDialog() {
         {voiceConfirm && (
           <>
             <div className="rounded-xl border border-border bg-card/60 p-4 text-center">
-              <p className="text-lg font-bold text-sky-300">{voiceConfirm.match.name}</p>
+              <p className="text-lg font-bold text-gold-300">{voiceConfirm.match.name}</p>
               <div className="mt-2 flex items-center justify-center gap-2">
                 <Badge
                   variant="outline"

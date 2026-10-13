@@ -91,7 +91,7 @@ function StatusPill({ item }: { item: YummyLibraryItem }) {
     alias === 'ongoing'
       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
       : alias === 'announced'
-        ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+        ? 'bg-gold-500/15 text-gold-300 border-gold-500/30'
         : 'bg-zinc-500/15 text-foreground border-zinc-500/30'
   return <span className={cn('rounded border px-1.5 py-0.5 text-[10px] leading-none', cls)}>{label}</span>
 }
@@ -139,7 +139,7 @@ function ProgressRow({
         </span>
         {pct !== null && (
           <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-secondary">
-            <span className="block h-full rounded-full bg-sky-400" style={{ width: `${pct}%` }} />
+            <span className="block h-full rounded-full bg-gold-400" style={{ width: `${pct}%` }} />
           </span>
         )}
       </button>
@@ -177,7 +177,7 @@ function LibraryCard({
   return (
     <button
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-colors hover:border-sky-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2 text-left transition-colors hover:border-gold-400/40 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       {item.poster ? (
         <img
@@ -201,7 +201,7 @@ function LibraryCard({
           {item.nextEpisodeAt !== null && (
             <>
               <span aria-hidden>·</span>
-              <span className="text-sky-300/90">
+              <span className="text-gold-300/90">
                 новая серия: {nextEpisodeDate(item.nextEpisodeAt) ?? 'скоро'}
               </span>
             </>
@@ -209,7 +209,7 @@ function LibraryCard({
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
           {item.ownRating !== null && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-sky-400/40 px-1.5 py-0.5 text-[10px] text-sky-300">
+            <span className="inline-flex items-center gap-0.5 rounded bg-gold-400/40 px-1.5 py-0.5 text-[10px] text-gold-300">
               <Star className="h-2.5 w-2.5" aria-hidden /> моя: {item.ownRating}
             </span>
           )}
@@ -374,7 +374,7 @@ export function LibraryPanel() {
       >
         <SheetHeader className="p-0">
           <SheetTitle className="flex items-center gap-2 text-lg">
-            <BookOpen className="h-5 w-5 text-sky-400" aria-hidden />
+            <BookOpen className="h-5 w-5 text-gold-400" aria-hidden />
             Библиотека YummyAnime
           </SheetTitle>
           <SheetDescription className="text-xs text-muted-foreground">
@@ -393,7 +393,7 @@ export function LibraryPanel() {
                 size="sm"
                 variant="ghost"
                 onClick={() => void continueWatchingFromLast()}
-                className="h-7 gap-1 px-2 text-xs text-sky-300 hover:bg-sky-400/40 hover:text-sky-200"
+                className="h-7 gap-1 px-2 text-xs text-gold-300 hover:bg-gold-400/40 hover:text-gold-200"
               >
                 <Play className="h-3 w-3" aria-hidden />
                 Последнее
@@ -402,7 +402,7 @@ export function LibraryPanel() {
           </div>
           {!progress ? (
             <div className="flex justify-center py-3">
-              <Loader2 className="h-4 w-4 animate-spin text-sky-400" aria-hidden />
+              <Loader2 className="h-4 w-4 animate-spin text-gold-400" aria-hidden />
             </div>
           ) : progress.items.length === 0 ? (
             <p className="py-2 text-xs text-muted-foreground">
@@ -439,7 +439,7 @@ export function LibraryPanel() {
               aria-label="Обновить библиотеку"
               disabled={loading}
               onClick={() => void load(true)}
-              className="h-9 w-9 text-muted-foreground hover:text-sky-300"
+              className="h-9 w-9 text-muted-foreground hover:text-gold-300"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -458,7 +458,7 @@ export function LibraryPanel() {
                   'noopener',
                 )
               }
-              className="h-9 w-9 text-muted-foreground hover:text-sky-300"
+              className="h-9 w-9 text-muted-foreground hover:text-gold-300"
             >
               <ExternalLink className="h-4 w-4" aria-hidden />
             </Button>
@@ -483,7 +483,7 @@ export function LibraryPanel() {
           </div>
         ) : !library ? (
           <div className="flex justify-center py-6">
-            <Loader2 className="h-6 w-6 animate-spin text-sky-400" aria-hidden />
+            <Loader2 className="h-6 w-6 animate-spin text-gold-400" aria-hidden />
           </div>
         ) : !library.available ? (
           <div className="rounded-xl border border-border bg-card/60 p-4 text-sm text-foreground">
@@ -512,7 +512,7 @@ export function LibraryPanel() {
                     className={cn(
                       'flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                       active
-                        ? 'border-sky-400/40 bg-sky-400/40 text-sky-200'
+                        ? 'border-gold-400/40 bg-gold-400/40 text-gold-200'
                         : 'border-border bg-card/60 text-muted-foreground hover:border-border hover:text-foreground',
                     )}
                   >
@@ -522,7 +522,7 @@ export function LibraryPanel() {
                       <span
                         className={cn(
                           'rounded-full px-1.5 py-0.5 text-[10px] leading-none',
-                          active ? 'bg-sky-400/40 text-sky-200' : 'bg-secondary text-muted-foreground',
+                          active ? 'bg-gold-400/40 text-gold-200' : 'bg-secondary text-muted-foreground',
                         )}
                       >
                         {t.count}
@@ -539,13 +539,13 @@ export function LibraryPanel() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск по названию…"
               aria-label="Поиск по библиотеке"
-              className="h-10 w-full rounded-xl border border-border bg-card/60 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-sky-400/40 focus:outline-none"
+              className="h-10 w-full rounded-xl border border-border bg-card/60 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-gold-400/40 focus:outline-none"
             />
 
             {/* Список тайтлов */}
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               {library.reason && (
-                <p className="mb-2 rounded-lg border border-sky-400/40 bg-sky-400/40 p-2 text-xs text-sky-200/80">
+                <p className="mb-2 rounded-lg border border-gold-400/40 bg-gold-400/40 p-2 text-xs text-gold-200/80">
                   {library.reason}
                 </p>
               )}

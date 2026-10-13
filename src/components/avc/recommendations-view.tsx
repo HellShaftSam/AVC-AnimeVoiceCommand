@@ -206,7 +206,7 @@ export function RecommendationsView() {
       {/* --- шапка --- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Compass className="h-6 w-6 text-sky-400" aria-hidden />
+          <Compass className="h-6 w-6 text-gold-400" aria-hidden />
           <h2 className="text-lg font-bold">Рекомендации</h2>
           {data?.mode === 'personalized' && !loading && (
             <Badge className="border border-emerald-400/40 bg-emerald-400/10 text-emerald-300">
@@ -214,7 +214,7 @@ export function RecommendationsView() {
             </Badge>
           )}
           {data?.mode === 'discovery' && !loading && (
-            <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-100">
+            <Badge className="border border-gold-400/40 bg-gold-400/40 text-gold-100">
               общая подборка
             </Badge>
           )}
@@ -234,7 +234,7 @@ export function RecommendationsView() {
             variant="outline"
             onClick={() => void load(true)}
             disabled={loading}
-            className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+            className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -252,7 +252,7 @@ export function RecommendationsView() {
           <div>
             <Label className="text-sm">
               Порог оценки: исключать, если моя оценка ниже{' '}
-              <span className="font-bold text-sky-300">{settings.recRatingThreshold}</span> из 10
+              <span className="font-bold text-gold-300">{settings.recRatingThreshold}</span> из 10
             </Label>
             <Slider
               aria-label="Порог своей оценки"
@@ -322,7 +322,7 @@ export function RecommendationsView() {
 
       {!loading && !error && data && data.mode === 'logged-out' && (
         <div className="rounded-xl border border-border bg-card/60 p-8 text-center">
-          <LogIn className="mx-auto h-10 w-10 text-sky-400" aria-hidden />
+          <LogIn className="mx-auto h-10 w-10 text-gold-400" aria-hidden />
           <h3 className="mt-3 text-lg font-semibold">Нужен аккаунт YummyAnime</h3>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
             {data.reason ??
@@ -347,7 +347,7 @@ export function RecommendationsView() {
       )}
 
       {!loading && !error && data && data.ok && data.message && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 text-sm text-sky-200">
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-gold-400/30 bg-gold-400/5 p-4 text-sm text-gold-200">
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <span>{data.message}</span>
         </div>
@@ -409,7 +409,7 @@ export function RecommendationsView() {
           <Button
             variant="outline"
             onClick={() => setVisible((v) => v + PAGE_STEP)}
-            className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+            className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
           >
             Показать ещё ({items.length - visible})
           </Button>
@@ -429,7 +429,7 @@ export function RecommendationsView() {
                 key={`${f.animeId}-${f.action}`}
                 onClick={() => void undoFeedback(f.animeId)}
                 title="Вернуть в рекомендации"
-                className="flex min-h-9 items-center gap-1 rounded-full border border-border bg-background/60 px-2.5 text-xs text-muted-foreground transition-colors hover:border-sky-400/40 hover:text-sky-300"
+                className="flex min-h-9 items-center gap-1 rounded-full border border-border bg-background/60 px-2.5 text-xs text-muted-foreground transition-colors hover:border-gold-400/40 hover:text-gold-300"
               >
                 <Undo2 className="h-3 w-3" aria-hidden />
                 <span className="max-w-40 truncate">{f.title || `Аниме #${f.animeId}`}</span>
@@ -455,11 +455,11 @@ function RecCardView({
 }) {
   const score = Math.round(item.score)
   const scoreTone =
-    score >= 55 ? 'text-emerald-300' : score >= 30 ? 'text-sky-300' : 'text-muted-foreground'
+    score >= 55 ? 'text-emerald-300' : score >= 30 ? 'text-gold-300' : 'text-muted-foreground'
   return (
     <div
       data-testid="rec-card"
-      className="group flex gap-3 rounded-xl border border-border bg-card/60 p-3 transition-all hover:border-sky-400/40 hover:shadow-[0_0_18px_rgba(56,189,248,0.10)]"
+      className="group flex gap-3 rounded-xl border border-border bg-card/60 p-3 transition-all hover:border-gold-400/40 hover:shadow-[0_0_18px_rgba(229,188,94,0.10)]"
     >
       <button
         onClick={() => onOpen(item.card)}
@@ -483,7 +483,7 @@ function RecCardView({
         <div className="flex items-start justify-between gap-2">
           <button
             onClick={() => onOpen(item.card)}
-            className="line-clamp-2 text-left text-sm font-semibold text-foreground transition-colors hover:text-sky-300"
+            className="line-clamp-2 text-left text-sm font-semibold text-foreground transition-colors hover:text-gold-300"
           >
             {item.card.title}
           </button>
@@ -503,8 +503,8 @@ function RecCardView({
         {item.reasons.length > 0 && (
           <ul className="mt-1.5 space-y-0.5">
             {item.reasons.map((r, i) => (
-              <li key={i} className="flex items-start gap-1 text-xs leading-snug text-sky-200/90">
-                <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-sky-400/70" aria-hidden />
+              <li key={i} className="flex items-start gap-1 text-xs leading-snug text-gold-200/90">
+                <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-gold-400/70" aria-hidden />
                 <span className="line-clamp-2">{r}</span>
               </li>
             ))}
@@ -515,7 +515,7 @@ function RecCardView({
             variant="outline"
             size="sm"
             onClick={() => onOpen(item.card)}
-            className="h-8 border-border bg-background/40 px-2.5 text-xs hover:border-sky-400/40 hover:text-sky-300"
+            className="h-8 border-border bg-background/40 px-2.5 text-xs hover:border-gold-400/40 hover:text-gold-300"
           >
             Открыть
           </Button>

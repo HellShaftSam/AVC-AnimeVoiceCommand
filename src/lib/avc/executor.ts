@@ -564,6 +564,40 @@ async function executeSearchAnime(cmd: VoiceCommand): Promise<CommandResult> {
   if (!query) return fail('Пустой поисковый запрос')
   const open = cmd.params.open === true
   const newTab = cmd.params.newTab === true
+
+  // --- Контекстная озвучка (урок v1.0.32) --------------------------------------
+  // Голый тайтл («анилибрия», «анирайз») при открытом аниме почти всегда означает
+  // название озвучки, а не поиск: Whisper мог съесть слово «озвучка» (сегмент-игнор
+  // или пауза), и фраза приходила как «Анилибрия». Если произнесённое совпадает
+  // с озвучкой ОТКРЫТОГО аниме с высокой уверенностью — переключаем озвучку,
+  // а не запускаем мусорный поиск поверх играющего плеера.
+  if (cmd.params.bareTitle === true) {
+    const st0 = useAvcStore.getState()
+    if (st0.playback.animeId) {
+      const details0 = await fetchDetails(st0.playback.animeId)
+      const dubs0 = details0?.dubs ?? []
+      if (dubs0.length > 0) {
+        const aliasMap0 = buildUserAliasMap(
+          st0.voiceAliases.map((r) => ({ targetName: r.targetName, alias: r.alias })),
+        )
+        const dubMatch = resolveVoiceProvider(
+          query,
+          dubs0.map((d) => ({ name: d.name, shortName: d.shortName })),
+          aliasMap0,
+          VOICE_CONFIDENCE_AUTO, // только уверенные совпадения — иначе честный поиск
+        )
+        if (dubMatch) {
+          return executeSelectVoice({
+            type: VoiceCommandType.SelectVoice,
+            params: { name: dubMatch.name, dub: dubMatch.name },
+            confidence: Math.max(cmd.confidence, dubMatch.confidence),
+            label: `Озвучка: ${dubMatch.name}`,
+          } as VoiceCommand)
+        }
+      }
+    }
+  }
+
   const data = await apiGetJson<{ items: AnimeCard[] }>(
     `/api/site/search?q=${encodeURIComponent(query)}`,
   )

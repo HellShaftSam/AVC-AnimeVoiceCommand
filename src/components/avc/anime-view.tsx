@@ -260,7 +260,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
               </Badge>
             )}
             {details.rating !== null && details.rating > 0 && (
-              <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-300">
+              <Badge className="border border-gold-400/40 bg-gold-400/40 text-gold-300">
                 <Star className="h-3 w-3" aria-hidden />
                 {details.rating.toFixed(1)}
               </Badge>
@@ -290,7 +290,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
               {desc.length > 180 && (
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="mt-1 text-xs text-sky-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className="mt-1 text-xs text-gold-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
                   {expanded ? 'Свернуть' : 'Показать полностью'}
                 </button>
@@ -306,11 +306,11 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 
           {/* Локальный трекинг: «вы останавливались на серии N» — до включения серии */}
           {localProgress && localProgress.episode !== null && playback.currentEpisode === null && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/40 bg-sky-400/40 p-2.5 text-sm">
-              <Play className="h-4 w-4 shrink-0 text-sky-300" aria-hidden />
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-gold-400/40 bg-gold-400/40 p-2.5 text-sm">
+              <Play className="h-4 w-4 shrink-0 text-gold-300" aria-hidden />
               <span className="text-foreground">
                 Вы смотрели здесь: серия{' '}
-                <span className="font-semibold text-sky-300">{localProgress.episode}</span>
+                <span className="font-semibold text-gold-300">{localProgress.episode}</span>
                 {localProgress.episodesTotal !== null && (
                   <span className="text-muted-foreground"> из {localProgress.episodesTotal}</span>
                 )}
@@ -332,7 +332,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
           )}
 
           <p className="mt-3 text-sm text-muted-foreground">
-            Серия <span className="font-semibold text-sky-300">{currentEp ?? '—'}</span> из{' '}
+            Серия <span className="font-semibold text-gold-300">{currentEp ?? '—'}</span> из{' '}
             {maxEp > 0 ? maxEp : '—'} · Озвучка:{' '}
             <span className="text-foreground">{playback.currentDub ?? 'не выбрана'}</span>
           </p>
@@ -359,7 +359,7 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
                       className={cn(
                         'min-h-11 rounded-full border px-3 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                         active
-                          ? 'border-sky-400 bg-sky-400/40 text-sky-300 shadow-[0_0_14px_rgba(56, 189, 248,0.15)]'
+                          ? 'border-gold-400 bg-gold-400/40 text-gold-300 shadow-[0_0_14px_rgba(229, 188, 94,0.15)]'
                           : 'border-border bg-card/60 text-foreground hover:border-zinc-500',
                       )}
                     >
@@ -405,11 +405,31 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
 // --- франшиза / порядок просмотра -----------------------------------------------
 
 /**
- * Горизонтальная лента франшизы (viewing_order сайта): сезоны, фильмы, ONA —
- * с подписью связи («1 сезон», «после 141 серии», «адаптация манги»). Текущий
- * тайтл помечен и не кликается; клик по соседнему открывает его в этой же
- * вкладке (back-stack сохраняется — голос «назад» вернётся).
+ * ГОРИЗОНТАЛЬНЫЙ ТАЙМЛАЙН ФРАНШИЗЫ (ТЗ §20.5, референс владельца): золотая
+ * линия с круглыми светящимися узлами — каждый узел = произведение франшизы.
+ *
+ * Состояния узлов (§20.5):
+ *   текущий      — яркое мягкое свечение (constellation-node[data-state=current])
+ *   необязательный (OVA/ONA/спешл/recап) — менее яркий голубой узел
+ *   анонс (недоступен) — нейтральное обозначение
+ *   обычный      — заметный золотой контур
+ *
+ * Клик по соседнему открывает его в этой же вкладке (back-stack сохраняется —
+ * голос «назад» вернётся). Данные — viewing_order сайта, ничего не выдумываем.
  */
+
+/** Необязательные произведения по тексту связи/типа (без выдуманных классификаций) */
+const OPTIONAL_KIND_RE = /ova|ona|спешл|special|recap|рекап|дополнение/i
+
+type NodeState = 'current' | 'optional' | 'unavailable' | 'default'
+
+function franchiseNodeState(item: RelatedAnime): NodeState {
+  if (item.isCurrent) return 'current'
+  if (item.status === 'анонс') return 'unavailable'
+  if (OPTIONAL_KIND_RE.test(`${item.type ?? ''} ${item.relation ?? ''}`)) return 'optional'
+  return 'default'
+}
+
 function ViewingOrderRow({ items }: { items: RelatedAnime[] }) {
   const openRelated = (item: RelatedAnime) => {
     if (item.isCurrent) return
@@ -431,80 +451,94 @@ function ViewingOrderRow({ items }: { items: RelatedAnime[] }) {
   return (
     <section aria-label="Франшиза и порядок просмотра" className="mt-6">
       <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        <Layers className="h-4 w-4" aria-hidden />
+        <Layers className="h-4 w-4 text-gold-300" aria-hidden />
         Франшиза и порядок просмотра
         <span className="text-xs font-normal normal-case">· {items.length} тайтлов</span>
       </h3>
-      <div className="avc-scroll flex gap-3 overflow-x-auto pb-2">
-        {items.map((item) => (
-          <button
-            key={`${item.animeId}-${item.slug}`}
-            data-testid="franchise-card"
-            onClick={() => openRelated(item)}
-            disabled={item.isCurrent}
-            aria-label={
-              item.isCurrent
-                ? `Текущее аниме: ${item.title}`
-                : `Открыть: ${item.title}${item.relation ? ` (${item.relation})` : ''}`
-            }
-            aria-current={item.isCurrent ? 'true' : undefined}
-            className={cn(
-              'group w-28 shrink-0 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:w-32',
-              item.isCurrent
-                ? 'cursor-default'
-                : 'cursor-pointer transition-transform hover:-translate-y-0.5',
-            )}
-          >
-            <div
-              className={cn(
-                'relative aspect-[3/4] w-full overflow-hidden rounded-lg border',
-                item.isCurrent
-                  ? 'border-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.25)]'
-                  : 'border-border group-hover:border-sky-400/50',
-              )}
-            >
-              {item.poster ? (
-                <img
-                  src={item.poster}
-                  alt=""
-                  loading="lazy"
-                  className={cn(
-                    'h-full w-full object-cover transition-opacity',
-                    !item.isCurrent && 'group-hover:opacity-85',
-                    item.status === 'анонс' && 'opacity-80 saturate-50',
-                  )}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-card text-muted-foreground">
-                  <Film className="h-6 w-6" aria-hidden />
-                </div>
-              )}
-              <span
-                className="absolute left-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums"
-                aria-hidden
+      {/* Таймлайн-созвездие: непрерывная золотая линия за рядом узлов */}
+      <div className="relative">
+        <div
+          aria-hidden
+          className="constellation-track absolute inset-x-0 top-[5px] z-0"
+        />
+        <div className="avc-scroll relative z-10 flex gap-3 overflow-x-auto pb-2">
+          {items.map((item) => {
+            const nodeState = franchiseNodeState(item)
+            return (
+              <button
+                key={`${item.animeId}-${item.slug}`}
+                data-testid="franchise-card"
+                onClick={() => openRelated(item)}
+                disabled={item.isCurrent}
+                aria-label={
+                  item.isCurrent
+                    ? `Текущее аниме: ${item.title}`
+                    : `Открыть: ${item.title}${item.relation ? ` (${item.relation})` : ''}`
+                }
+                aria-current={item.isCurrent ? 'true' : undefined}
+                className={cn(
+                  'constellation-card group w-28 shrink-0 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:w-32',
+                  item.isCurrent
+                    ? 'cursor-default'
+                    : 'cursor-pointer',
+                )}
               >
-                №{item.order + 1}
-              </span>
-              {item.isCurrent && (
-                <span className="absolute right-1.5 top-1.5 rounded-md bg-sky-400 px-1.5 py-0.5 text-[10px] font-bold text-black">
-                  сейчас
-                </span>
-              )}
-              {item.status === 'анонс' && (
-                <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-amber-300">
-                  анонс
-                </span>
-              )}
-            </div>
-            <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-snug text-foreground">
-              {item.title}
-            </p>
-            <p className="mt-0.5 line-clamp-1 text-[11px] text-sky-300/90">
-              {item.relation ?? item.type ?? ''}
-              {item.year !== null && item.relation ? ` · ${item.year}` : ''}
-            </p>
-          </button>
-        ))}
+                {/* Узел на золотой линии (по центру карточки) */}
+                <div className="flex h-3 justify-center" aria-hidden>
+                  <span className="constellation-node" data-state={nodeState} />
+                </div>
+                <div
+                  className={cn(
+                    'relative aspect-[3/4] w-full overflow-hidden rounded-lg border',
+                    item.isCurrent
+                      ? 'border-gold-300 shadow-[0_0_14px_rgba(229,188,94,0.3)]'
+                      : 'border-border group-hover:border-gold-400/60',
+                  )}
+                >
+                  {item.poster ? (
+                    <img
+                      src={item.poster}
+                      alt=""
+                      loading="lazy"
+                      className={cn(
+                        'h-full w-full object-cover transition-opacity',
+                        !item.isCurrent && 'group-hover:opacity-85',
+                        item.status === 'анонс' && 'opacity-80 saturate-50',
+                      )}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-card text-muted-foreground">
+                      <Film className="h-6 w-6" aria-hidden />
+                    </div>
+                  )}
+                  <span
+                    className="absolute left-1.5 top-1.5 rounded-md border border-gold-300/30 bg-night-950/85 px-1.5 py-0.5 text-[10px] font-bold text-gold-200 tabular-nums"
+                    aria-hidden
+                  >
+                    №{item.order + 1}
+                  </span>
+                  {item.isCurrent && (
+                    <span className="absolute right-1.5 top-1.5 rounded-md bg-gold-400 px-1.5 py-0.5 text-[10px] font-bold text-night-950 shadow-[0_0_10px_rgba(229,188,94,0.6)]">
+                      сейчас
+                    </span>
+                  )}
+                  {item.status === 'анонс' && (
+                    <span className="absolute bottom-1.5 right-1.5 rounded-md bg-night-950/85 px-1.5 py-0.5 text-[10px] text-night-300">
+                      анонс
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-snug text-foreground">
+                  {item.title}
+                </p>
+                <p className="mt-0.5 line-clamp-1 text-[11px] text-gold-300/90">
+                  {item.relation ?? item.type ?? ''}
+                  {item.year !== null && item.relation ? ` · ${item.year}` : ''}
+                </p>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </section>
   )
@@ -545,7 +579,7 @@ function AccountActionBar({
           size="sm"
           onClick={onOpenSite}
           aria-label="Открыть страницу тайтла на сайте"
-          className="min-h-9 gap-1.5 px-2 text-xs text-muted-foreground hover:text-sky-300"
+          className="min-h-9 gap-1.5 px-2 text-xs text-muted-foreground hover:text-gold-300"
         >
           <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           На сайте
@@ -570,8 +604,8 @@ function AccountActionBar({
               className={cn(
                 'min-h-9 border-border px-2.5 text-xs',
                 active
-                  ? 'border-sky-400/70 bg-sky-400/15 text-sky-200'
-                  : 'bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-300',
+                  ? 'border-gold-400/70 bg-gold-400/15 text-gold-200'
+                  : 'bg-card/60 text-foreground hover:border-gold-400/40 hover:text-gold-300',
               )}
             >
               {active && <Check className="h-3.5 w-3.5" aria-hidden />}
@@ -620,7 +654,7 @@ function AccountActionBar({
       {/* Оценка 1..10 (шкала сайта): текущая оценка видна в селекте и залитой звезде */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Star
-          className={cn('h-4 w-4', rated ? 'fill-sky-300 text-sky-300' : 'text-sky-300')}
+          className={cn('h-4 w-4', rated ? 'fill-gold-300 text-gold-300' : 'text-gold-300')}
           aria-hidden
         />
         <Select
@@ -636,7 +670,7 @@ function AccountActionBar({
             aria-label={rated ? `Моя оценка ${own?.rating} из 10 — изменить` : 'Поставить оценку от 1 до 10'}
             className={cn(
               'h-9 w-44 border-border bg-card/60 text-xs',
-              rated ? 'border-sky-400/70 text-sky-200' : 'text-foreground',
+              rated ? 'border-gold-400/70 text-gold-200' : 'text-foreground',
             )}
           >
             <SelectValue placeholder={rated ? `Моя оценка: ${own?.rating} из 10` : 'Оценить (1–10)'} />
@@ -727,8 +761,8 @@ function EpisodeGrid({
             className={cn(
               'min-h-11 rounded-lg border text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               currentEp === n
-                ? 'border-sky-400 bg-sky-400/40 text-sky-300 shadow-[0_0_14px_rgba(56, 189, 248,0.2)]'
-                : 'border-border bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-200',
+                ? 'border-gold-400 bg-gold-400/40 text-gold-300 shadow-[0_0_14px_rgba(229, 188, 94,0.2)]'
+                : 'border-border bg-card/60 text-foreground hover:border-gold-400/40 hover:text-gold-200',
             )}
           >
             {n}

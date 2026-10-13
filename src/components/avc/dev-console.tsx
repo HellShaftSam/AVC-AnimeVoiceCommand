@@ -152,7 +152,7 @@ export function DevConsole({ open, onClose }: { open: boolean; onClose: () => vo
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl" aria-describedby="dev-console-desc">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span className="rounded bg-sky-950 px-2 py-0.5 text-xs text-sky-300">DEV</span>
+            <span className="rounded bg-night-900 px-2 py-0.5 text-xs text-gold-300">DEV</span>
             Панель разработчика
           </DialogTitle>
         </DialogHeader>

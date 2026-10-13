@@ -48,7 +48,7 @@ function statusDotClass(state: string): string {
     case 'loggedIn':
       return 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
     case 'checking':
-      return 'bg-sky-400 animate-pulse'
+      return 'bg-gold-400 animate-pulse'
     case 'sessionExpired':
       return 'bg-rose-400'
     case 'unavailable':
@@ -189,11 +189,18 @@ export function HeaderBar() {
   const loggedIn = account.state === 'loggedIn' && user !== null
 
   return (
-    <header className="glass flex items-center justify-between gap-3 border-b border-cyan-200/10 px-3 py-2 sm:px-4">
-      <h1 className="avc-title-glow flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg">
-        <Mic className="h-5 w-5 shrink-0 text-sky-400" aria-hidden />
+    <header className="glass relative flex items-center justify-between gap-3 border-b border-gold-300/15 px-3 py-2 sm:px-4">
+      <h1 className="avc-title-glow flex min-w-0 items-center gap-2.5 text-base font-bold sm:text-lg">
+        {/* Звёздный узел-логотип: золотое кольцо с орбитой (референс — светящиеся круглые узлы) */}
+        <span
+          aria-hidden
+          className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gold-400/70 bg-night-900/80 shadow-[0_0_14px_rgba(229,188,94,0.35)]"
+        >
+          <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-gold-200 shadow-[0_0_6px_rgba(242,221,164,0.9)]" />
+          <Mic className="h-4 w-4 text-gold-300" />
+        </span>
         <span className="truncate">
-          Anime <span className="text-sky-400">Voice</span> Controller
+          Anime <span className="text-gold-300">Voice</span> Controller
         </span>
       </h1>
       <nav className="flex items-center gap-1" aria-label="Панель инструментов">
@@ -216,7 +223,7 @@ export function HeaderBar() {
               <Button
                 variant="ghost"
                 aria-label={`Аккаунт YummyAnime: ${user.username ?? ''}`}
-                className="h-11 min-h-11 gap-1.5 px-2.5 text-foreground hover:text-sky-300"
+                className="h-11 min-h-11 gap-1.5 px-2.5 text-foreground hover:text-gold-300"
               >
                 <span className="relative shrink-0">
                   {user.avatarUrl ? (
@@ -226,7 +233,7 @@ export function HeaderBar() {
                       className="h-6 w-6 rounded-full border border-border object-cover"
                     />
                   ) : (
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-secondary text-xs font-bold text-sky-300">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-secondary text-xs font-bold text-gold-300">
                       {(user.username ?? '?').slice(0, 1).toUpperCase()}
                     </span>
                   )}
@@ -285,7 +292,7 @@ export function HeaderBar() {
             size="sm"
             aria-label="Войти через YummyAnime"
             className={cn(
-              'min-h-11 gap-1.5 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300',
+              'min-h-11 gap-1.5 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300',
               account.state === 'sessionExpired' && 'border-rose-400/40 text-rose-300',
             )}
             onClick={() => setAuthOpen(true)}
@@ -307,7 +314,7 @@ export function HeaderBar() {
             size="icon"
             aria-label="Отладочная панель"
             title="Отладка"
-            className={cn('h-11 w-11', debugOpen && 'text-sky-400')}
+            className={cn('h-11 w-11', debugOpen && 'text-gold-400')}
             onClick={() => {
               if (isDevUnlocked()) setDevConsoleOpen(true)
               else setDevGateOpen(true)
@@ -321,7 +328,7 @@ export function HeaderBar() {
           size="icon"
           aria-label="Справка по командам"
           title="Справка"
-          className={cn('h-11 w-11', helpOpen && 'text-sky-400')}
+          className={cn('h-11 w-11', helpOpen && 'text-gold-400')}
           onClick={() => setHelpOpen(true)}
         >
           <CircleHelp className="h-5 w-5" />
@@ -331,7 +338,7 @@ export function HeaderBar() {
           size="icon"
           aria-label="Настройки"
           title="Настройки"
-          className={cn('h-11 w-11', settingsOpen && 'text-sky-400')}
+          className={cn('h-11 w-11', settingsOpen && 'text-gold-400')}
           onClick={() => setSettingsOpen(true)}
         >
           <Settings className="h-5 w-5" />
@@ -367,6 +374,9 @@ export function HeaderBar() {
 
       {/* Диалог обновления (только EXE-мост; state-машина §3.5) */}
       <UpdateDialog />
+
+      {/* Тонкая золотая линия под шапкой (референс — золотая горизонталь) */}
+      <div aria-hidden className="gold-hairline absolute inset-x-0 bottom-0 h-px" />
 
       {/* Панель разработчика: доступ только по секретному коду */}
       <DevGate open={devGateOpen} onClose={() => setDevGateOpen(false)} onUnlocked={() => {

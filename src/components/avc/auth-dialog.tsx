@@ -162,7 +162,7 @@ export function AuthDialog() {
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-sky-400" aria-hidden />
+            <KeyRound className="h-5 w-5 text-gold-400" aria-hidden />
             Вход через YummyAnime
           </DialogTitle>
           <DialogDescription>
@@ -192,7 +192,7 @@ export function AuthDialog() {
                 variant="outline"
                 disabled={anyBusy}
                 onClick={() => void verifyNow()}
-                className="min-h-11 gap-2 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+                className="min-h-11 gap-2 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
               >
                 {verifyBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -206,7 +206,7 @@ export function AuthDialog() {
             {loginBusy && (
               <p
                 role="status"
-                className="flex items-start gap-2 rounded-lg border border-sky-400/40 bg-sky-400/40 p-2.5 text-xs leading-relaxed text-sky-200"
+                className="flex items-start gap-2 rounded-lg border border-gold-400/40 bg-gold-400/40 p-2.5 text-xs leading-relaxed text-gold-200"
               >
                 <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
                 Открыто окно сайта — завершите вход там. Это окно закроется автоматически
@@ -286,7 +286,7 @@ export function AuthDialog() {
                 variant="outline"
                 disabled={webCheckBusy}
                 onClick={() => void checkWeb()}
-                className="min-h-11 gap-2 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+                className="min-h-11 gap-2 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
               >
                 {webCheckBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -299,7 +299,7 @@ export function AuthDialog() {
               <Button
                 variant="ghost"
                 onClick={openSite}
-                className="min-h-11 gap-2 text-muted-foreground hover:text-sky-300"
+                className="min-h-11 gap-2 text-muted-foreground hover:text-gold-300"
               >
                 <ExternalLink className="h-4 w-4" aria-hidden />
                 Войти в браузере (Telegram / VK / Shikimori)

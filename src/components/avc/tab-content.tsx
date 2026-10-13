@@ -63,7 +63,12 @@ function HomeView() {
   return (
     <div className="mx-auto max-w-4xl py-6">
       <div className="text-center">
-        <h2 className="bg-gradient-to-r from-sky-200 via-sky-400 to-rose-400 bg-clip-text text-2xl font-bold text-transparent md:text-4xl">
+        <div className="mb-4 flex items-center justify-center gap-3" aria-hidden>
+          <span className="gold-hairline h-px w-16 sm:w-28" />
+          <span className="h-1.5 w-1.5 rounded-full bg-gold-300 shadow-[0_0_10px_rgba(242,221,164,0.9)]" />
+          <span className="gold-hairline h-px w-16 sm:w-28" />
+        </div>
+        <h2 className="bg-gradient-to-r from-gold-200 via-gold-400 to-gold-200 bg-clip-text text-2xl font-bold text-transparent md:text-4xl">
           Скажите команду или нажмите микрофон
         </h2>
         <p className="mt-3 text-sm text-muted-foreground md:text-base">
@@ -75,7 +80,7 @@ function HomeView() {
             <button
               key={chip}
               onClick={() => void executeText(chip, 'text')}
-              className="min-h-11 rounded-full border border-border bg-card/60 px-4 text-sm text-foreground transition-all hover:border-sky-400/40 hover:text-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="min-h-11 rounded-full border border-border bg-card/60 px-4 text-sm text-foreground transition-all hover:border-gold-400/40 hover:text-gold-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               «{chip}»
             </button>
@@ -94,7 +99,7 @@ function HomeView() {
             key={title}
             className="rounded-xl border border-border bg-card/60 p-4 transition-colors hover:border-border"
           >
-            <div className="flex items-center gap-2 text-sky-400">
+            <div className="flex items-center gap-2 text-gold-400">
               <Icon className="h-5 w-5" aria-hidden />
               <span className="font-semibold text-foreground">{title}</span>
             </div>
@@ -108,7 +113,7 @@ function HomeView() {
           variant="outline"
           onClick={() => void runDiagnostics()}
           disabled={diagLoading}
-          className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+          className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
         >
           {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
           Диагностика сайта
@@ -203,7 +208,7 @@ function SectionPagination({
               'h-11 min-w-11 px-2 text-sm tabular-nums',
               p === page
                 ? 'font-bold'
-                : 'border-border bg-card/60 text-foreground hover:border-sky-400/40 hover:text-sky-300',
+                : 'border-border bg-card/60 text-foreground hover:border-gold-400/40 hover:text-gold-300',
             )}
           >
             {p}
@@ -293,7 +298,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
         <h2 className="text-lg font-bold">{data?.title ?? tab.title}</h2>
         <div className="flex items-center gap-2">
           {data?.source === 'demo' && (
-            <Badge className="border border-sky-400/40 bg-sky-400/40 text-sky-300">
+            <Badge className="border border-gold-400/40 bg-gold-400/40 text-gold-300">
               Демо-данные (сайт недоступен)
             </Badge>
           )}
@@ -373,7 +378,7 @@ function SearchView({ tab }: { tab: BrowserTab }) {
   return (
     <div>
       <h2 className="mb-4 text-lg font-bold">
-        Результаты: <span className="text-sky-300">{query}</span>
+        Результаты: <span className="text-gold-300">{query}</span>
       </h2>
       {loading && <AnimeGridSkeleton />}
       {!loading && error && <p className="text-sm text-rose-400">✗ {error}</p>}

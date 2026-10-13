@@ -37,8 +37,8 @@ interface DiagResult {
 
 const STAGE_STYLES: Record<PipelineStep['stage'], string> = {
   RAW: 'border-border bg-zinc-700/40 text-foreground',
-  NORMALIZED: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
-  COMMAND: 'border-amber-500/40 bg-amber-500/15 text-sky-200',
+  NORMALIZED: 'border-gold-400/40 bg-gold-400/40 text-gold-300',
+  COMMAND: 'border-amber-500/40 bg-amber-500/15 text-gold-200',
   PARAMS: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
   CONFIDENCE: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   RESULT: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
@@ -48,7 +48,7 @@ const STAGE_STYLES: Record<PipelineStep['stage'], string> = {
 /** Цвет бейджа способа сопоставления резолвера озвучек */
 const VIA_STYLES: Record<VoiceProviderMatch['matchedVia'], string> = {
   exact: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  alias: 'border-sky-400/40 bg-sky-400/40 text-sky-300',
+  alias: 'border-gold-400/40 bg-gold-400/40 text-gold-300',
   translit: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
   fuzzy: 'border-border bg-accent/60 text-foreground',
 }
@@ -139,7 +139,7 @@ export function DebugPanel() {
               size="sm"
               onClick={() => void runDiagnostics()}
               disabled={diagLoading}
-              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+              className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
             >
               {diagLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -152,7 +152,7 @@ export function DebugPanel() {
               variant="outline"
               size="sm"
               onClick={() => setAuthDiagOpen(true)}
-              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+              className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
             >
               <Activity className="h-4 w-4" aria-hidden />
               Диагностика входа YummyAnime
@@ -161,7 +161,7 @@ export function DebugPanel() {
               variant="outline"
               size="sm"
               onClick={() => void copyDebug()}
-              className="min-h-11 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+              className="min-h-11 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
             >
               <Copy className="h-4 w-4" aria-hidden />
               Копировать отладку
@@ -191,7 +191,7 @@ export function DebugPanel() {
         {/* Резолвер озвучек */}
         <section aria-label="Резолвер озвучек">
           <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <FlaskConical className="h-3.5 w-3.5 text-sky-400" aria-hidden />
+            <FlaskConical className="h-3.5 w-3.5 text-gold-400" aria-hidden />
             Резолвер озвучек
           </h3>
           <div className="flex gap-1.5">
@@ -212,7 +212,7 @@ export function DebugPanel() {
               variant="outline"
               onClick={runResolver}
               disabled={!resolverInput.trim()}
-              className="min-h-11 shrink-0 border-border bg-card/60 hover:border-sky-400/40 hover:text-sky-300"
+              className="min-h-11 shrink-0 border-border bg-card/60 hover:border-gold-400/40 hover:text-gold-300"
             >
               Проверить
             </Button>

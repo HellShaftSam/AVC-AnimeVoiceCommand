@@ -232,7 +232,7 @@ export function UpdateDialog() {
       <DialogContent className="max-w-md border-border bg-card text-foreground">
         <DialogHeader className="p-0">
           <DialogTitle className="flex items-center gap-2 text-lg">
-            <RefreshCw className={cn('h-5 w-5 text-sky-400', busy && 'animate-spin')} aria-hidden />
+            <RefreshCw className={cn('h-5 w-5 text-gold-400', busy && 'animate-spin')} aria-hidden />
             {phaseTitle[phase]}
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
@@ -268,7 +268,7 @@ export function UpdateDialog() {
         {/* checking */}
         {phase === 'checking' && (
           <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-sky-400" aria-hidden />
+            <Loader2 className="h-4 w-4 animate-spin text-gold-400" aria-hidden />
             Сверяю версию приложения с опубликованным релизом…
           </div>
         )}
@@ -296,10 +296,10 @@ export function UpdateDialog() {
         {/* available: версия/имя/дата/размер/примечания */}
         {phase === 'available' && info && (
           <div className="space-y-3 py-1">
-            <div className="flex items-start gap-2 rounded-lg border border-sky-400/40 bg-sky-400/10 p-3 text-sm">
-              <Download className="mt-0.5 h-4 w-4 shrink-0 text-sky-300" aria-hidden />
+            <div className="flex items-start gap-2 rounded-lg border border-gold-400/40 bg-gold-400/10 p-3 text-sm">
+              <Download className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" aria-hidden />
               <div className="min-w-0">
-                <p className="text-sky-100">
+                <p className="text-gold-100">
                   Доступна версия <span className="font-bold tabular-nums">{info.latest}</span>
                   {info.releaseName ? ` — ${info.releaseName}` : ''}
                 </p>
@@ -344,7 +344,7 @@ export function UpdateDialog() {
           <div className="space-y-3 py-1" aria-live="polite">
             <Progress value={progress.percent ?? 0} className="h-2.5" />
             <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-muted-foreground">
-              <span className="font-bold tabular-nums text-sky-300">
+              <span className="font-bold tabular-nums text-gold-300">
                 {progress.percent != null ? `${Math.floor(progress.percent)}%` : 'скачивание…'}
               </span>
               <span className="tabular-nums">
@@ -379,7 +379,7 @@ export function UpdateDialog() {
         {phase === 'preparing' && (
           <div className="space-y-2 py-1" aria-live="polite">
             <div className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin text-sky-400" aria-hidden />
+              <Loader2 className="h-4 w-4 animate-spin text-gold-400" aria-hidden />
               Готовлю замену EXE и перезапуск…
             </div>
             {shaVerified != null && (
@@ -402,8 +402,8 @@ export function UpdateDialog() {
         {/* restarting */}
         {phase === 'restarting' && (
           <div className="space-y-2 py-1" aria-live="polite">
-            <div className="flex items-center justify-center gap-2 py-3 text-sm text-sky-200">
-              <Loader2 className="h-4 w-4 animate-spin text-sky-400" aria-hidden />
+            <div className="flex items-center justify-center gap-2 py-3 text-sm text-gold-200">
+              <Loader2 className="h-4 w-4 animate-spin text-gold-400" aria-hidden />
               Приложение закроется и запустится заново автоматически.
             </div>
             <p className="text-center text-xs text-muted-foreground">
