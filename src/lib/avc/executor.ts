@@ -466,6 +466,21 @@ export async function openAnimeCard(card: AnimeCard, newTab = true): Promise<Com
   return navigateToAnime(card, newTab)
 }
 
+/**
+ * Открыть вкладку рекомендаций (кнопка/голос). Отдельный kind — секции сайта не касается.
+ * Уже открытая вкладка рекомендаций активируется повторно (без дублей подряд).
+ */
+export function openRecommendations(): CommandResult {
+  const st = useAvcStore.getState()
+  const active = st.tabs.find((t) => t.id === st.activeTabId)
+  if (active && active.kind === 'recommendations') {
+    st.bumpReload(active.id) // повторный запрос = перезагрузка с refresh
+    return ok('Рекомендации уже открыты — обновляю')
+  }
+  st.addTab({ kind: 'recommendations', title: 'Рекомендации', payload: {} })
+  return ok('Открываю рекомендации')
+}
+
 function openSectionTab(sectionId: SiteSectionId): CommandResult {
   const st = useAvcStore.getState()
   if (sectionId === 'home') {
@@ -764,6 +779,10 @@ async function runAccountAction(
         .catch(() => {})
     }
     if (res.ok) {
+      // Профиль аккаунта изменился (оценка/статус/избранное подтверждены сайтом) —
+      // вкладка рекомендаций честно пересчитается (ТЗ §10: обновление от реальных
+      // действий, без поллинга и без ручного сброса)
+      useAvcStore.getState().bumpRecsVersion()
       if (res.verification === 'pass') return ok(`${successPrefix} — подтверждено сайтом`)
       // HTTP принят; верификация unconfirmed/mismatch — честное сообщение сайта
       return ok(res.message)
@@ -1338,6 +1357,8 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
       const section = reverse[cmd.type]
       return section ? openSectionTab(section) : fail('Неизвестная секция')
     }
+    case VoiceCommandType.OpenRecommendations:
+      return openRecommendations()
     case VoiceCommandType.OpenRandom:
       return executeOpenRandom()
     case VoiceCommandType.SearchAnime:

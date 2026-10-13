@@ -199,8 +199,11 @@ function checkPendingUpdate() {
   // §3.2  Источник истины: GitHub releases/latest (опубликованный, не draft/pre).
   // §3.3  Версии сравниваются ВСЕГДА ДО скачивания, причём ДВАЖДЫ: в check и
   //       повторно в install (рендерер не может заставить установить равную/старую).
-  // §3.9  Целостность: SHA-256 по SHA256SUMS.txt из релиза; не совпало — файл
-  //       удаляется, установленная версия не трогается.
+  // §3.9  Целостность: SHA-256 из ПОЛЯ digest ассета GitHub API (assets[].digest =
+  //       "sha256:…", GitHub считает его сам при загрузке ассета) — отдельный
+  //       SHA-файл БОЛЬШЕ НЕ НУЖЕН: в релизе лежит только portable EXE.
+  //       Нет digest (старый кэш API) — sanity-проверки: размер ≥ 10 МБ + PE-заголовок "MZ".
+  //       Не совпало — файл удаляется, установленная версия не трогается.
   // §3.10 Двухфазная подмена: приложение завершается ШТАТНО (before-quit снимает
   //       своих детей), а cmd-скрипт (detached) только ЖДЁТ исчезновения PID,
   //       подменяет EXE (move; fallback: ren старого → move нового), стартует новый.
@@ -305,7 +308,11 @@ function checkPendingUpdate() {
       const latest = String(body.tag_name || '')
       const assets = Array.isArray(body.assets) ? body.assets : []
       const asset = assets.find((a) => /\.exe$/i.test(a.name)) || null
-      const shaAsset = assets.find((a) => /^SHA256SUMS\.txt$/i.test(a.name)) || null
+      // Целостность: GitHub API сам возвращает SHA-256 ассета (assets[].digest =
+      // "sha256:hex"). Парсим защитно: поле недокументировано на 100% и может отсутствовать.
+      const rawDigest = asset && typeof asset.digest === 'string' ? asset.digest : null
+      const digestMatch = rawDigest ? rawDigest.trim().match(/^sha256:([a-fA-F0-9]{64})$/i) : null
+      const assetDigest = digestMatch ? digestMatch[1].toLowerCase() : null
       const cmp = compareVersions(latest, current)
       const relation = cmp === null ? 'unknown' : cmp > 0 ? 'newer' : cmp < 0 ? 'older' : 'up-to-date'
       return {
@@ -320,7 +327,7 @@ function checkPendingUpdate() {
         assetUrl: asset ? asset.browser_download_url : null,
         assetName: asset ? asset.name : null,
         assetSizeBytes: asset ? asset.size : null,
-        shaUrl: shaAsset ? shaAsset.browser_download_url : null,
+        assetDigest,
         releasesUrl,
         lastUpdateResult: pendingUpdateResult,
       }
@@ -1177,35 +1184,55 @@ function setupAiIpc() {
         })
       })
 
-      // 2. Целостность: SHA-256 из SHA256SUMS.txt релиза (если релиз его публикует)
+      // 2. Целостность БЕЗ отдельного SHA-файла (в релизе только portable EXE):
+      //    SHA-256 берём из поля digest ассета GitHub API (считает сам GitHub при
+      //    загрузке); digest недоступен → sanity-проверки (размер ≥ 10 МБ + PE "MZ").
       send({ phase: 'verifying' })
       let shaVerified = false
       let shaWarning = null
-      if (info.shaUrl) {
-        const sumsPath = path.join(tmpDir, 'SHA256SUMS.txt')
-        try { fs.rmSync(sumsPath, { force: true }) } catch { /* ок */ }
-        await httpsDownloadFile(info.shaUrl, sumsPath, null)
-        const sums = fs.readFileSync(sumsPath, 'utf8')
-        const line = sums
-          .split(/\r?\n/)
-          .map((l) => l.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/))
-          .find((m) => m && m[2].trim().toLowerCase() === String(info.assetName || '').toLowerCase())
-        if (!line) {
-          shaWarning = 'В SHA256SUMS.txt нет записи для файла обновления'
-        } else {
-          const expected = line[1].toLowerCase()
-          const actual = (await sha256File(newPath)).toLowerCase()
-          if (actual !== expected) {
+      if (info.assetDigest) {
+        const actual = (await sha256File(newPath)).toLowerCase()
+        if (actual !== info.assetDigest) {
+          fs.rmSync(newPath, { force: true })
+          return {
+            ok: false,
+            error: `Проверка целостности не пройдена (SHA-256 не совпал). Файл удалён, установленная версия не тронута — повторите обновление позже.`,
+          }
+        }
+        shaVerified = true
+      } else {
+        // Fallback-проверки (API не отдал digest): размер и PE-заголовок
+        const stat = fs.statSync(newPath)
+        const minBytes = 10 * 1024 * 1024
+        if (info.assetSizeBytes && Math.abs(stat.size - info.assetSizeBytes) > 1024) {
+          fs.rmSync(newPath, { force: true })
+          return {
+            ok: false,
+            error: `Размер скачанного файла не совпадает с релизом (${stat.size} ≠ ${info.assetSizeBytes}). Файл удалён, версия не тронута.`,
+          }
+        }
+        if (stat.size < minBytes) {
+          fs.rmSync(newPath, { force: true })
+          return {
+            ok: false,
+            error: `Файл обновления подозрительно мал (${Math.round(stat.size / 1048576)} МБ). Файл удалён, версия не тронута.`,
+          }
+        }
+        const fd = fs.openSync(newPath, 'r')
+        try {
+          const head = Buffer.alloc(2)
+          fs.readSync(fd, head, 0, 2, 0)
+          if (head.toString('ascii') !== 'MZ') {
             fs.rmSync(newPath, { force: true })
             return {
               ok: false,
-              error: `Проверка целостности не пройдена (SHA-256 не совпал). Файл удалён, установленная версия не тронута — повторите обновление позже.`,
+              error: 'Файл обновления не похож на Windows EXE (нет PE-заголовка). Файл удалён, версия не тронута.',
             }
           }
-          shaVerified = true
+        } finally {
+          fs.closeSync(fd)
         }
-      } else {
-        shaWarning = 'Релиз не содержит SHA256SUMS.txt — проверка целостности недоступна'
+        shaWarning = 'GitHub API не отдал SHA-256 ассета — проверены размер и PE-заголовок'
       }
 
       // 3. Маркер результата (сверится при следующем старте — §3.12)

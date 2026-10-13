@@ -27,6 +27,8 @@ const SECTION_WORDS: Record<string, VoiceCommandType> = {
   'онгоинг': VoiceCommandType.OpenOngoing,
   'анонс': VoiceCommandType.OpenAnnouncements,
   'расписан': VoiceCommandType.OpenSchedule,
+  'рекомендац': VoiceCommandType.OpenRecommendations,
+  'совет': VoiceCommandType.OpenRecommendations,
   'случайн': VoiceCommandType.OpenRandom,
   'рандом': VoiceCommandType.OpenRandom,
 }
@@ -80,6 +82,7 @@ export const LABELS: Record<VoiceCommandType, string> = {
   [VoiceCommandType.OpenOngoing]: 'Открыть онгоинги',
   [VoiceCommandType.OpenAnnouncements]: 'Открыть анонсы',
   [VoiceCommandType.OpenSchedule]: 'Открыть расписание',
+  [VoiceCommandType.OpenRecommendations]: 'Открыть рекомендации',
   [VoiceCommandType.OpenRandom]: 'Случайное аниме',
   [VoiceCommandType.SearchAnime]: 'Поиск аниме',
   [VoiceCommandType.OpenAnime]: 'Открыть аниме',
@@ -125,6 +128,11 @@ export const LABELS: Record<VoiceCommandType, string> = {
   [VoiceCommandType.CheckAccount]: 'Проверить аккаунт',
   [VoiceCommandType.AccountLogout]: 'Выйти из аккаунта',
   [VoiceCommandType.AddVoiceAlias]: 'Добавить алиас озвучки',
+  [VoiceCommandType.RemoveWatchStatus]: 'Убрать из списка',
+  [VoiceCommandType.SkipSegment]: 'Пропустить сегмент',
+  [VoiceCommandType.UndoSkip]: 'Вернуть пропущенное',
+  [VoiceCommandType.SetAutoSkip]: 'Автопропуск',
+  [VoiceCommandType.MarkSegment]: 'Запомнить таймкод',
   [VoiceCommandType.Unknown]: 'Не распознано',
 }
 
@@ -961,6 +969,9 @@ export function parserSelfTest(): Array<{ input: string; expect: string }> {
     { input: 'открой случайное', expect: 'OpenRandom' },
     { input: 'расписание', expect: 'OpenSchedule' },
     { input: 'анонсы', expect: 'OpenAnnouncements' },
+    { input: 'открой рекомендации', expect: 'OpenRecommendations' },
+    { input: 'покажи рекомендации', expect: 'OpenRecommendations' },
+    { input: 'что посоветуешь', expect: 'OpenRecommendations' },
     // --- Task 8-b ---
     { input: 'переключи на анилибрию', expect: 'SelectVoice(анилибрию)' },
     { input: 'включи озвучку дрим каст', expect: 'SelectVoice(дрим каст)' },

@@ -19,6 +19,8 @@ export enum VoiceCommandType {
   OpenAnnouncements = 'OpenAnnouncements',
   OpenSchedule = 'OpenSchedule',
   OpenRandom = 'OpenRandom',
+  /** «открой рекомендации» — вкладка персональных рекомендаций */
+  OpenRecommendations = 'OpenRecommendations',
   SearchAnime = 'SearchAnime',
   OpenAnime = 'OpenAnime',
   SelectEpisode = 'SelectEpisode',
@@ -507,6 +509,15 @@ export interface AppSettings {
   // --- Локальный AI-слой (спецификация §4–§134; работает только в EXE) --------
   /** Профиль производительности STT (§19); LLM/TTS удалены из релиза по решению владельца */
   aiProfile: AiProfile
+  // --- Рекомендации (персональная вкладка; пороги/поведение движка) -----------
+  /** Порог своей оценки: ниже — тайтл жёстко исключён (по умолчанию 5 из 10) */
+  recRatingThreshold: number
+  /** Исключать из выдачи уже известные тайтлы (любой список/история) */
+  recExcludeKnown: boolean
+  /** MMR-разнообразие против «двадцати одинаковых шоу» */
+  recDiversity: boolean
+  /** Внешние кандидаты AniList (экспериментально; по умолчанию выключено) */
+  recAnilist: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -546,6 +557,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipAutoDelaySec: 3,
   skipFallbackSec: 85,
   aiProfile: 'max_responsiveness',
+  recRatingThreshold: 5,
+  recExcludeKnown: true,
+  recDiversity: true,
+  recAnilist: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -616,7 +631,7 @@ export interface YummyAnimeActionResponse {
 // Вкладки (Browser layer)
 // ---------------------------------------------------------------------------
 
-export type TabKind = 'home' | 'section' | 'search' | 'anime' | 'help'
+export type TabKind = 'home' | 'section' | 'search' | 'anime' | 'help' | 'recommendations'
 
 export interface BrowserTab {
   id: string

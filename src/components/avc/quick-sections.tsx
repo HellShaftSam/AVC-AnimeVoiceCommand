@@ -7,6 +7,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   CalendarClock,
   CalendarDays,
+  Compass,
   Dices,
   Home,
   Library,
@@ -34,6 +35,36 @@ const SECTIONS: SectionDef[] = [
   { id: 'random', label: 'Случайное', icon: Dices },
 ]
 
+/** Отдельная кнопка рекомендаций — это вкладка (kind), а не секция сайта */
+function RecommendationsButton() {
+  const tabs = useAvcStore((s) => s.tabs)
+  const activeTabId = useAvcStore((s) => s.activeTabId)
+  const active = tabs.find((t) => t.id === activeTabId) ?? null
+  const activeBtn = active?.kind === 'recommendations'
+  return (
+    <button
+      onClick={() => void executeOpenRecommendations()}
+      aria-label="Открыть: Рекомендации"
+      aria-current={activeBtn ? 'page' : undefined}
+      className={cn(
+        'flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        activeBtn
+          ? 'border-sky-400/40 bg-sky-400/40 text-sky-300 shadow-[0_0_18px_rgba(56, 189, 248,0.15)]'
+          : 'border-border bg-card/60 text-foreground hover:border-border hover:text-foreground',
+      )}
+    >
+      <Compass className="h-5 w-5" aria-hidden />
+      Рекомендации
+    </button>
+  )
+}
+
+/** Открыть вкладку рекомендаций (используется и кнопкой, и голосом через executor) */
+async function executeOpenRecommendations(): Promise<unknown> {
+  const { openRecommendations } = await import('@/lib/avc/executor')
+  return openRecommendations()
+}
+
 export function QuickSections() {
   const tabs = useAvcStore((s) => s.tabs)
   const activeTabId = useAvcStore((s) => s.activeTabId)
@@ -48,6 +79,7 @@ export function QuickSections() {
   return (
     <div className="avc-scroll glass overflow-x-auto border-b border-cyan-200/10 px-3 py-2 sm:px-4">
       <div className="flex gap-2">
+        <RecommendationsButton />
         {SECTIONS.map(({ id, label, icon: Icon }) => {
           const activeBtn = isActive(id)
           return (

@@ -6,8 +6,8 @@
  *   T1-T5: compareVersions/parseVersion — юнит (копия логики main.cjs §3.3)
  *   T6:    releases/latest отвечает, структура корректна (tag_name, assets)
  *   T7:    EXE-ассет найден по правилу апдейтера (/\.exe$/i)
- *   T8:    SHA256SUMS.txt найден, скачивается, парсится правилом апдейтера,
- *          запись для EXE есть и валидна (64 hex)
+ *   T8:    целостность БЕЗ SHA-файла: assets[].digest = "sha256:<64hex>" от GitHub;
+ *          юнит-проверки парсера digest и sanity-правила (размер/PE "MZ")
  *   T9:    «доступно обновление» для заведомо старой версии = true, для новой = false
  *
  * Запуск: node tools/update-selftest.cjs
@@ -40,12 +40,37 @@ const compareVersions = (a, b) => {
   return 0
 }
 
-// --- T1..T5: версии ------------------------------------------------------------
+// Копия логики main.cjs §3.9: парсинг digest ассета
+const parseAssetDigest = (raw) => {
+  if (typeof raw !== 'string') return null
+  const m = raw.trim().match(/^sha256:([a-fA-F0-9]{64})$/i)
+  return m ? m[1].toLowerCase() : null
+}
+
+// Копия sanity-правил main.cjs (fallback без digest)
+const isPlausibleExe = (sizeBytes, head) =>
+  sizeBytes >= 10 * 1024 * 1024 && head.slice(0, 2).toString('ascii') === 'MZ'
+
+// --- T1..T5: версии + юнит правил целостности -----------------------------------
 t('T1', 'равные версии = up-to-date', compareVersions('v1.0.28', '1.0.28') === 0)
 t('T2', 'новее (патч)', compareVersions('v1.0.29', '1.0.28') === 1)
 t('T3', 'новее (минор, 1.10 > 1.9)', compareVersions('v1.10.0', 'v1.9.0') === 1)
 t('T4', 'старее', compareVersions('v1.0.27', '1.0.28') === -1)
 t('T5', 'мусор = null (не качаем)', compareVersions('garbage', '1.0.28') === null)
+t(
+  'T5b',
+  'digest парсится: "sha256:<64hex>" → hex, мусор → null',
+  parseAssetDigest('sha256:7825005f2b63ebc91fc36ce26f5cfbed2481a1d44d0ab7d6f932a5fa57e533eb') === '7825005f2b63ebc91fc36ce26f5cfbed2481a1d44d0ab7d6f932a5fa57e533eb' &&
+    parseAssetDigest('sha256:xyz') === null &&
+    parseAssetDigest('md5:7825005f2b63ebc91fc36ce26f5cfbed2481a1d44d0ab7d6f932a5fa57e533eb') === null,
+)
+t(
+  'T5c',
+  'sanity EXE: ≥10 МБ + "MZ" проходит, без MZ/малый — нет',
+  isPlausibleExe(20 * 1024 * 1024, Buffer.from('MZ\x90\x00', 'ascii')) &&
+    !isPlausibleExe(20 * 1024 * 1024, Buffer.from('NO', 'ascii')) &&
+    !isPlausibleExe(1024, Buffer.from('MZ', 'ascii')),
+)
 
 // --- https helper ---------------------------------------------------------------
 function httpsGet(url, redirects = 0) {
@@ -80,30 +105,21 @@ async function main() {
     const latest = String(rel.tag_name || '')
     const assets = Array.isArray(rel.assets) ? rel.assets : []
     const exe = assets.find((a) => /\.exe$/i.test(a.name)) || null
-    const sha = assets.find((a) => /^SHA256SUMS\.txt$/i.test(a.name)) || null
-    info = { latest, exe, sha }
+    info = { latest, exe }
     t(
       'T7',
       'EXE-ассет найден и имеет browser_download_url',
       !!exe && typeof exe.browser_download_url === 'string' && exe.size > 1_000_000,
       `${exe ? `${exe.name} (${Math.round(exe.size / 1048576)} МБ)` : 'нет'}`,
     )
-    t('T8a', 'SHA256SUMS.txt в релизе', !!sha, sha ? sha.name : 'нет')
-    if (sha) {
-      const sums = await httpsGet(sha.browser_download_url)
-      const text = sums.body.toString('utf8')
-      // Правило апдейтера main.cjs (§ install, шаг 2)
-      const line = text
-        .split(/\r?\n/)
-        .map((l) => l.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/))
-        .find((m) => m && m[2].trim().toLowerCase() === String(exe ? exe.name : '').toLowerCase())
-      t(
-        'T8b',
-        'запись SHA для EXE парсится правилом апдейтера',
-        !!line,
-        line ? `sha=${line[1].slice(0, 12)}… file=${line[2]}` : text.slice(0, 120),
-      )
-    }
+    // Целостность БЕЗ SHA-файла: GitHub API возвращает digest ассета сам
+    const digest = parseAssetDigest(exe ? exe.digest : null)
+    t(
+      'T8',
+      'digest ассета от GitHub API валиден (sha256:64hex)',
+      !!digest,
+      digest ? `sha256:${digest.slice(0, 12)}…` : `digest=${exe ? JSON.stringify(exe.digest) : 'нет ассета'}`,
+    )
     const relOlder = compareVersions(latest, '1.0.1')
     const relNewer = compareVersions(latest, '99.0.0')
     t(

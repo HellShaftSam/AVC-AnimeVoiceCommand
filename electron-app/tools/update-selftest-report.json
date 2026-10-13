@@ -1,0 +1,74 @@
+{
+  "ranAt": "2026-10-13T10:11:13.907Z",
+  "repo": "HellShaftSam/AVC-AnimeVoiceCommand",
+  "pass": 11,
+  "fail": 0,
+  "results": [
+    {
+      "id": "T1",
+      "name": "равные версии = up-to-date",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T2",
+      "name": "новее (патч)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T3",
+      "name": "новее (минор, 1.10 > 1.9)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T4",
+      "name": "старее",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T5",
+      "name": "мусор = null (не качаем)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T5b",
+      "name": "digest парсится: \"sha256:<64hex>\" → hex, мусор → null",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T5c",
+      "name": "sanity EXE: ≥10 МБ + \"MZ\" проходит, без MZ/малый — нет",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T6",
+      "name": "releases/latest доступен",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "T7",
+      "name": "EXE-ассет найден и имеет browser_download_url",
+      "ok": true,
+      "detail": "AVC-Anime-Portable-1.0.30.exe (174 МБ)"
+    },
+    {
+      "id": "T8",
+      "name": "digest ассета от GitHub API валиден (sha256:64hex)",
+      "ok": true,
+      "detail": "sha256:7825005f2b63…"
+    },
+    {
+      "id": "T9",
+      "name": "доступность обновления считается верно",
+      "ok": true,
+      "detail": "latest=v1.0.30: vs 1.0.1 → 1, vs 99.0.0 → -1"
+    }
+  ]
+}

@@ -71,6 +71,12 @@ export interface AvcState {
   tabBackStack: Record<string, BackStackEntry[]>
   /** Инкрементится после записи в историю — HistoryPanel перезагружается */
   historyVersion: number
+  /**
+   * Инкрементится после ПОДТВЕРЖДЁННОГО изменения данных аккаунта (оценка/статус/
+   * избранное) — вкладка рекомендаций честно перечитывает профиль (ТЗ §10:
+   * пересчёт от реальных действий, без ручного сброса и без поллинга).
+   */
+  recsVersion: number
 
   /**
    * Своё состояние тайтла (список/избранное/оценка), прочитанное с сайта.
@@ -146,6 +152,7 @@ export interface AvcState {
   pushBackStack: (tabId: string, payload: BackStackEntry) => void
   popBackStack: (tabId: string) => BackStackEntry | null
   bumpHistoryVersion: () => void
+  bumpRecsVersion: () => void
 }
 
 // --- служебное ---------------------------------------------------------------
@@ -218,6 +225,7 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   tabReloadCounter: {},
   tabBackStack: {},
   historyVersion: 0,
+  recsVersion: 0,
   ownAnimeState: null,
   skipSegments: [],
   skipMarksVersion: 0,
@@ -387,6 +395,8 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   },
 
   bumpHistoryVersion: () => set((s) => ({ historyVersion: s.historyVersion + 1 })),
+
+  bumpRecsVersion: () => set((s) => ({ recsVersion: s.recsVersion + 1 })),
 }))
 
 /** Типизированный доступ к действию pushBackStack (payload-снимок вкладки) */

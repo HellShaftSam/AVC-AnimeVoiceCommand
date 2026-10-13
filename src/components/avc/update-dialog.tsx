@@ -3,7 +3,8 @@
  * UpdateDialog — ПОЛНАЯ state-машина обновления приложения (§3.5, §10).
  *
  * Проверка   → current/latest  → доступно?  → скачивание (%, МБ, скорость, ETA)
- *   → верификация SHA-256 → подготовка → перезапуск → итог после старта (§3.12).
+ *   → верификация SHA-256 (поле digest ассета GitHub API — без отдельного файла) →
+ *     подготовка → перезапуск → итог после старта (§3.12).
  *
  * Никогда не скачивает при current == latest: сравнение версий выполняется
  * В MAIN-ПРОЦЕССЕ дважды (check и install) — рендерер только отображает.
@@ -134,7 +135,7 @@ export function UpdateDialog() {
     }
   }, [])
 
-  /** Установка: main сам скачивает → проверяет SHA → готовит → перезапускает */
+  /** Установка: main сам скачивает → проверяет digest → готовит → перезапускает */
   const startInstall = useCallback(async () => {
     const bridge = getElectronBridge()
     if (!bridge?.installUpdate || busyRef.current) return
@@ -370,7 +371,7 @@ export function UpdateDialog() {
         {phase === 'verifying' && (
           <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
             <ShieldCheck className="h-4 w-4 animate-pulse text-emerald-400" aria-hidden />
-            Сверяю SHA-256 скачанного файла с манифестом релиза…
+            Сверяю SHA-256 скачанного файла с данными релиза (GitHub API)…
           </div>
         )}
 
@@ -391,8 +392,8 @@ export function UpdateDialog() {
                 )}
               >
                 {shaVerified
-                  ? 'Целостность подтверждена: SHA-256 совпал с манифестом релиза.'
-                  : 'Контрольная сумма недоступна в этом релизе — установка продолжена без неё.'}
+                  ? 'Целостность подтверждена: SHA-256 совпал с данными релиза (GitHub API).'
+                  : 'SHA-256 недоступен — файл проверен по размеру и PE-заголовку, установка продолжена.'}
               </p>
             )}
           </div>

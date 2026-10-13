@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { AnimeGrid, AnimeGridSkeleton } from './anime-grid'
 import { AnimeView } from './anime-view'
 import { ScheduleView } from './schedule-view'
+import { RecommendationsView } from './recommendations-view'
 import { executeText } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
 import { AnimeCard, BrowserTab, SectionPage } from '@/lib/avc/types'
@@ -398,6 +399,8 @@ export function TabContent({ tab }: { tab: BrowserTab }) {
       return <SearchView tab={tab} />
     case 'anime':
       return <AnimeView tab={tab} />
+    case 'recommendations':
+      return <RecommendationsView />
     default:
       return <HomeView />
   }

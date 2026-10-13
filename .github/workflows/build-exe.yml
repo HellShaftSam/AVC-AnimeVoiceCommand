@@ -127,18 +127,8 @@ jobs:
           AVC_PYTHON: ${{ github.workspace }}/electron-app/dist/win-unpacked/resources/python-runtime/python.exe
         run: node scripts/ci-stt-selftest.mjs
 
-      # --- Контрольные суммы релиза: EXE-обновлятор сверяет SHA-256 перед установкой ---
-
-      - name: Generate SHA256SUMS.txt
-        working-directory: electron-app/dist
-        shell: pwsh
-        run: |
-          $lines = Get-ChildItem -Filter *.exe | ForEach-Object {
-            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
-            "$hash  $($_.Name)"
-          }
-          $lines | Out-File -FilePath SHA256SUMS.txt -Encoding ascii
-          Get-Content SHA256SUMS.txt
+      # --- Контрольные суммы НЕ публикуются: целостность сверяет обновлятор по ---
+      # --- полю digest ассета из GitHub API (GitHub сам считает SHA-256) ---------
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -146,7 +136,6 @@ jobs:
           name: AVC-Anime-Portable-1.0.${{ github.run_number }}
           path: |
             electron-app/dist/*.exe
-            electron-app/dist/SHA256SUMS.txt
           if-no-files-found: error
 
       # --- Публикация в Releases (всегда доступно по /releases/latest) ---
@@ -159,13 +148,15 @@ jobs:
           body: |
             **Portable Windows EXE (x64)** — автоматическая сборка из коммита ${{ github.sha }}.
 
-            **Файл:** `AVC-Anime-Portable-1.0.${{ github.run_number }}.exe` (см. Assets ниже)
-            **Целостность:** `SHA256SUMS.txt` — встроенный обновлятор сверяет SHA-256 перед установкой
+            **Файл:** `AVC-Anime-Portable-1.0.${{ github.run_number }}.exe` (см. Assets ниже — только portable EXE, ничего лишнего)
+            **Целостность:** встроенный обновлятор сверяет SHA-256 по данным GitHub API (assets.digest) — отдельный файл контрольных сумм не нужен
 
             - Не требует установки: один EXE, данные — в профиле пользователя
             - Встроенный Next.js UI (свой локальный сервер, интернет нужен для сайта)
             - Постоянная сессия YummyAnime: вход один раз — на реальном сайте
             - Библиотека аккаунта (Смотрю/В Планах/Просмотрено/…) читается с сайта
+            - Персональные рекомендации по вашей библиотеке/оценкам/избранному (объяснимый гибридный алгоритм)
+            - Франшизы (порядок просмотра), расписание онгоингов по дням, нумерованная пагинация вкладок
             - Голосовые команды (микрофон), история, алиасы — локально в SQLite
             - Пароли и cookie никогда не покидают профиль сайта
 
@@ -173,6 +164,5 @@ jobs:
             https://github.com/HellShaftSam/AVC-AnimeVoiceCommand/releases/latest
           files: |
             electron-app/dist/*.exe
-            electron-app/dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
           make_latest: true
