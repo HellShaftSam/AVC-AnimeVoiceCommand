@@ -1350,3 +1350,18 @@ Work Log:
 Stage Summary:
 - 4 фичи владельца реализованы и верифицированы на живом сайте: франшиза (viewing_order), расписание по дням с временем выхода серий, пагинация вкладок (435 страниц каталога), апдейтер (авто-check + бейдж + selftest 10/10 против живого GitHub)
 - Релиз v1.0.29 (CI run #29): AVC-Anime-Portable-1.0.29.exe + SHA256SUMS.txt; пользователь с v1.0.28 увидит бейдж при старте, кнопка «Обновить» → скачивание/SHA/подмена/перезапуск
+
+---
+Task ID: 14-hotfix
+Agent: Z.ai Code (main)
+Task: Хотфикс РЕФАКТОР-КРАША — авто-check обновления в boot() звал setupAiIpc-локальный fetchLatestReleaseInfo (ReferenceError через 4 с после старта)
+
+Work Log:
+- Поймано ПОСЛЕ пуша d17c5e2 (CI #29 собрал v1.0.29): fetchLatestReleaseInfo/httpsGetJson/compareVersions/parseVersion были локальными КОНСТАМИ внутри setupAiIpc(), а новый авто-check в boot() ссылался на них → ReferenceError в setTimeout → uncaughtException → reportFatal (фатальный диалог у пользователя). node --check такое НЕ ловит (синтаксис валиден).
+- Рефактор: ядро апдейтера (UPDATE_REPO, parseVersion, compareVersions, httpsGetJson, httpsDownloadFile, sha256File, fetchLatestReleaseInfo) поднято на уровень модуля (перед «Next.js сервер»); IPC avc:update:* остались в setupAiIpc и теперь ссылаются на модульные функции; python-перенос блока сначала потерял 1 закрывающую скобку (node --check снова пропустил) — поймано контрольшим acorn-скриптом: все ключевые функции обязаны быть в ast.body уровня Program (fetchLatestReleaseInfo, findFreePort, waitForServer, startNextServer, boot, setupAiIpc, createMainWindow, killProcessTree, setupAdShield, runSelftest) — 13/13 TOP-LEVEL OK.
+- ПОВРЕЖДЁННЫЙ РЕЛИЗ v1.0.29 УДАЛЁН (release id 411497708 + tag ref → HTTP 204) до того, как кнопка «Обновить» у пользователя могла бы его поставить.
+- Урок в скрипт-контроль: структурная проверка top-level областей acorn'ом — обязательный шаг после любых переносов блоков в main.cjs.
+
+Stage Summary:
+- main.cjs: апдейтер на уровне модуля; авто-check в boot() легитимно видит fetchLatestReleaseInfo
+- v1.0.29 отозван; следующий CI-рун соберёт v1.0.30 уже с фиксом

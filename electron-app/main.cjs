@@ -195,6 +195,140 @@ function checkPendingUpdate() {
 }
 
 
+  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ (портативное сам-обновление, двухфазная схема) ----
+  // §3.2  Источник истины: GitHub releases/latest (опубликованный, не draft/pre).
+  // §3.3  Версии сравниваются ВСЕГДА ДО скачивания, причём ДВАЖДЫ: в check и
+  //       повторно в install (рендерер не может заставить установить равную/старую).
+  // §3.9  Целостность: SHA-256 по SHA256SUMS.txt из релиза; не совпало — файл
+  //       удаляется, установленная версия не трогается.
+  // §3.10 Двухфазная подмена: приложение завершается ШТАТНО (before-quit снимает
+  //       своих детей), а cmd-скрипт (detached) только ЖДЁТ исчезновения PID,
+  //       подменяет EXE (move; fallback: ren старого → move нового), стартует новый.
+  //       НИКАКИХ taskkill изнутри дерева — прежний скрипт убивал сам себя
+  //       (cmd.exe был потомком mainPid при taskkill /T).
+  // §3.12 Маркер update-pending.json: пишется до перезапуска; при следующем старте
+  //       версия процесса сверяется с ожидаемой → честный итог в UI.
+  const UPDATE_REPO = 'HellShaftSam/AVC-AnimeVoiceCommand'
+
+  const httpsGetJson = (url, redirects = 0) =>
+    new Promise((resolve, reject) => {
+      if (redirects > 5) return reject(new Error('too many redirects'))
+      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater', Accept: 'application/vnd.github+json' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume()
+          return httpsGetJson(new URL(res.headers.location, url).toString(), redirects + 1).then(resolve, reject)
+        }
+        let raw = ''
+        res.on('data', (c) => (raw += c))
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(raw) }) } catch (e) { reject(e) }
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(15000, () => req.destroy(new Error('timeout')))
+    })
+
+  /** Формат версии проекта: 1.0.<run_number> (CI extraMetadata); теги v1.0.<N>. */
+  const parseVersion = (s) => {
+    const m = String(s || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)/i)
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+  }
+  /** Правильное числовое сравнение (1.10.0 > 1.9.0); null — формат не распознан */
+  const compareVersions = (a, b) => {
+    const va = parseVersion(a)
+    const vb = parseVersion(b)
+    if (!va || !vb) return null
+    for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return va[i] > vb[i] ? 1 : -1
+    return 0
+  }
+
+  const httpsDownloadFile = (url, destPath, onProgress, redirects = 0) =>
+    new Promise((resolve, reject) => {
+      if (redirects > 6) return reject(new Error('Слишком много перенаправлений'))
+      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume()
+          return httpsDownloadFile(new URL(res.headers.location, url).toString(), destPath, onProgress, redirects + 1).then(resolve, reject)
+        }
+        if (res.statusCode !== 200) {
+          res.resume()
+          return reject(new Error(`HTTP ${res.statusCode}`))
+        }
+        const total = Number(res.headers['content-length'] || 0)
+        let received = 0
+        let lastEmit = 0
+        const samples = [] // скользящее окно скорости (~2 с)
+        const file = fs.createWriteStream(destPath)
+        res.on('data', (chunk) => {
+          received += chunk.length
+          if (onProgress) {
+            const now = Date.now()
+            samples.push({ t: now, b: received })
+            while (samples.length > 2 && now - samples[0].t > 2000) samples.shift()
+            if (now - lastEmit > 250) {
+              lastEmit = now
+              const first = samples[0]
+              const speed = first && now > first.t ? (received - first.b) / ((now - first.t) / 1000) : 0
+              onProgress({ received, total, speed })
+            }
+          }
+        })
+        res.pipe(file)
+        file.on('finish', () => file.close(() => resolve({ received, total })))
+        file.on('error', (e) => reject(e))
+        res.on('error', (e) => {
+          try { file.close() } catch { /* ок */ }
+          reject(e)
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(60000, () => req.destroy(new Error('Таймаут скачивания обновления')))
+    })
+
+  const sha256File = (file) =>
+    new Promise((resolve, reject) => {
+      const hash = crypto.createHash('sha256')
+      const stream = fs.createReadStream(file)
+      stream.on('data', (c) => hash.update(c))
+      stream.on('error', reject)
+      stream.on('end', () => resolve(hash.digest('hex')))
+    })
+
+  /** releases/latest → нормализованная информация об обновлении (без скачивания) */
+  const fetchLatestReleaseInfo = async () => {
+    const current = app.getVersion()
+    const releasesUrl = `https://github.com/${UPDATE_REPO}/releases/latest`
+    try {
+      const { status, body } = await httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)
+      if (status === 404) return { current, latest: null, relation: 'unknown', available: false, error: 'На GitHub нет опубликованного релиза', releasesUrl, lastUpdateResult: pendingUpdateResult }
+      if (status !== 200) return { current, latest: null, relation: 'unknown', available: false, error: `GitHub API: HTTP ${status}`, releasesUrl, lastUpdateResult: pendingUpdateResult }
+      const latest = String(body.tag_name || '')
+      const assets = Array.isArray(body.assets) ? body.assets : []
+      const asset = assets.find((a) => /\.exe$/i.test(a.name)) || null
+      const shaAsset = assets.find((a) => /^SHA256SUMS\.txt$/i.test(a.name)) || null
+      const cmp = compareVersions(latest, current)
+      const relation = cmp === null ? 'unknown' : cmp > 0 ? 'newer' : cmp < 0 ? 'older' : 'up-to-date'
+      return {
+        current,
+        latest: latest || null,
+        releaseName: body.name || null,
+        releasedAt: body.published_at || null,
+        releaseNotes: typeof body.body === 'string' ? body.body.slice(0, 2000) : null,
+        relation,
+        // §3.3: доступно обновление ТОЛЬКО если latest строго новее и есть EXE
+        available: relation === 'newer' && !!asset,
+        assetUrl: asset ? asset.browser_download_url : null,
+        assetName: asset ? asset.name : null,
+        assetSizeBytes: asset ? asset.size : null,
+        shaUrl: shaAsset ? shaAsset.browser_download_url : null,
+        releasesUrl,
+        lastUpdateResult: pendingUpdateResult,
+      }
+    } catch (e) {
+      return { current, latest: null, relation: 'unknown', available: false, error: e.message, releasesUrl, lastUpdateResult: pendingUpdateResult }
+    }
+  }
+
 // --- Next.js сервер для packaged-сборки -----------------------------------------
 // (nextProcess объявлен вверху модуля — до регистрации обработчиков ошибок)
 
@@ -1003,141 +1137,6 @@ function setupAiIpc() {
     }
   })
 
-  /** Открыть папку с логами (диагностика «что происходит» без поддержки) */
-  // --- ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ (портативное сам-обновление, двухфазная схема) ----
-  // §3.2  Источник истины: GitHub releases/latest (опубликованный, не draft/pre).
-  // §3.3  Версии сравниваются ВСЕГДА ДО скачивания, причём ДВАЖДЫ: в check и
-  //       повторно в install (рендерер не может заставить установить равную/старую).
-  // §3.9  Целостность: SHA-256 по SHA256SUMS.txt из релиза; не совпало — файл
-  //       удаляется, установленная версия не трогается.
-  // §3.10 Двухфазная подмена: приложение завершается ШТАТНО (before-quit снимает
-  //       своих детей), а cmd-скрипт (detached) только ЖДЁТ исчезновения PID,
-  //       подменяет EXE (move; fallback: ren старого → move нового), стартует новый.
-  //       НИКАКИХ taskkill изнутри дерева — прежний скрипт убивал сам себя
-  //       (cmd.exe был потомком mainPid при taskkill /T).
-  // §3.12 Маркер update-pending.json: пишется до перезапуска; при следующем старте
-  //       версия процесса сверяется с ожидаемой → честный итог в UI.
-  const UPDATE_REPO = 'HellShaftSam/AVC-AnimeVoiceCommand'
-
-  const httpsGetJson = (url, redirects = 0) =>
-    new Promise((resolve, reject) => {
-      if (redirects > 5) return reject(new Error('too many redirects'))
-      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater', Accept: 'application/vnd.github+json' } }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume()
-          return httpsGetJson(new URL(res.headers.location, url).toString(), redirects + 1).then(resolve, reject)
-        }
-        let raw = ''
-        res.on('data', (c) => (raw += c))
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(raw) }) } catch (e) { reject(e) }
-        })
-      })
-      req.on('error', reject)
-      req.setTimeout(15000, () => req.destroy(new Error('timeout')))
-    })
-
-  /** Формат версии проекта: 1.0.<run_number> (CI extraMetadata); теги v1.0.<N>. */
-  const parseVersion = (s) => {
-    const m = String(s || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)/i)
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
-  }
-  /** Правильное числовое сравнение (1.10.0 > 1.9.0); null — формат не распознан */
-  const compareVersions = (a, b) => {
-    const va = parseVersion(a)
-    const vb = parseVersion(b)
-    if (!va || !vb) return null
-    for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return va[i] > vb[i] ? 1 : -1
-    return 0
-  }
-
-  const httpsDownloadFile = (url, destPath, onProgress, redirects = 0) =>
-    new Promise((resolve, reject) => {
-      if (redirects > 6) return reject(new Error('Слишком много перенаправлений'))
-      const req = https.get(url, { headers: { 'User-Agent': 'AVC-Anime-Updater' } }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume()
-          return httpsDownloadFile(new URL(res.headers.location, url).toString(), destPath, onProgress, redirects + 1).then(resolve, reject)
-        }
-        if (res.statusCode !== 200) {
-          res.resume()
-          return reject(new Error(`HTTP ${res.statusCode}`))
-        }
-        const total = Number(res.headers['content-length'] || 0)
-        let received = 0
-        let lastEmit = 0
-        const samples = [] // скользящее окно скорости (~2 с)
-        const file = fs.createWriteStream(destPath)
-        res.on('data', (chunk) => {
-          received += chunk.length
-          if (onProgress) {
-            const now = Date.now()
-            samples.push({ t: now, b: received })
-            while (samples.length > 2 && now - samples[0].t > 2000) samples.shift()
-            if (now - lastEmit > 250) {
-              lastEmit = now
-              const first = samples[0]
-              const speed = first && now > first.t ? (received - first.b) / ((now - first.t) / 1000) : 0
-              onProgress({ received, total, speed })
-            }
-          }
-        })
-        res.pipe(file)
-        file.on('finish', () => file.close(() => resolve({ received, total })))
-        file.on('error', (e) => reject(e))
-        res.on('error', (e) => {
-          try { file.close() } catch { /* ок */ }
-          reject(e)
-        })
-      })
-      req.on('error', reject)
-      req.setTimeout(60000, () => req.destroy(new Error('Таймаут скачивания обновления')))
-    })
-
-  const sha256File = (file) =>
-    new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256')
-      const stream = fs.createReadStream(file)
-      stream.on('data', (c) => hash.update(c))
-      stream.on('error', reject)
-      stream.on('end', () => resolve(hash.digest('hex')))
-    })
-
-  /** releases/latest → нормализованная информация об обновлении (без скачивания) */
-  const fetchLatestReleaseInfo = async () => {
-    const current = app.getVersion()
-    const releasesUrl = `https://github.com/${UPDATE_REPO}/releases/latest`
-    try {
-      const { status, body } = await httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`)
-      if (status === 404) return { current, latest: null, relation: 'unknown', available: false, error: 'На GitHub нет опубликованного релиза', releasesUrl, lastUpdateResult: pendingUpdateResult }
-      if (status !== 200) return { current, latest: null, relation: 'unknown', available: false, error: `GitHub API: HTTP ${status}`, releasesUrl, lastUpdateResult: pendingUpdateResult }
-      const latest = String(body.tag_name || '')
-      const assets = Array.isArray(body.assets) ? body.assets : []
-      const asset = assets.find((a) => /\.exe$/i.test(a.name)) || null
-      const shaAsset = assets.find((a) => /^SHA256SUMS\.txt$/i.test(a.name)) || null
-      const cmp = compareVersions(latest, current)
-      const relation = cmp === null ? 'unknown' : cmp > 0 ? 'newer' : cmp < 0 ? 'older' : 'up-to-date'
-      return {
-        current,
-        latest: latest || null,
-        releaseName: body.name || null,
-        releasedAt: body.published_at || null,
-        releaseNotes: typeof body.body === 'string' ? body.body.slice(0, 2000) : null,
-        relation,
-        // §3.3: доступно обновление ТОЛЬКО если latest строго новее и есть EXE
-        available: relation === 'newer' && !!asset,
-        assetUrl: asset ? asset.browser_download_url : null,
-        assetName: asset ? asset.name : null,
-        assetSizeBytes: asset ? asset.size : null,
-        shaUrl: shaAsset ? shaAsset.browser_download_url : null,
-        releasesUrl,
-        lastUpdateResult: pendingUpdateResult,
-      }
-    } catch (e) {
-      return { current, latest: null, relation: 'unknown', available: false, error: e.message, releasesUrl, lastUpdateResult: pendingUpdateResult }
-    }
-  }
-
   ipcMain.handle('avc:update:check', () => fetchLatestReleaseInfo())
 
   ipcMain.handle('avc:update:install', async () => {
@@ -1284,6 +1283,7 @@ function setupAiIpc() {
     }
   })
 
+  /** Открыть папку с логами (диагностика «что происходит» без поддержки) */
   ipcMain.handle('avc:ai:open-logs', async () => {
     const dir = path.join(app.getPath('userData'), 'logs')
     try {
