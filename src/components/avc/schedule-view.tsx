@@ -5,7 +5,11 @@
  * Данные: /api/site/schedule → { days: ScheduleDay[] } с UNIX-временем выхода
  * следующей серии каждой карточки (local-time[data-time] с сайта).
  * День выбирается чипами; по умолчанию — сегодняшний (метка сайта isToday,
- * иначе день недели машины). Клик по плитке — открыть аниме в новой вкладке.
+ * иначе день недели машины). Клик по плитке — открыть аниме.
+ *
+ * ТЗ п.7: абсолютные времена — ВСЕГДА по Астане (Asia/Almaty, UTC+5),
+ * независимо от настроек машины (выяснено: сайт отдаёт абсолютные unix-
+ * штампы data-time; переводим в пояс Астаны прямо при выводе).
  */
 import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Clock, RotateCw } from 'lucide-react'
@@ -16,38 +20,7 @@ import { AnimeGridSkeleton } from './anime-grid'
 import { openAnimeCard } from '@/lib/avc/executor'
 import type { SchedulePage, ScheduleEntry } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
-
-/** Тикает каждые 30 с — для честного «через N минут» */
-function useNowTick(intervalMs = 30_000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(t)
-  }, [intervalMs])
-  return now
-}
-
-/** «20:45» по локальной машине пользователя */
-function formatTime(unixSec: number): string {
-  return new Date(unixSec * 1000).toLocaleTimeString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-/** «через 2 ч 15 мин» / «через 40 мин» / «через 4 дн 12 ч» / «серия вышла» */
-function formatRelative(unixSec: number, nowMs: number): string {
-  const diffMin = Math.round(unixSec - nowMs / 1000) / 60
-  if (!Number.isFinite(diffMin)) return ''
-  if (diffMin <= -5) return 'серия вышла'
-  if (diffMin < 60) return `через ${Math.max(1, Math.round(diffMin))} мин`
-  const h = Math.floor(diffMin / 60)
-  const m = Math.round(diffMin % 60)
-  if (h < 24) return m > 0 ? `через ${h} ч ${m} мин` : `через ${h} ч`
-  const d = Math.floor(h / 24)
-  const restH = h % 24
-  return restH > 0 ? `через ${d} дн ${restH} ч` : `через ${d} дн`
-}
+import { formatKzTime, formatRelative, useNowTick } from './time-utils'
 
 /** День недели машины: Пн=1 … Вс=7 (JS: 0=Вс) */
 function localDayIndex(): number {
@@ -55,7 +28,7 @@ function localDayIndex(): number {
 }
 
 function ScheduleTile({ entry, nowMs }: { entry: ScheduleEntry; nowMs: number }) {
-  const release = entry.releaseAt !== null ? formatTime(entry.releaseAt) : null
+  const release = entry.releaseAt !== null ? formatKzTime(entry.releaseAt) : null
   const rel = entry.releaseAt !== null ? formatRelative(entry.releaseAt, nowMs) : null
   const released =
     entry.releaseAt !== null && entry.releaseAt * 1000 < nowMs - 5 * 60_000
@@ -285,7 +258,7 @@ export function ScheduleView() {
       )}
 
       <p className="mt-4 text-xs text-muted-foreground">
-        Время указано по вашему часовому поясу. Нажмите на тайтл, чтобы открыть его.
+        Время указано по Астане (UTC+5) — сайт отдаёт абсолютное время серий, приложение переводит его в казахстанский пояс. Нажмите на тайтл, чтобы открыть его.
       </p>
     </div>
   )

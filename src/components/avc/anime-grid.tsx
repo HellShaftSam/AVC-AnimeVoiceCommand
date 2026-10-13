@@ -4,18 +4,56 @@
  * Наведение (мышь) → плавающее превью рядом с карточкой: полное название,
  * рейтинг, жанры, описание — без перехода на страницу (короткие названия
  * на карточке обрезаются — в превью видно всё).
+ *
+ * Если у карточки известно время следующей серии (онгоинги/анонсы —
+ * обогащение в адаптере), на плитке показывается бейдж: номер серии и
+ * «через…» (обратный отсчёт), для анонсов — дата премьеры. Время — Астана.
  */
 import { useRef } from 'react'
-import { Star } from 'lucide-react'
+import { Clock, Star } from 'lucide-react'
 import { openAnimeCard } from '@/lib/avc/executor'
 import type { AnimeCard } from '@/lib/avc/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AnimeHoverPreview, useAnimeHover } from './anime-hover-preview'
+import { formatKzDateTimeShort, formatRelative, useNowTick } from './time-utils'
+
+/** Бейдж следующей серии/премьеры (ТЗ п.3, п.6): честно только при известных данных */
+export function NextEpisodeBadge({ card, nowMs }: { card: AnimeCard; nowMs: number }) {
+  const t = card.nextEpisodeAt
+  if (typeof t !== 'number' || t <= 0) return null
+  const released = t * 1000 < nowMs - 5 * 60_000
+  const epNum =
+    typeof card.episodesAired === 'number' && card.episodesAired > 0
+      ? card.episodesAired + 1
+      : null
+  const isPremiere = epNum === null || epNum === 1
+  if (released) {
+    return (
+      <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+        <Clock className="h-3 w-3" aria-hidden />
+        {isPremiere ? 'вышло' : `серия ${epNum} вышла`}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="mt-1 inline-flex w-fit items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-300"
+      title={`${formatKzDateTimeShort(t)} (Астана)`}
+    >
+      <Clock className="h-3 w-3" aria-hidden />
+      {isPremiere ? 'с ' : `серия ${epNum} — `}
+      {formatKzDateTimeShort(t)}
+      <span className="text-emerald-400/90">· {formatRelative(t, nowMs)}</span>
+    </span>
+  )
+}
 
 export function AnimeGrid({ items }: { items: AnimeCard[] }) {
   const { hover, onEnter, onLeave } = useAnimeHover()
   const gridRef = useRef<HTMLDivElement | null>(null)
   const open = (card: AnimeCard) => void openAnimeCard(card, true)
+  // один тик на сетку — бейджи обратного отсчёта обновляются вместе
+  const nowMs = useNowTick(60_000)
 
   return (
     <div ref={gridRef} className="relative">
@@ -26,7 +64,7 @@ export function AnimeGrid({ items }: { items: AnimeCard[] }) {
           onClick={() => open(card)}
           onMouseEnter={(e) => onEnter(card, e.currentTarget)}
           onMouseLeave={onLeave}
-          aria-label={`Открыть: ${card.title}`}
+          aria-label={`Открыть: ${card.title}${card.nextEpisodeAt ? `, следующая серия ${formatKzDateTimeShort(card.nextEpisodeAt)} по Астане` : ''}`}
           className="group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-xl"
         >
           <div className="relative overflow-hidden rounded-lg border border-border bg-card transition-all group-hover:border-gold-400/40 group-hover:shadow-[0_0_20px_rgba(229, 188, 94,0.12)]">
@@ -52,6 +90,7 @@ export function AnimeGrid({ items }: { items: AnimeCard[] }) {
           <div className="mt-1.5 line-clamp-2 text-sm font-medium text-foreground transition-colors group-hover:text-gold-300">
             {card.title}
           </div>
+          <NextEpisodeBadge card={card} nowMs={nowMs} />
           <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
             {card.year !== null && <span>{card.year}</span>}
             {card.type && <span>· {card.type}</span>}

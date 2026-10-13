@@ -24,7 +24,7 @@ import { QuickSections } from '@/components/avc/quick-sections'
 import { SessionRestoreDialog } from '@/components/avc/session-restore-dialog'
 import { SettingsDialog } from '@/components/avc/settings-dialog'
 import { TabContent } from '@/components/avc/tab-content'
-import { TabsBar } from '@/components/avc/tabs-bar'
+import { NavBar } from '@/components/avc/nav-bar'
 import { VoiceConfirmDialog } from '@/components/avc/voice-confirm-dialog'
 import { VoicePanel } from '@/components/avc/voice-panel'
 import { useVoice } from '@/lib/avc/use-voice'
@@ -164,7 +164,7 @@ export default function Page() {
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <HeaderBar />
         <QuickSections />
-        <TabsBar />
+        <NavBar />
 
         <div className="flex min-h-0 flex-1">
           <main

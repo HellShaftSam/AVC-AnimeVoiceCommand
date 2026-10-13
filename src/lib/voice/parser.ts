@@ -907,13 +907,11 @@ function extractEpisodeSelect(words: string[], ctx: ParseCtx): VoiceCommand | nu
 
 function extractContextual(words: string[], ctx: ParseCtx): VoiceCommand | null {
   const text = words.join(' ')
-  const watchingVideo = ctx.playback.animeTitle !== null
 
-  // "назад": в контексте видео -> предыдущая серия, иначе -> история назад
+  // "назад" — ВСЕГДА навигация по истории (ТЗ «стрелками переходить в прошлые
+  // или вперед»): предсказуемо и на странице аниме, и в каталоге.
+  // Прошлая серия — отдельная фраза «предыдущая серия» (триггер ниже по таблице).
   if (text === 'назад') {
-    if (watchingVideo) {
-      return { type: VoiceCommandType.PreviousEpisode, params: {}, confidence: 0.75, label: 'Предыдущая серия (контекст)' }
-    }
     return { type: VoiceCommandType.Back, params: {}, confidence: 0.85, label: 'Назад' }
   }
   return null
@@ -1227,5 +1225,9 @@ export function parserSelfTest(): Array<{ input: string; expect: string }> {
     { input: 'продолжи то что смотрел', expect: 'ContinueWatching' },
     { input: 'продолжи вчерашнее', expect: 'ContinueWatching' },
     { input: 'продолжи то аниме которое я смотрел', expect: 'ContinueWatching' },
+    // --- v1.0.35: «назад/вперёд» — всегда навигация по истории (ТЗ «вкладки → стрелки»)
+    { input: 'назад', expect: 'Back' },
+    { input: 'вперед', expect: 'Forward' },
+    { input: 'предыдущая серия', expect: 'PreviousEpisode' },
   ]
 }

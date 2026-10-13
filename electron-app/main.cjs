@@ -180,6 +180,18 @@ function checkPendingUpdate() {
         startedAt: data.startedAt || null,
       }
       log(`[Update] Обновление подтверждено: работает ${running}`)
+      // Уборка: подменённый старый EXE рядом с лаунчером больше не нужен
+      // (остаётся только после успешной подмены — см. avc:update:install)
+      try {
+        const prevExe = path.join(
+          path.dirname(resolveLauncherExePath()),
+          'AVC-Anime-previous.exe',
+        )
+        if (fs.existsSync(prevExe)) {
+          fs.rmSync(prevExe, { force: true, maxRetries: 2, retryDelay: 300 })
+          log('[Update] Удалён AVC-Anime-previous.exe от прошлой подмены')
+        }
+      } catch { /* не критично — уберём при следующем подтверждении */ }
     } else {
       pendingUpdateResult = {
         ok: false,
@@ -867,6 +879,123 @@ function dirStats(dir) {
   return { bytes, files }
 }
 
+// --- жизненный цикл: чистка temp и висячих процессов (ТЗ п.8, п.9) --------------
+
+/**
+ * РЕАЛЬНЫЙ путь EXE, запущенного пользователем.
+ *
+ * ROOT CAUSE «обновление проходит, но ничего не происходит» (ТЗ п.10): в
+ * portable-сборке electron-builder РАСПАКОВЫВАЕТ приложение во временный
+ * каталог и запускает КОПИЮ — app.getPath('exe') возвращает именно её.
+ * Прежний апдейтер подменял эту копию: реальный portable EXE пользователя
+ * оставался старым, при следующем запуске снова поднималась старая версия.
+ * electron-builder экспортирует путь оригинала в PORTABLE_EXECUTABLE_FILE.
+ */
+function resolveLauncherExePath() {
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE
+  if (portable && path.isAbsolute(portable) && fs.existsSync(portable)) {
+    return portable
+  }
+  return app.getPath('exe')
+}
+
+/**
+ * Чистка «мусора» в %TEMP% от прошлых сессий (ТЗ п.9 «засоряется temp на C»):
+ *  - avc-update: скачанный EXE обновления и cmd-скрипт (остаются, если сессия
+ *    умерла между скачиванием и подменой);
+ *  - распакованные каталоги portable (имя содержит AVC-Anime / AnimeVoice):
+ *    bootloader убирает их сам ТОЛЬКО при штатном выходе — после жёсткого
+ *    завершения процессов (ТЗ п.8) они остаются навсегда.
+ * Удаляется только старьё старше СУТОК — сегодняшние каталоги не трогаем.
+ */
+function cleanupStaleTemp() {
+  try {
+    const tmp = app.getPath('temp')
+    const dayMs = 24 * 60 * 60 * 1000
+    let removed = 0
+    let bytes = 0
+    for (const entry of fs.readdirSync(tmp, { withFileTypes: true })) {
+      try {
+        if (!entry.isDirectory()) continue
+        const name = entry.name
+        const ours =
+          /^avc-update$/i.test(name) ||
+          /avc[-_.]?anime|anime[-_.]?voice/i.test(name)
+        if (!ours) continue
+        const full = path.join(tmp, name)
+        const st = fs.statSync(full)
+        if (Date.now() - st.mtimeMs < dayMs) continue
+        const size = dirStatsQuiet(full)
+        fs.rmSync(full, { recursive: true, force: true, maxRetries: 2, retryDelay: 300 })
+        removed += 1
+        bytes += size
+        log(`[Temp] Удалён устаревший каталог ${name} (${Math.round(size / 1048576)} МБ)`)
+      } catch { /* занят другим процессом — не наш случай */ }
+    }
+    if (removed > 0) log(`[Temp] Очистка temp: удалено каталогов ${removed}, освобождено ${Math.round(bytes / 1048576)} МБ`)
+  } catch (e) {
+    log(`[Temp] Очистка temp не удалась: ${e.message}`)
+  }
+}
+
+/** Размер каталога без исключений (для лога чистки) */
+function dirStatsQuiet(dir) {
+  let bytes = 0
+  try {
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name)
+        if (e.isDirectory()) walk(p)
+        else bytes += fs.statSync(p).size
+      }
+    }
+    walk(dir)
+  } catch { /* частично прочитали — достаточно */ }
+  return bytes
+}
+
+/**
+ * Сироты-процессы прошлых сессий (ТЗ п.8 «в диспетчере задач висят процессы»):
+ * если приложение когда-то было завершено жёстко (снято из диспетчера, сбой,
+ * выключение ПК) — его Next-сервер/AI-воркер могли пережить родителя и висеть
+ * вечно. При старте добиваем ЧУЖИЕ процессы по характерным путям в командной
+ * строке (next-app…server.js / ai…ai-worker.cjs), ДО запуска своих.
+ */
+function killOrphanedProcesses() {
+  if (process.platform !== 'win32') return
+  const probe = [
+    'next-app',
+    'ai-worker.cjs',
+    'stt-python',
+  ]
+  try {
+    const { execSync } = require('child_process')
+    const raw = execSync(
+      'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | ' +
+        'Where-Object { $_.CommandLine -and (' +
+        probe.map((p) => `$_.CommandLine -match \'${p}\'`).join(' -or ') +
+        ') } | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"',
+      { timeout: 15000, windowsHide: true, encoding: 'utf8' },
+    )
+    if (!raw.trim()) return
+    let list = JSON.parse(raw)
+    if (!Array.isArray(list)) list = [list]
+    let killed = 0
+    for (const proc of list) {
+      const pid = Number(proc?.ProcessId)
+      if (!Number.isInteger(pid) || pid === process.pid) continue
+      try {
+        process.kill(pid, 'SIGKILL')
+        killed += 1
+        log(`[Lifecycle] Убит процесс-сирота PID ${pid}: ${String(proc?.CommandLine ?? '').slice(0, 120)}`)
+      } catch { /* уже мёртв или нет прав */ }
+    }
+    if (killed > 0) log(`[Lifecycle] Сироты прошлых сессий: завершено ${killed}`)
+  } catch (e) {
+    log(`[Lifecycle] Проверка сирот не удалась: ${e.message}`)
+  }
+}
+
 /**
  * Запуск AI-воркера с РЕТРАМИ и ЧЕСТНОЙ причиной отказа в UI.
  * УРОК РЕЛИЗА 1.0.12: на машинах пользователей форк мог временно падать
@@ -1237,7 +1366,10 @@ function setupAiIpc() {
 
       // 3. Маркер результата (сверится при следующем старте — §3.12)
       send({ phase: 'preparing', shaVerified })
-      const exePath = app.getPath('exe')
+      // ТЗ п.10 ROOT CAUSE: в portable-сборке getPath('exe') — временная
+      // распакованная копия, НЕ файл, который запустил пользователь. Подменять
+      // нужно оригинал (PORTABLE_EXECUTABLE_FILE), иначе «обновление не происходит».
+      const exePath = resolveLauncherExePath()
       const prevPath = path.join(path.dirname(exePath), 'AVC-Anime-previous.exe')
       fs.writeFileSync(
         updatePendingMarkerPath(),
@@ -1442,6 +1574,10 @@ async function runSelftest() {
 async function boot() {
   setupAdShield()
 
+  // ТЗ п.8/п.9: сироты прошлых сессий (до запуска СВОИХ процессов!) и мусор в temp
+  killOrphanedProcesses()
+  cleanupStaleTemp()
+
   setSplashStage('Инициализация сессии сайта…')
   authService = new AuthenticationService({
     log,
@@ -1606,23 +1742,46 @@ function killProcessTree(child) {
   } catch { /* уже мёртв */ }
 }
 
+// ТЗ п.8: PID детей сохраняются до обнуления — will-quit добивает дерево
+// синхронно, даже если before-quit упал посреди снятия.
+let quittingChildPids = []
+
 app.on('before-quit', () => {
-  app.isQuitting = true // воркер умирает по нашей команде — без автоперезапуска и уведомлений
-  if (authService) authService.shutdown()
-  if (aiWorker) {
-    killProcessTree(aiWorker)
-    aiWorker = null
-  }
-  if (nextProcess) {
-    killProcessTree(nextProcess)
-    nextProcess = null
+  try {
+    app.isQuitting = true // воркер умирает по нашей команде — без автоперезапуска и уведомлений
+    try { if (authService) authService.shutdown() } catch { /* не мешаем выходу */ }
+    for (const child of [aiWorker, nextProcess]) {
+      if (child?.pid) quittingChildPids.push(child.pid)
+    }
+    if (aiWorker) {
+      killProcessTree(aiWorker)
+      aiWorker = null
+    }
+    if (nextProcess) {
+      killProcessTree(nextProcess)
+      nextProcess = null
+    }
+  } catch (e) {
+    log(`[Lifecycle] before-quit: ошибка снятия детей (${e.message}) — добьёт will-quit`)
   }
 })
 
-// страховка: если что-то пережило before-quit — добиваем на will-quit
+// страховка: если что-то пережило before-quit — добиваем на will-quit.
+// ТЗ п.8 («в диспетчере задач висят процессы»): здесь СИНХРОННЫЙ taskkill
+// (execSync) — Electron не выйдет, пока дерево фактически не снято.
 app.on('will-quit', () => {
-  if (aiWorker) killProcessTree(aiWorker)
-  if (nextProcess) killProcessTree(nextProcess)
+  const pids = [...new Set(quittingChildPids.filter(Boolean))]
+  for (const pid of pids) {
+    try {
+      if (process.platform === 'win32') {
+        const { execSync } = require('child_process')
+        execSync(`taskkill /pid ${pid} /T /F`, { timeout: 5000, stdio: 'ignore', windowsHide: true })
+      } else {
+        try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGKILL') } catch { /* мёртв */ } }
+      }
+    } catch { /* уже мёртв */ }
+  }
+  if (pids.length > 0) log(`[Lifecycle] Выход: деревья процессов сняты (PID: ${pids.join(', ')})`)
 })
 
 // Защита единственного экземпляра.

@@ -440,22 +440,14 @@ export function syncPlaybackToDetails(details: AnimeDetails): void {
 
 async function navigateToAnime(
   card: AnimeCard,
-  newTab: boolean,
+  _newTab: boolean,
   prefetched?: AnimeDetails | null,
 ): Promise<CommandResult> {
   const st = useAvcStore.getState()
   const payload: Record<string, unknown> = { slug: card.slug, animeId: card.animeId }
-  if (newTab || !st.activeTabId) {
-    st.addTab({ kind: 'anime', title: card.title, payload })
-  } else {
-    const active = st.tabs.find((t) => t.id === st.activeTabId)
-    if (active) {
-      st.pushBackStack(active.id, makeTabSnapshot(active))
-      st.patchTab(active.id, { kind: 'anime', title: card.title, payload })
-    } else {
-      st.addTab({ kind: 'anime', title: card.title, payload })
-    }
-  }
+  // ОДНООКОННАЯ МОДЕЛЬ (ТЗ «вкладки → стрелки»): открытие аниме — запись в
+  // единую историю навигации, стрелки назад/вперёд работают как в браузере.
+  st.navigate({ kind: 'anime', title: card.title, payload })
   const details = prefetched ?? (await fetchDetails(card.animeId))
   applyDetailsToPlayback(details, card)
   toast({ description: `Открыто: ${card.title}` })
@@ -478,7 +470,7 @@ export function openRecommendations(): CommandResult {
     st.bumpReload(active.id) // повторный запрос = перезагрузка с refresh
     return ok('Рекомендации уже открыты — обновляю')
   }
-  st.addTab({ kind: 'recommendations', title: 'Рекомендации', payload: {} })
+  st.navigate({ kind: 'recommendations', title: 'Рекомендации', payload: {} })
   return ok('Открываю рекомендации')
 }
 
@@ -509,16 +501,16 @@ export function openCompanionTab(sub?: string, q?: string): CommandResult {
     st.bumpReload(active.id)
     return ok(label ? `Anime Companion — ${label}` : 'Anime Companion')
   }
-  st.addTab({ kind: 'companion', title: label ? `Компаньон · ${label}` : 'Компаньон', payload })
+  st.navigate({ kind: 'companion', title: label ? `Компаньон · ${label}` : 'Компаньон', payload })
   return ok(label ? `Открываю: ${label}` : 'Открываю Anime Companion')
 }
 
 function openSectionTab(sectionId: SiteSectionId): CommandResult {
   const st = useAvcStore.getState()
   if (sectionId === 'home') {
-    st.addTab({ kind: 'home', title: SECTION_LABELS.home, payload: {} })
+    st.navigate({ kind: 'home', title: SECTION_LABELS.home, payload: {} })
   } else {
-    st.addTab({
+    st.navigate({
       kind: 'section',
       title: SECTION_LABELS[sectionId],
       payload: { section: sectionId, page: 1 },
@@ -586,9 +578,10 @@ async function playEpisode(episode: number): Promise<CommandResult> {
 // --- основной switch ------------------------------------------------------------
 
 async function executeOpenRandom(): Promise<CommandResult> {
-  const details = await apiGetJson<AnimeDetails>('/api/site/random')
-  if (!details) return fail('Не удалось получить случайное аниме')
-  return navigateToAnime(details, false, details)
+  // ТЗ п.4: «Случайное» — ВКЛАДКА с выбором жанра (не мгновенный тайтл).
+  // Открываем RandomView: чипы жанров + «Крутить». Мгновенный тайтл —
+  // кнопка «Крутить из всех» внутри вкладки.
+  return openSectionTab('random')
 }
 
 async function executeSearchAnime(cmd: VoiceCommand): Promise<CommandResult> {
@@ -1573,33 +1566,33 @@ function executeTabCommand(cmd: VoiceCommand): CommandResult {
   const st = useAvcStore.getState()
   switch (cmd.type) {
     case VoiceCommandType.OpenNewTab: {
-      st.addTab({ kind: 'home', title: 'Главная', payload: {} })
-      return ok('Открыта новая вкладка')
+      // Однооконная модель: «новая вкладка» = переход на главную (запись в историю)
+      st.navigate({ kind: 'home', title: 'Главная', payload: {} })
+      return ok('Открыта главная')
     }
     case VoiceCommandType.CloseTab: {
-      const target = st.activeTabId ?? st.tabs[st.tabs.length - 1]?.id
-      if (!target) return fail('Нет вкладок')
-      const wasLast = st.tabs.length <= 1
-      st.closeTab(target)
-      return ok(wasLast ? 'Вкладка закрыта. Открыта главная' : 'Вкладка закрыта')
+      // Вкладки больше не создаются — честное объяснение вместо мёртвого действия
+      return ok('Вкладки больше не используются — навигация стрелками назад/вперёд')
     }
     case VoiceCommandType.NextTab:
-    case VoiceCommandType.PreviousTab: {
-      if (st.tabs.length === 0) return fail('Нет вкладок')
-      const idx = st.tabs.findIndex((t) => t.id === st.activeTabId)
-      const cur = idx >= 0 ? idx : 0
-      const dir = cmd.type === VoiceCommandType.NextTab ? 1 : -1
-      const next = st.tabs[(cur + dir + st.tabs.length) % st.tabs.length]
-      st.setActiveTab(next.id)
-      return ok(`Вкладка: ${next.title}`)
-    }
+      return st.goForward()
+        ? ok(`Вперёд: ${useAvcStore.getState().tabs.find((t) => t.id === st.activeTabId)?.title ?? ''}`)
+        : fail('Вперёд идти некуда')
+    case VoiceCommandType.PreviousTab:
+      return st.goBack()
+        ? ok(`Назад: ${useAvcStore.getState().tabs.find((t) => t.id === st.activeTabId)?.title ?? ''}`)
+        : fail('Назад идти некуда')
     case VoiceCommandType.SelectTab: {
       const n = paramNumber(cmd, 'index')
       if (n === null) return fail('Не указан номер вкладки')
-      const tab = st.tabs[n - 1]
-      if (!tab) return fail(`Вкладка ${n} не найдена. Открыто вкладок: ${st.tabs.length}`)
-      st.setActiveTab(tab.id)
-      return ok(`Вкладка: ${tab.title}`)
+      // Голос «вкладка два» = позиция в истории навигации (1 = самое начало)
+      const idx = n - 1
+      const target = st.navHistory[idx]
+      if (!target) {
+        return fail(`Запись истории ${n} не найдена. Всего записей: ${st.navHistory.length}`)
+      }
+      st.gotoNavIndex(idx)
+      return ok(`Переход: ${target.title ?? ''}`)
     }
     default:
       return fail('Неизвестная команда вкладок')
@@ -1607,22 +1600,18 @@ function executeTabCommand(cmd: VoiceCommand): CommandResult {
 }
 
 function executeBack(): CommandResult {
+  // ЕДИНАЯ ИСТОРИЯ НАВИГАЦИИ: стрелка «назад» (голос «назад» — то же самое)
   const st = useAvcStore.getState()
-  const id = st.activeTabId
-  if (!id) return fail('Нет активной вкладки')
-  const entry = st.popBackStack(id)
-  if (!entry) return fail('История вкладки пуста')
-  const snap = entry as {
-    kind?: TabKind
-    title?: string
-    payload?: Record<string, unknown>
-  }
-  st.patchTab(id, {
-    kind: snap.kind ?? 'home',
-    title: snap.title ?? 'Главная',
-    payload: snap.payload ?? {},
-  })
-  return ok('Назад')
+  return st.goBack()
+    ? ok('Назад')
+    : fail('Назад идти некуда — история пуста')
+}
+
+function executeForward(): CommandResult {
+  const st = useAvcStore.getState()
+  return st.goForward()
+    ? ok('Вперёд')
+    : fail('Вперёд идти некуда')
 }
 
 function executeScroll(cmd: VoiceCommand): CommandResult {
@@ -1734,7 +1723,7 @@ export async function executeCommand(cmd: VoiceCommand): Promise<CommandResult> 
     case VoiceCommandType.Back:
       return executeBack()
     case VoiceCommandType.Forward:
-      return ok('Нет данных для перехода вперёд')
+      return executeForward()
     case VoiceCommandType.ScrollUp:
     case VoiceCommandType.ScrollDown:
       return executeScroll(cmd)

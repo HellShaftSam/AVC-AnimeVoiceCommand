@@ -42,6 +42,25 @@ export interface AddTabData {
 /** Снимок состояния вкладки для back-stack (kind+title+payload) */
 export type BackStackEntry = Record<string, unknown>
 
+/** Типизированная запись истории навигации (BackStackEntry без unknown) */
+interface NavEntry {
+  kind: TabKind
+  title: string
+  payload: Record<string, unknown>
+}
+
+/** Привести запись истории (пришедшую и из старых структур) к NavEntry */
+function asNavEntry(entry: BackStackEntry): NavEntry {
+  return {
+    kind: (entry.kind as TabKind) ?? 'home',
+    title: typeof entry.title === 'string' ? entry.title : 'Главная',
+    payload:
+      entry.payload && typeof entry.payload === 'object'
+        ? (entry.payload as Record<string, unknown>)
+        : {},
+  }
+}
+
 /** Ожидание подтверждения переключения озвучки («Вы имеете в виду...?») */
 export interface VoiceConfirmState {
   spoken: string
@@ -52,6 +71,14 @@ export interface AvcState {
   // --- состояние ---
   tabs: BrowserTab[]
   activeTabId: string | null
+  /**
+   * ЕДИНАЯ ИСТОРИЯ НАВИГАЦИИ (ТЗ «вкладки → стрелки назад/вперёд»):
+   * переход в Каталог/поиск/аниме больше НЕ создаёт вкладок — он создаёт запись
+   * истории, а стрелки листают эту историю как в браузере. tabs[] остаётся
+   * массивом из ОДНОЙ вкладки (совместимость с session/restore/deriveNavigation).
+   */
+  navHistory: BackStackEntry[]
+  navIndex: number
   playback: PlaybackContext
   playerIframeUrl: string | null
   playerPlayerName: string | null
@@ -106,7 +133,8 @@ export interface AvcState {
   /** Громкость до Mute — для восстановления при Unmute */
   prevVolume: number
 
-  // --- действия: вкладки ---
+  // --- действия: вкладки/навигация ---
+  /** Устаревший путь (совместимость): создать вкладку. UI/executor используют navigate() */
   addTab: (data: AddTabData) => string
   closeTab: (id: string) => void
   setActiveTab: (id: string) => void
@@ -114,6 +142,21 @@ export interface AvcState {
     id: string,
     patch: Partial<Pick<BrowserTab, 'kind' | 'title' | 'payload'>>,
   ) => void
+  /**
+   * Перейти в новое место (секция/поиск/аниме/…) БЕЗ создания вкладки:
+   * текущее место уходит в историю, новая запись становится текущей.
+   * Возвращает id активной вкладки (совместимость с прежним addTab).
+   */
+  navigate: (data: AddTabData) => string
+  /** Стрелка «назад» по истории; true — переход произошёл */
+  goBack: () => boolean
+  /** Стрелка «вперёд» по истории; true — переход произошёл */
+  goForward: () => boolean
+  /** Перейти на абсолютную позицию истории (голосовое «вкладка N») */
+  gotoNavIndex: (index: number) => boolean
+  /** Внутренний: применить запись истории к активной вкладке */
+  _applyNavEntry: (entry: BackStackEntry) => void
+  /** Миграция старых сессий (мультивкладки) в однооконную модель */
   restoreSession: (tabs: BrowserTab[], activeId: string | null) => void
 
   // --- действия: плеер ---
@@ -165,6 +208,8 @@ function nextTabId(): string {
 
 const INITIAL_TAB_ID = 'tab-home'
 
+const HOME_ENTRY: BackStackEntry = { kind: 'home', title: 'Главная', payload: {} }
+
 function makeHomeTab(id: string): BrowserTab {
   return { id, kind: 'home', title: 'Главная', payload: {}, createdAt: 0 }
 }
@@ -207,6 +252,8 @@ function deriveNavigation(
 export const useAvcStore = create<AvcState>()((set, get) => ({
   tabs: [makeHomeTab(INITIAL_TAB_ID)],
   activeTabId: INITIAL_TAB_ID,
+  navHistory: [{ ...HOME_ENTRY }],
+  navIndex: 0,
   playback: INITIAL_PLAYBACK,
   playerIframeUrl: null,
   playerPlayerName: null,
@@ -246,22 +293,92 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   voiceConfirm: null,
   prevVolume: 70,
 
-  // --- вкладки ---------------------------------------------------------------
+  // --- вкладки/навигация -------------------------------------------------------
 
   addTab: (data) => {
-    const id = nextTabId()
-    const tab: BrowserTab = {
-      id,
+    // Устаревший путь (совместимость с редкими вызовами): в однооконной модели
+    // «новая вкладка» = переход в новое место с записью в историю.
+    return get().navigate(data)
+  },
+
+  /** Применить запись истории к активной вкладке (единая однооконная модель) */
+  _applyNavEntry: (entry) => {
+    const nav = asNavEntry(entry)
+    set((s) => {
+      const activeId = s.activeTabId ?? s.tabs[0]?.id
+      if (!activeId) return s
+      const tabs = s.tabs.map((t) =>
+        t.id === activeId
+          ? { ...t, kind: nav.kind, title: nav.title, payload: nav.payload }
+          : t,
+      )
+      return {
+        tabs,
+        navigation: deriveNavigation(tabs, activeId, s.pendingOptions),
+      }
+    })
+  },
+
+  navigate: (data) => {
+    const id = get().activeTabId ?? get().tabs[0]?.id ?? INITIAL_TAB_ID
+    const entry: NavEntry = {
       kind: data.kind,
       title: data.title,
       payload: data.payload ?? {},
-      createdAt: Date.now(),
     }
     set((s) => {
-      const tabs = [...s.tabs, tab]
-      return { tabs, activeTabId: id, navigation: deriveNavigation(tabs, id, s.pendingOptions) }
+      // Ветка «вперёд» обрезается (как в браузере), запись добавляется в конец.
+      // Дедупликация: повторный переход в ТО ЖЕ место не раздувает историю.
+      const trimmed = s.navHistory.slice(0, s.navIndex + 1)
+      const last = trimmed[trimmed.length - 1]
+      const same =
+        last &&
+        last.kind === entry.kind &&
+        last.title === entry.title &&
+        JSON.stringify(last.payload ?? {}) === JSON.stringify(entry.payload ?? {})
+      const history: BackStackEntry[] = same
+        ? trimmed
+        : [...trimmed, { ...entry }].slice(-50)
+      const idx = history.length - 1
+      const tabs = s.tabs.map((t) =>
+        t.id === id
+          ? { ...t, kind: entry.kind, title: entry.title, payload: entry.payload }
+          : t,
+      )
+      return {
+        navHistory: history,
+        navIndex: idx,
+        tabs,
+        navigation: deriveNavigation(tabs, id, s.pendingOptions),
+      }
     })
     return id
+  },
+
+  goBack: () => {
+    const s = get()
+    if (s.navIndex <= 0) return false
+    const idx = s.navIndex - 1
+    set({ navIndex: idx })
+    get()._applyNavEntry(s.navHistory[idx])
+    return true
+  },
+
+  goForward: () => {
+    const s = get()
+    if (s.navIndex >= s.navHistory.length - 1) return false
+    const idx = s.navIndex + 1
+    set({ navIndex: idx })
+    get()._applyNavEntry(s.navHistory[idx])
+    return true
+  },
+
+  gotoNavIndex: (index) => {
+    const s = get()
+    if (index < 0 || index >= s.navHistory.length || index === s.navIndex) return false
+    set({ navIndex: index })
+    get()._applyNavEntry(s.navHistory[index])
+    return true
   },
 
   closeTab: (id) =>
@@ -304,14 +421,22 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
 
   restoreSession: (tabs, activeId) =>
     set((s) => {
-      const list: BrowserTab[] = tabs.length
-        ? tabs
-        : [makeHomeTab(nextTabId())]
-      const active =
-        activeId && list.some((t) => t.id === activeId) ? activeId : list[0].id
+      // МИГРАЦИЯ старых сессий (мультивкладки) в однооконную модель:
+      // оставляем только ту вкладку, которая была активна (или первую).
+      const keeper =
+        tabs.find((t) => t.id === activeId) ?? tabs[tabs.length - 1] ?? null
+      const list: BrowserTab[] = [keeper ?? makeHomeTab(nextTabId())]
+      const active = list[0].id
+      const entry: BackStackEntry = {
+        kind: list[0].kind,
+        title: list[0].title,
+        payload: list[0].payload,
+      }
       return {
         tabs: list,
         activeTabId: active,
+        navHistory: [entry],
+        navIndex: 0,
         navigation: deriveNavigation(list, active, s.pendingOptions),
       }
     }),

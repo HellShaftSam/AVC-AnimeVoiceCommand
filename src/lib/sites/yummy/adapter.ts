@@ -221,6 +221,72 @@ function parseTotalPages(html: string): number | null {
   return max
 }
 
+// --- поиск/подсказки: нормализация и ранжирование (ТЗ «приоритет букв») --------
+
+/** Нормализация запроса/названия: нижний регистр, ё→е, схлопывание пробелов */
+export function normalizeForSearch(input: string): string {
+  return String(input ?? '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Ранжирование результатов по запросу (ТЗ: «по приоритету букв»):
+ * 0 — название НАЧИНАЕТСЯ с запроса, 1 — запрос в начале слова,
+ * 2 — запрос внутри названия, 3 — не совпало (сохраняем порядок сайта).
+ * Внутри уровня — алфавит (ru). «Н» → все на Н, «На» → все на «На»…
+ */
+export function rankCards(cards: AnimeCard[], query: string): AnimeCard[] {
+  const q = normalizeForSearch(query)
+  if (!q) return cards
+  const score = (title: string): number => {
+    const t = normalizeForSearch(title)
+    if (t.startsWith(q)) return 0
+    const words = t.split(/[^a-zа-я0-9]+/i)
+    if (words.some((w) => w.startsWith(q))) return 1
+    return t.includes(q) ? 2 : 3
+  }
+  return cards
+    .map((c, i) => ({ c, s: score(c.title), i }))
+    .sort((a, b) => a.s - b.s || (a.s === b.s ? a.c.title.localeCompare(b.c.title, 'ru') : a.i - b.i))
+    .map(({ c }) => c)
+}
+
+/** Пул параллельных задач с ограничением параллелизма (не ДДОсим сайт) */
+async function runPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<Array<R | null>> {
+  const out: Array<R | null> = new Array(items.length).fill(null)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const idx = cursor++
+      if (idx >= items.length) break
+      try {
+        out[idx] = await fn(items[idx], idx)
+      } catch {
+        out[idx] = null // честно оставляем без обогащения
+      }
+    }
+  })
+  await Promise.all(workers)
+  return out
+}
+
+/** Данные обогащения карточки (детали /api/anime/{id}) — фильтры каталога, плитки онгоингов/анонсов */
+export interface EnrichData {
+  year: number | null
+  rating: number | null
+  status: string | null
+  nextEpisodeAt: number | null
+  episodesAired: number | null
+  episodesTotal: number | null
+}
+
 // --- секции ------------------------------------------------------------------
 
 const SECTION_PATHS: Record<Exclude<SiteSectionId, 'home' | 'random'>, string> = {
@@ -257,7 +323,8 @@ interface ApiAnimeDetails {
   genres: Array<{ title: string }>
   studios: Array<{ title: string }>
   translates: Array<{ value: number; title: string; href: string }>
-  episodes: { count: number; aired: number }
+  /** LIVE-VERIFY /api/anime/29420: {count, aired, next_date (unix сек), prev_date} */
+  episodes: { count: number; aired: number; next_date?: unknown; prev_date?: unknown }
   /** Внешние ID тайтла (формат не документирован — парсим защитно) */
   remote_ids?: { myanimelist_id?: unknown; mal?: unknown; [k: string]: unknown }
   /** Франшиза в порядке просмотра (LIVE-VERIFY: Naruto id 111 → 30 записей;
@@ -537,6 +604,102 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
     }
   }
 
+  /**
+   * Обогащение карточек из деталей (онгоинги/анонсы/фильтры каталога):
+   * год, статус, рейтинг, ВРЕМЯ СЛЕДУЮЩЕЙ СЕРИИ (episodes.next_date),
+   * вышло/всего серий. Каждый id кэширован (getAnimeById), пул = 6.
+   * Ошибки по отдельным карточкам честно оставляют поля пустыми.
+   */
+  async enrichCards(items: AnimeCard[]): Promise<AnimeCard[]> {
+    if (items.length === 0) return items
+    const results = await runPool(items, 6, async (card) => {
+      const d = await this.getAnimeById(card.animeId)
+      if (!d) return null
+      return {
+        year: d.year ?? null,
+        rating: d.rating ?? null,
+        status: d.status ?? null,
+        nextEpisodeAt:
+          typeof d.nextEpisodeAt === 'number' && d.nextEpisodeAt > 1_000_000_000
+            ? d.nextEpisodeAt
+            : null,
+        episodesAired: typeof d.episodesAired === 'number' ? d.episodesAired : null,
+        episodesTotal: d.episodesTotal ?? null,
+      }
+    })
+    return items.map((card, i) => {
+      const e = results[i]
+      return e ? { ...card, ...e } : card
+    })
+  }
+
+  /**
+   * Пакетное обогащение по id (для фильтров каталога: годы/статус/рейтинг).
+   * Возвращает map по animeId; несостоявшиеся — отсутствуют в map.
+   */
+  async getEnrichment(ids: number[]): Promise<Record<number, EnrichData>> {
+    const uniq = [...new Set(ids.filter((n) => Number.isInteger(n) && n > 0))]
+    if (uniq.length === 0) return {}
+    const results = await runPool(uniq, 6, async (id) => {
+      const d = await this.getAnimeById(id)
+      if (!d) return null
+      const e: EnrichData = {
+        year: d.year ?? null,
+        rating: d.rating ?? null,
+        status: d.status ?? null,
+        nextEpisodeAt:
+          typeof d.nextEpisodeAt === 'number' && d.nextEpisodeAt > 1_000_000_000
+            ? d.nextEpisodeAt
+            : null,
+        episodesAired: typeof d.episodesAired === 'number' ? d.episodesAired : null,
+        episodesTotal: d.episodesTotal ?? null,
+      }
+      return e
+    })
+    const map: Record<number, EnrichData> = {}
+    uniq.forEach((id, i) => {
+      const e = results[i]
+      if (e) map[id] = e
+    })
+    return map
+  }
+
+  /**
+   * Локальный индекс подсказок для КОРОТКИХ запросов (1-2 буквы): сайт ищет
+   * только от 3 символов (проверено живым API: minimum query length = 3).
+   * Строится один раз лениво из первых страниц каталога/топа/онгоингов/анонсов
+   * (8 запросов, пул 4), кэш 10 минут — «все тайтлы на Н/На» по приоритету букв.
+   */
+  async getSuggestIndex(): Promise<AnimeCard[]> {
+    const key = `suggest-index:${this.baseUrl}`
+    const cached = cacheGet<AnimeCard[]>(key)
+    if (cached) return cached
+    const paths = [
+      '/catalog?page=1', '/catalog?page=2', '/catalog?page=3', '/catalog?page=4',
+      '/catalog/top', '/catalog/ongoing', '/catalog/announcement', '/catalog?page=5',
+    ]
+    const pages = await runPool(paths, 4, async (p) => {
+      try {
+        const html = await fetchText(`${this.baseUrl}${p}`)
+        return parseCards(html)
+      } catch {
+        return []
+      }
+    })
+    const seen = new Set<number>()
+    const index: AnimeCard[] = []
+    for (const page of pages) {
+      for (const card of page ?? []) {
+        if (seen.has(card.animeId)) continue
+        seen.add(card.animeId)
+        index.push(card)
+      }
+    }
+    // индекс — в общий кэш с ДЛИННЫМ TTL (10 мин): строится из многих запросов
+    cache.set(key, { data: index, expires: Date.now() + 10 * 60 * 1000 })
+    return index
+  }
+
   async getSection(section: SiteSectionId, page = 1): Promise<SectionPage> {
     if (section === 'home') {
       return {
@@ -548,7 +711,7 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
         source: 'live',
       }
     }
-    const key = `section:${this.baseUrl}:${section}:${page}`
+    const key = `section:v2:${this.baseUrl}:${section}:${page}`
     const cached = cacheGet<SectionPage>(key)
     if (cached) return { ...cached, source: 'cache' }
     try {
@@ -579,8 +742,15 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       const path = SECTION_PATHS[section]
       const url = page > 1 ? `${this.baseUrl}${path}/?page=${page}` : `${this.baseUrl}${path}`
       const html = await fetchText(url)
-      const items = parseCards(html)
-      if (items.length === 0) throw new Error('no cards parsed')
+      const parsed = parseCards(html)
+      if (parsed.length === 0) throw new Error('no cards parsed')
+      // Обогащение плиток датой/сериями (ТЗ: анонсы — даты, онгоинги — время до серии):
+      // каждый id в кэше адаптера, пул 6 — повторные открытия мгновенны.
+      // ВАЖНО: enrichCards возвращает НОВЫЙ массив — присваиваем.
+      let items = parsed
+      if (section === 'ongoing' || section === 'announcements') {
+        items = await this.enrichCards(parsed)
+      }
       return cacheSet(key, {
         section,
         title: SECTION_TITLES[section],
@@ -642,6 +812,35 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       return await this.getAnimeBySlug(slug)
     } catch {
       return demoRandom()
+    }
+  }
+
+  /**
+   * Случайный тайтл ВНУТРИ жанра (ТЗ п.4 «случайное по жанрам»).
+   * Механика: случайная страница категории (до 10, чтобы не листать сотни),
+   * случайная карточка с неё. Кэш адаптера делает повторные крутки дешёвыми.
+   * Пустой/неизвестный жанр → null (роут отдаёт честную 404).
+   */
+  async getRandomByGenre(genre: string): Promise<AnimeCard | null> {
+    const clean = genre.trim().toLowerCase()
+    if (!/^[a-z0-9-]{1,64}$/.test(clean)) return null
+    try {
+      // total pages первой страницей (пагинация в HTML)
+      const first = await fetchText(`${this.baseUrl}/catalog/category/${clean}`)
+      const items = parseCards(first)
+      if (items.length === 0) return null
+      const totalPages = Math.min(parseTotalPages(first) ?? 1, 10)
+      const page = 1 + Math.floor(Math.random() * totalPages)
+      let pool = items
+      if (page > 1) {
+        const html = await fetchText(`${this.baseUrl}/catalog/category/${clean}?page=${page}`)
+        const pageItems = parseCards(html)
+        if (pageItems.length > 0) pool = pageItems
+      }
+      const card = pool[Math.floor(Math.random() * pool.length)]
+      return card ?? null
+    } catch {
+      return null // жанр недоступен — честный null (не выдумываем тайтл)
     }
   }
 
@@ -733,6 +932,10 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
       rating: d.rating?.average ?? null,
       status: d.anime_status?.title ?? null,
       type: d.type?.shortname ?? null,
+      nextEpisodeAt:
+        typeof d.episodes?.next_date === 'number' && d.episodes.next_date > 1_000_000_000
+          ? d.episodes.next_date
+          : null,
       description: d.description != null ? decodeHtmlEntities(d.description) : null,
       genres: (d.genres ?? []).map((g) => decodeHtmlEntities(g.title)),
       studios: (d.studios ?? []).map((s) => s.title),

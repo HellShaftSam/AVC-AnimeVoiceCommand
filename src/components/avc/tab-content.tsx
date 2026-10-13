@@ -1,12 +1,14 @@
 'use client'
 /**
- * TabContent — рендер активной вкладки по kind: home / section / search / anime.
+ * TabContent — рендер активного места по kind: home / section / search / anime.
+ *
+ * Единая история навигации (ТЗ «вкладки → стрелки»): место ОДНО, вкладки не
+ * создаются — содержание меняется по payload активной вкладки, история листается
+ * стрелками NavBar. При смене места скролл уходит наверх (как в браузере).
  */
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Dices,
   Loader2,
   SearchX,
@@ -15,16 +17,18 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { AnimeGrid, AnimeGridSkeleton } from './anime-grid'
 import { AnimeView } from './anime-view'
+import { CatalogBrowser } from './catalog-browser'
+import { RandomView } from './random-view'
+import { ReleaseCalendar } from './release-calendar'
 import { ScheduleView } from './schedule-view'
 import { RecommendationsView } from './recommendations-view'
 import { CompanionView } from './companion-view'
+import { SectionPagination } from './section-pagination'
 import { executeText } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
 import { AnimeCard, BrowserTab, SectionPage } from '@/lib/avc/types'
-import { cn } from '@/lib/utils'
 
 // --- Главная -----------------------------------------------------------------
 
@@ -74,7 +78,8 @@ function HomeView() {
           Скажите команду или нажмите микрофон
         </h2>
         <p className="mt-3 text-sm text-muted-foreground md:text-base">
-          Голосовое управление аниме-сайтом: поиск, каталоги, серии, озвучки, плеер и вкладки.
+          Голосовое управление аниме-сайтом: поиск, каталоги, серии, озвучки и плеер.
+          Навигация — стрелками в панели сверху (Alt+← / Alt+→), поиск — в той же строке (Ctrl+F).
           Удерживайте <kbd className="rounded border border-border bg-card px-1.5 py-0.5 text-xs">Ctrl + Space</kbd> или кнопку микрофона внизу.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
@@ -92,10 +97,10 @@ function HomeView() {
 
       <div className="mt-10 grid gap-4 sm:grid-cols-2">
         {[
-          { icon: SearchX, title: 'Поиск', text: '«Найди берсерк», «открой клейм» — совпадения покажутся списком: скажите номер.' },
+          { icon: SearchX, title: 'Поиск', text: '«Найди берсерк», «открой клейм» — совпадения покажутся списком: скажите номер. Или печатайте в строке поиска — тайтлы появляются по мере ввода.' },
           { icon: Sparkles, title: 'Сериалы', text: '«Следующая серия», «включи пятую», «озвучка anidub», «назад на 30 секунд».' },
-          { icon: Dices, title: 'Витрина', text: '«Открой топ сто», «покажи онгоинги», «открой случайное», «расписание».' },
-          { icon: Loader2, title: 'Плеер и вкладки', text: '«Пауза», «громкость 50», «полный экран», «новая вкладка», «вкладка три».' },
+          { icon: Dices, title: 'Витрина', text: '«Открой топ сто», «покажи онгоинги», «открой случайное» (с выбором жанра), «расписание».' },
+          { icon: Loader2, title: 'Навигация', text: 'Стрелки назад/вперёд листают историю, как в браузере. Голосом: «назад», «вперёд».' },
         ].map(({ icon: Icon, title, text }) => (
           <div
             key={title}
@@ -148,96 +153,13 @@ function HomeView() {
   )
 }
 
-// --- Секция ------------------------------------------------------------------
+// --- Секция ---------------------------------------------------------------------
 
 const PAGE_SIZE_FALLBACK = 1
 
-/**
- * Окно страниц для пагинации: 1, последняя, ±1 вокруг текущей; «…» в разрывах.
- * Пример (стр. 6 из 435): 1 … 5 6 7 … 435
- */
-function pageWindow(current: number, total: number): Array<number | '…'> {
-  const uniq = new Set<number>([1, total, current - 1, current, current + 1])
-  const pages = [...uniq].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b)
-  const out: Array<number | '…'> = []
-  let prev = 0
-  for (const p of pages) {
-    if (p - prev > 1) out.push('…')
-    out.push(p)
-    prev = p
-  }
-  return out
-}
-
-/** Нумерованная пагинация вкладки-секции (как на сайте: страниц может быть сотни) */
-function SectionPagination({
-  page,
-  totalPages,
-  onGo,
-}: {
-  page: number
-  totalPages: number
-  onGo: (p: number) => void
-}) {
-  return (
-    <nav aria-label="Страницы секции" className="flex flex-wrap items-center justify-center gap-1.5">
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label="Предыдущая страница"
-        disabled={page <= 1}
-        onClick={() => onGo(page - 1)}
-        className="h-11 w-11 border-border bg-card/60"
-      >
-        <ChevronLeft className="h-5 w-5" />
-      </Button>
-      {pageWindow(page, totalPages).map((p, i) =>
-        p === '…' ? (
-          <span key={`gap-${i}`} aria-hidden className="px-1 text-sm text-muted-foreground">
-            …
-          </span>
-        ) : (
-          <Button
-            key={p}
-            variant={p === page ? 'default' : 'outline'}
-            aria-label={`Страница ${p}`}
-            aria-current={p === page ? 'page' : undefined}
-            data-testid={`page-${p}`}
-            onClick={() => {
-              if (p !== page) onGo(p)
-            }}
-            className={cn(
-              'h-11 min-w-11 px-2 text-sm tabular-nums',
-              p === page
-                ? 'font-bold'
-                : 'border-border bg-card/60 text-foreground hover:border-gold-400/40 hover:text-gold-300',
-            )}
-          >
-            {p}
-          </Button>
-        ),
-      )}
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label="Следующая страница"
-        disabled={page >= totalPages}
-        onClick={() => onGo(page + 1)}
-        className="h-11 w-11 border-border bg-card/60"
-      >
-        <ChevronRight className="h-5 w-5" />
-      </Button>
-      <span className="ml-1 hidden min-w-20 text-center text-sm text-muted-foreground sm:inline">
-        {page} из {totalPages}
-      </span>
-    </nav>
-  )
-}
-
 function SectionView({ tab }: { tab: BrowserTab }) {
   const patchTab = useAvcStore((s) => s.patchTab)
-  const pushBackStack = useAvcStore((s) => s.pushBackStack)
-  const bumpReload = useAvcStore((s) => s.bumpReload)
+  const navigate = useAvcStore((s) => s.navigate)
   const reloadCounter = useAvcStore((s) => s.tabReloadCounter[tab.id] ?? 0)
   const [data, setData] = useState<SectionPage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -275,27 +197,45 @@ function SectionView({ tab }: { tab: BrowserTab }) {
   }, [section, page, reloadCounter, requestKey])
 
   useEffect(() => {
-    if (data && data.title && data.title !== tab.title) {
+    // Синхронизация заголовка из данных сайта. Guard data.section === section:
+    // при переходе секция→секция внутри НЕ перемонтированного вида старые data
+    // («Анонсы») не должны перебивать свежий заголовок навигации («Расписание»)
+    if (data && data.section === section && data.title && data.title !== tab.title) {
       patchTab(tab.id, { title: data.title })
     }
-  }, [data, tab.id, tab.title, patchTab])
+  }, [data, section, tab.id, tab.title, patchTab])
 
+  // Переключение страницы = запись в единую историю (стрелки листают страницы тоже)
   const goToPage = (next: number) => {
     if (next < 1) return
     if (data?.totalPages != null && next > data.totalPages) return
-    pushBackStack(tab.id, { kind: tab.kind, title: tab.title, payload: tab.payload })
-    patchTab(tab.id, { payload: { ...tab.payload, page: next } })
+    navigate({
+      kind: 'section',
+      title: tab.title,
+      payload: { ...tab.payload, page: next },
+    })
   }
 
-  // Расписание — отдельный вид: плитки по дням недели с временем выхода серий.
-  // ВАЖНО: стоит ПОСЛЕ всех хуков (Rules of Hooks): openSectionTab патчит payload
-  // активной вкладки, поэтому catalog → schedule возможно без перемонтирования.
+  // Специальные виды секций (ВАЖНО: после всех хуков — Rules of Hooks)
   if (section === 'schedule') {
     return <ScheduleView />
   }
+  if (section === 'random') {
+    return <RandomView />
+  }
+  if (section === 'catalog') {
+    return <CatalogBrowser />
+  }
+
+  const isAnnouncements = section === 'announcements'
 
   return (
     <div>
+      {/* Липкая пагинация сверху (ТЗ п.5: доступна в ЛЮБОЙ момент скролла) */}
+      {!loading && !error && data && data.totalPages != null && data.totalPages > 1 && (
+        <SectionPagination page={page} totalPages={data.totalPages} onGo={goToPage} sticky />
+      )}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-bold">{data?.title ?? tab.title}</h2>
         <div className="flex items-center gap-2">
@@ -319,7 +259,7 @@ function SectionView({ tab }: { tab: BrowserTab }) {
           <div className="mt-3">
             <Button
               variant="outline"
-              onClick={() => bumpReload(tab.id)}
+              onClick={() => useAvcStore.getState().bumpReload(tab.id)}
               className="min-h-11 border-border"
             >
               Повторить
@@ -332,7 +272,12 @@ function SectionView({ tab }: { tab: BrowserTab }) {
         <p className="py-10 text-center text-sm text-muted-foreground">Секция пуста</p>
       )}
 
-      {/* Полная нумерованная пагинация под сеткой (как на сайте: 1 … 5 6 7 … 435) */}
+      {/* Анонсы: календарь релизов с листанием месяцев (ТЗ п.3) */}
+      {!loading && !error && data && isAnnouncements && data.items.length > 0 && (
+        <ReleaseCalendar cards={data.items} />
+      )}
+
+      {/* Полная нумерованная пагинация под сеткой */}
       {!loading && !error && data && data.totalPages != null && data.totalPages > 1 && (
         <div className="mt-6 border-t border-border pt-4">
           <SectionPagination page={page} totalPages={data.totalPages} onGo={goToPage} />
@@ -342,28 +287,54 @@ function SectionView({ tab }: { tab: BrowserTab }) {
   )
 }
 
-// --- Поиск ---------------------------------------------------------------------
+// --- Поиск (живой, по мере ввода — ТЗ п.2) ---------------------------------------
+
+interface SuggestResponse {
+  query: string
+  items: AnimeCard[]
+  mode: 'site' | 'index' | 'empty' | string
+  error?: string
+}
 
 function SearchView({ tab }: { tab: BrowserTab }) {
   const query = typeof tab.payload.query === 'string' ? tab.payload.query : ''
-  const reloadCounter = useAvcStore((s) => s.tabReloadCounter[tab.id] ?? 0)
-  const [items, setItems] = useState<AnimeCard[]>([])
+  const live = tab.payload.live === true
+  // Дебаунс 250 мс: тайтлы появляются по мере ввода, но без запроса на каждый символ
+  const [debounced, setDebounced] = useState(query)
+  const [items, setItems] = useState<AnimeCard[] | null>(null)
+  const [mode, setMode] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [loadedKey, setLoadedKey] = useState('')
 
-  const requestKey = `${query}:${reloadCounter}`
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebounced(query), 250)
+    return () => window.clearTimeout(id)
+  }, [query])
+
+  const requestKey = `q:${debounced}`
   const loading = loadedKey !== requestKey
 
   useEffect(() => {
+    const trimmed = debounced.trim()
+    if (!trimmed) {
+      // пустой запрос — сброс результатов (в отложенном тике: set-state-in-effect)
+      const id = window.setTimeout(() => {
+        setItems(null)
+        setError(null)
+        setLoadedKey('q:')
+      }, 0)
+      return () => window.clearTimeout(id)
+    }
     let cancelled = false
-    fetch(`/api/site/search?q=${encodeURIComponent(query)}`)
+    fetch(`/api/site/suggest?q=${encodeURIComponent(trimmed)}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return (await r.json()) as { items?: AnimeCard[] }
+        return (await r.json()) as SuggestResponse
       })
       .then((d) => {
         if (cancelled) return
         setItems(d.items ?? [])
+        setMode(d.mode ?? 'site')
         setError(null)
         setLoadedKey(requestKey)
       })
@@ -375,21 +346,47 @@ function SearchView({ tab }: { tab: BrowserTab }) {
     return () => {
       cancelled = true
     }
-  }, [query, reloadCounter, requestKey])
+  }, [debounced])
+
+  const waiting = live && query.trim() !== debounced.trim()
 
   return (
     <div>
-      <h2 className="mb-4 text-lg font-bold">
-        Результаты: <span className="text-gold-300">{query}</span>
-      </h2>
-      {loading && <AnimeGridSkeleton />}
-      {!loading && error && <p className="text-sm text-rose-400">✗ {error}</p>}
-      {!loading && !error && items.length === 0 && (
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-bold">
+          Поиск: <span className="text-gold-300">{query}</span>
+        </h2>
+        {mode === 'index' && (
+          <Badge variant="outline" className="border-border text-xs text-muted-foreground">
+            короткий запрос — популярные тайтлы
+          </Badge>
+        )}
+        {(loading || waiting) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />}
+      </div>
+
+      {(!live && query.trim() === '') || (live && query.trim() === '') ? (
         <p className="py-10 text-center text-sm text-muted-foreground">
-          Ничего не найдено по запросу «{query}»
+          Начните вводить название в строке поиска сверху (Ctrl+F) — тайтлы появятся здесь
         </p>
+      ) : (
+        <>
+          {(loading || waiting) && items === null && <AnimeGridSkeleton />}
+          {!loading && !waiting && error && <p className="text-sm text-rose-400">✗ {error}</p>}
+          {!loading && !waiting && items !== null && items.length === 0 && (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Ничего не найдено по запросу «{query}»
+            </p>
+          )}
+          {!loading && !waiting && items !== null && items.length > 0 && (
+            <>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Найдено: {items.length}. Сначала — названия, начинающиеся с запроса, затем совпадения внутри названия.
+              </p>
+              <AnimeGrid items={items} />
+            </>
+          )}
+        </>
       )}
-      {!loading && !error && items.length > 0 && <AnimeGrid items={items} />}
     </div>
   )
 }
@@ -397,6 +394,13 @@ function SearchView({ tab }: { tab: BrowserTab }) {
 // --- переключатель ---------------------------------------------------------------
 
 export function TabContent({ tab }: { tab: BrowserTab }) {
+  // Смена места (навигация/стрелки/страница) — контент начинается сверху,
+  // как в браузере. Ключ = payload: заголовки (title) скролл не трогают.
+  const payloadKey = JSON.stringify(tab.payload ?? {})
+  useEffect(() => {
+    document.getElementById('avc-content')?.scrollTo({ top: 0 })
+  }, [payloadKey])
+
   switch (tab.kind) {
     case 'home':
       return <HomeView />

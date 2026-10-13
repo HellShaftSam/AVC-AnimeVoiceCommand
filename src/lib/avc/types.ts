@@ -344,6 +344,16 @@ export interface AnimeCard {
   rating: number | null
   status: string | null
   type: string | null
+  /**
+   * Unix-время (СЕКУНДЫ) выхода следующей серии, если сайту известно
+   * (детали /api/anime/{id} → episodes.next_date; расписание → data-time).
+   * null/undefined — дата неизвестна (честно не показываем).
+   */
+  nextEpisodeAt?: number | null
+  /** Вышло серий (из деталей); для плиток онгоингов/анонсов */
+  episodesAired?: number | null
+  /** Всего серий (из деталей); null — неизвестно */
+  episodesTotal?: number | null
 }
 
 export interface DubOption {
@@ -402,6 +412,8 @@ export interface AnimeDetails extends AnimeCard {
   studios: string[]
   episodesAired: number
   episodesTotal: number | null
+  /** Unix-время (сек) следующей серии из details API (episodes.next_date); null — не известно */
+  nextEpisodeAt?: number | null
   dubs: DubOption[]
   videos: VideoEntry[]
   /** MAL ID (MyAnimeList) с сайта — для Aniskip; null если сайт не отдал */
