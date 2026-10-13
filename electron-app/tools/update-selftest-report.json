@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-13T18:57:26.579Z",
+  "ranAt": "2026-10-13T21:03:45.638Z",
   "repo": "HellShaftSam/AVC-AnimeVoiceCommand",
   "pass": 11,
   "fail": 0,
@@ -56,19 +56,19 @@
       "id": "T7",
       "name": "EXE-ассет найден и имеет browser_download_url",
       "ok": true,
-      "detail": "AVC-Anime-Portable-1.0.32.exe (174 МБ)"
+      "detail": "AVC-Anime-Portable-1.0.33.exe (174 МБ)"
     },
     {
       "id": "T8",
       "name": "digest ассета от GitHub API валиден (sha256:64hex)",
       "ok": true,
-      "detail": "sha256:252890cad91f…"
+      "detail": "sha256:d510016b86a9…"
     },
     {
       "id": "T9",
       "name": "доступность обновления считается верно",
       "ok": true,
-      "detail": "latest=v1.0.32: vs 1.0.1 → 1, vs 99.0.0 → -1"
+      "detail": "latest=v1.0.33: vs 1.0.1 → 1, vs 99.0.0 → -1"
     }
   ]
 }
