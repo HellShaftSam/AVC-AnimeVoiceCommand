@@ -98,3 +98,25 @@ export function formatRelative(unixSec: number, nowMs: number): string {
   const restH = h % 24
   return restH > 0 ? `через ${d} дн ${restH} ч` : `через ${d} дн`
 }
+
+/**
+ * Честная подпись даты выхода по её ТОЧНОСТИ (ТЗ: не выдавать «в 2027 году»
+ * за точную дату и наоборот). Самодостаточная фраза с предлогом.
+ * Все времена — Астана.
+ */
+export function formatReleaseDate(date: {
+  precision: 'day' | 'month' | 'year' | 'unknown'
+  unix: number | null
+  y: number | null
+  m: number | null
+}): string {
+  if (date.precision === 'day' && date.unix !== null) {
+    const p = kzDateParts(date.unix)
+    return `${p.d} ${MONTHS_GEN[p.m - 1]} ${p.y}`
+  }
+  if (date.precision === 'month' && date.y !== null && date.m !== null) {
+    return `с ${MONTHS_GEN[date.m - 1]} ${date.y}`
+  }
+  if (date.precision === 'year' && date.y !== null) return `в ${date.y} году`
+  return 'дата не объявлена'
+}

@@ -28,7 +28,7 @@ import { CompanionView } from './companion-view'
 import { SectionPagination } from './section-pagination'
 import { executeText } from '@/lib/avc/executor'
 import { useAvcStore } from '@/lib/avc/store'
-import { AnimeCard, BrowserTab, SectionPage } from '@/lib/avc/types'
+import { AnimeCard, BrowserTab, ReleaseDateInfo, SectionPage } from '@/lib/avc/types'
 
 // --- Главная -----------------------------------------------------------------
 
@@ -169,6 +169,12 @@ function SectionView({ tab }: { tab: BrowserTab }) {
   const page = typeof tab.payload.page === 'number' ? tab.payload.page : PAGE_SIZE_FALLBACK
   const requestKey = `${section}:${page}:${reloadCounter}`
   const loading = loadedKey !== requestKey
+  /**
+   * Даты выхода с точностью (анонсы: батч release-meta) — хранятся ВМЕСТЕ
+   * с ключом запроса: смена секции/страницы автоматически «сбрасывает» их
+   * без setState-in-effect (слияние только когда ключ совпадает).
+   */
+  const [releaseDates, setReleaseDates] = useState<{ key: string; map: Record<number, ReleaseDateInfo> } | null>(null)
 
   useEffect(() => {
     // Расписание рендерится отдельным видом (ScheduleView c своей загрузкой) —
@@ -196,6 +202,28 @@ function SectionView({ tab }: { tab: BrowserTab }) {
     }
   }, [section, page, reloadCounter, requestKey])
 
+  // Анонсы: один батч-запрос дат на страницу (кэш сервера 3 ч) — точность дат
+  // (день/месяц/год/не объявлена) доезжает на плитки и календарь (ТЗ §3/§14.8)
+  useEffect(() => {
+    if (section !== 'announcements' || !data || data.items.length === 0) return
+    let cancelled = false
+    const ids = data.items.map((c) => c.animeId).slice(0, 40)
+    fetch(`/api/site/release-meta?ids=${ids.join(',')}`, { cache: 'no-store' })
+      .then(async (r) => (r.ok ? ((await r.json()) as { items: Record<number, { releaseDate: ReleaseDateInfo }> }) : null))
+      .then((d) => {
+        if (cancelled || !d) return
+        const map: Record<number, ReleaseDateInfo> = {}
+        for (const [id, meta] of Object.entries(d.items)) {
+          if (meta?.releaseDate) map[Number(id)] = meta.releaseDate
+        }
+        setReleaseDates({ key: requestKey, map })
+      })
+      .catch(() => undefined) // без дат плитки честно молчат, секция не падает
+    return () => {
+      cancelled = true
+    }
+  }, [section, data, requestKey])
+
   useEffect(() => {
     // Синхронизация заголовка из данных сайта. Guard data.section === section:
     // при переходе секция→секция внутри НЕ перемонтированного вида старые data
@@ -221,13 +249,20 @@ function SectionView({ tab }: { tab: BrowserTab }) {
     return <ScheduleView />
   }
   if (section === 'random') {
-    return <RandomView />
+    return <RandomView tab={tab} />
   }
   if (section === 'catalog') {
     return <CatalogBrowser />
   }
 
   const isAnnouncements = section === 'announcements'
+  // Слитые карточки: даты с точностью прилетают в бейдж плитки и календарь
+  // (ключ гарантирует, что даты не от старой страницы не смешаются с новой)
+  const releaseMap = releaseDates && releaseDates.key === requestKey ? releaseDates.map : null
+  const mergedItems =
+    data && isAnnouncements && releaseMap
+      ? data.items.map((c) => ({ ...c, releaseDate: releaseMap[c.animeId] ?? null }))
+      : data?.items ?? []
 
   return (
     <div>
@@ -267,14 +302,14 @@ function SectionView({ tab }: { tab: BrowserTab }) {
           </div>
         </div>
       )}
-      {!loading && !error && data && <AnimeGrid items={data.items} />}
+      {!loading && !error && data && <AnimeGrid items={mergedItems} />}
       {!loading && !error && data && data.items.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">Секция пуста</p>
       )}
 
       {/* Анонсы: календарь релизов с листанием месяцев (ТЗ п.3) */}
       {!loading && !error && data && isAnnouncements && data.items.length > 0 && (
-        <ReleaseCalendar cards={data.items} />
+        <ReleaseCalendar cards={mergedItems} datesLoading={isAnnouncements && releaseMap === null} />
       )}
 
       {/* Полная нумерованная пагинация под сеткой */}

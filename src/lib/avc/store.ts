@@ -416,7 +416,22 @@ export const useAvcStore = create<AvcState>()((set, get) => ({
   patchTab: (id, patch) =>
     set((s) => {
       const tabs = s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t))
-      return { tabs, navigation: deriveNavigation(tabs, s.activeTabId, s.pendingOptions) }
+      // Текущая запись истории = место активной вкладки: обновляем снапшот
+      // вместе с вкладкой, иначе «назад» возвращает СТАРЫЙ payload
+      // (например, сбрасывает выбранные жанры «Случайного» или query живого поиска).
+      let navHistory = s.navHistory
+      if (id === s.activeTabId && navHistory.length > 0) {
+        navHistory = navHistory.map((e, i) =>
+          i === s.navIndex
+            ? {
+                ...e,
+                ...(patch.title !== undefined ? { title: patch.title } : null),
+                ...(patch.payload !== undefined ? { payload: patch.payload } : null),
+              }
+            : e,
+        )
+      }
+      return { tabs, navHistory, navigation: deriveNavigation(tabs, s.activeTabId, s.pendingOptions) }
     }),
 
   restoreSession: (tabs, activeId) =>

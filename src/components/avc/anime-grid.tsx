@@ -10,15 +10,43 @@
  * «через…» (обратный отсчёт), для анонсов — дата премьеры. Время — Астана.
  */
 import { useRef } from 'react'
-import { Clock, Star } from 'lucide-react'
+import { CalendarClock, Clock, Star } from 'lucide-react'
 import { openAnimeCard } from '@/lib/avc/executor'
 import type { AnimeCard } from '@/lib/avc/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AnimeHoverPreview, useAnimeHover } from './anime-hover-preview'
-import { formatKzDateTimeShort, formatRelative, useNowTick } from './time-utils'
+import { formatKzDateTimeShort, formatReleaseDate, formatRelative, useNowTick } from './time-utils'
 
-/** Бейдж следующей серии/премьеры (ТЗ п.3, п.6): честно только при известных данных */
+/**
+ * Бейдж следующей серии/премьеры (ТЗ п.3, п.6): честно только при известных
+ * данных. Анонсы с точностью даты (releaseDate) показывают честный уровень:
+ * «в 2027 году» / «с июля 2027» / точная дата + «дата не объявлена».
+ */
 export function NextEpisodeBadge({ card, nowMs }: { card: AnimeCard; nowMs: number }) {
+  const rd = card.releaseDate
+  // Дата с точностью хуже дня: честная подпись вместо фальшивого «1 января»
+  if (rd && (rd.precision === 'year' || rd.precision === 'month' || rd.precision === 'unknown')) {
+    if (rd.precision === 'unknown') {
+      return (
+        <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <CalendarClock className="h-3 w-3" aria-hidden />
+          дата не объявлена
+        </span>
+      )
+    }
+    const approx = !rd.confirmed
+    return (
+      <span
+        className="mt-1 inline-flex w-fit items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-300"
+        title={rd.note ?? undefined}
+      >
+        <CalendarClock className="h-3 w-3" aria-hidden />
+        {formatReleaseDate(rd)}
+        {approx && <span className="text-emerald-400/80">· предположительно</span>}
+      </span>
+    )
+  }
+
   const t = card.nextEpisodeAt
   if (typeof t !== 'number' || t <= 0) return null
   const released = t * 1000 < nowMs - 5 * 60_000

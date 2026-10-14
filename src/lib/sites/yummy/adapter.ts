@@ -318,7 +318,8 @@ interface ApiAnimeDetails {
   year: number
   poster: { medium?: string; big?: string }
   rating: { average: number }
-  anime_status: { title: string }
+  /** alias: released | ongoing | announcement (LIVE-VERIFY /api/anime/29420) */
+  anime_status: { title: string; alias?: string }
   type: { shortname: string }
   genres: Array<{ title: string }>
   studios: Array<{ title: string }>
@@ -936,6 +937,11 @@ export class YummyAnimeAdapter implements IAnimeSiteAdapter {
         typeof d.episodes?.next_date === 'number' && d.episodes.next_date > 1_000_000_000
           ? d.episodes.next_date
           : null,
+      episodesPrevDate:
+        typeof d.episodes?.prev_date === 'number' && d.episodes.prev_date > 1_000_000_000
+          ? d.episodes.prev_date
+          : null,
+      statusAlias: typeof d.anime_status?.alias === 'string' ? d.anime_status.alias : null,
       description: d.description != null ? decodeHtmlEntities(d.description) : null,
       genres: (d.genres ?? []).map((g) => decodeHtmlEntities(g.title)),
       studios: (d.studios ?? []).map((s) => s.title),

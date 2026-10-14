@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Player } from './player'
+import { AnnouncementBlock, TrailersSection } from './announcement-block'
 import { toast } from '@/hooks/use-toast'
 import {
   executeCommand,
@@ -186,6 +187,8 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
   const desc = details.description ?? ''
   const currentEp = playback.currentEpisode
   const isDemo = details.source === 'demo'
+  /** Тайтл ещё БЕЗ доступных серий → блок анонса вместо списка серий (ТЗ §5) */
+  const noEpisodes = maxEp === 0
 
   const pickEpisode = (n: number) => {
     void executeCommand({
@@ -332,9 +335,15 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
           )}
 
           <p className="mt-3 text-sm text-muted-foreground">
-            Серия <span className="font-semibold text-gold-300">{currentEp ?? '—'}</span> из{' '}
-            {maxEp > 0 ? maxEp : '—'} · Озвучка:{' '}
-            <span className="text-foreground">{playback.currentDub ?? 'не выбрана'}</span>
+            {noEpisodes ? (
+              <>Серии ещё не появились{details.episodesTotal && details.episodesTotal > 0 ? ` (заявлено ${details.episodesTotal})` : ''}</>
+            ) : (
+              <>
+                Серия <span className="font-semibold text-gold-300">{currentEp ?? '—'}</span> из{' '}
+                {maxEp > 0 ? maxEp : '—'} · Озвучка:{' '}
+                <span className="text-foreground">{playback.currentDub ?? 'не выбрана'}</span>
+              </>
+            )}
           </p>
 
           {details.dubs.length > 0 && (
@@ -393,9 +402,21 @@ export function AnimeView({ tab }: { tab: BrowserTab }) {
         </div>
       )}
 
-      <div className="mt-6">
-        <Player />
-      </div>
+      {/*
+        Анонс/ожидание: вместо пустого списка серий и плеера — блок со статусом,
+        честной датой, официальным трейлером и расписанием серий (ТЗ §5, §6).
+        Серии появились → авто-перезагрузка вкладки → обычный список серий.
+      */}
+      {noEpisodes && <AnnouncementBlock details={details} onEpisodesAppeared={() => bumpReload(tab.id)} />}
+
+      {/* Серии уже есть: трейлеры не пропадают — отдельная секция (сценарий C) */}
+      {!noEpisodes && <TrailersSection animeId={details.animeId} title={details.title} />}
+
+      {!noEpisodes && (
+        <div className="mt-6">
+          <Player />
+        </div>
+      )}
 
       <EpisodesDialog details={details} maxEp={maxEp} />
     </div>

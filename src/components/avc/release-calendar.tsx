@@ -2,19 +2,23 @@
 /**
  * ReleaseCalendar — календарь релизов (ТЗ п.3: «куда-нибудь запихнуть типа
  * календаря, где будут отмечены известные тайтлы, чтобы можно было листать
- * и смотреть в каком порядке они выходят по датам»).
+ * и смотреть в каком порядке они выходят по датам») + ТЗ §14.8.
  *
  * Источники событий (честные, без выдумок):
- *  1. Анонсы: дата премьеры/следующей серии из деталей (episodes.next_date)
- *  2. Расписание: время следующей серии онгоинга (data-time) + проекция
- *     еженедельного слота вперёд по 7-дневным шагам (помечено «по расписанию»)
+ *  1. Анонсы: ТОЧНАЯ дата премьеры/следующей серии (releaseDate.precision=day
+ *    или episodes.next_date сайта) → день в сетке.
+ *  2. Анонсы с грубой точностью («в 2027», «с июля 2027», «не объявлена») →
+ *    отдельный честный список «Без точной даты» под сеткой — НЕ рисуются
+ *    фальшивыми точками в конкретном дне.
+ *  3. Расписание: время следующей серии онгоинга (data-time) + проекция
+ *    еженедельного слота вперёд по 7-дневным шагам (помечено «по расписанию»).
  *
  * Все времена — Астана (Asia/Almaty, UTC+5). Листание — месяцами.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { openAnimeCard } from '@/lib/avc/executor'
-import type { AnimeCard, SchedulePage } from '@/lib/avc/types'
+import type { AnimeCard, ReleaseDateInfo, SchedulePage } from '@/lib/avc/types'
 import { cn } from '@/lib/utils'
 import { formatKzTime, kzDateParts, kzDayKey, useNowTick } from './time-utils'
 
@@ -25,6 +29,16 @@ interface CalEvent {
   slug: string
   poster: string | null
   kind: 'announcement' | 'schedule'
+  /** Номер серии (если событие — серия, а не премьера) */
+  episode: number | null
+  /** Расчётная дата (проекция еженедельного слота) — помечается честно */
+  estimated: boolean
+}
+
+/** Анонс без точного дня — в отдельный список (месяц/год/не объявлена) */
+interface VagueEvent {
+  card: AnimeCard
+  date: ReleaseDateInfo
 }
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
@@ -46,7 +60,20 @@ function monthGrid(y: number, m: number): Array<number | null> {
   return cells
 }
 
-export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
+function vagueSortKey(d: ReleaseDateInfo): number {
+  // Сортировка списка «без точной даты»: сначала более точные/более ранние
+  if (d.precision === 'month' && d.y !== null && d.m !== null) return d.y * 12 + d.m
+  if (d.precision === 'year' && d.y !== null) return d.y * 12
+  return 9999 * 12
+}
+
+function vagueLabel(d: ReleaseDateInfo): string {
+  if (d.precision === 'month' && d.y !== null && d.m !== null) return `${MONTHS_NOM[d.m - 1].toLowerCase()} ${d.y}`
+  if (d.precision === 'year' && d.y !== null) return `${d.y} год`
+  return 'дата не объявлена'
+}
+
+export function ReleaseCalendar({ cards, datesLoading = false }: { cards: AnimeCard[]; datesLoading?: boolean }) {
   const nowMs = useNowTick(60_000)
   // Текущий месяц В ПОЯСЕ АСТАНЫ
   const todayParts = kzDateParts(Math.floor(nowMs / 1000))
@@ -68,7 +95,7 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
     }
   }, [])
 
-  const eventsByDay = useMemo(() => {
+  const { eventsByDay, vague } = useMemo(() => {
     const map = new Map<string, CalEvent[]>()
     const push = (e: CalEvent) => {
       const key = kzDayKey(e.unix)
@@ -76,17 +103,28 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
       list.push(e)
       map.set(key, list)
     }
+    const vagueList: VagueEvent[] = []
 
-    // 1. Анонсы: точные даты премьер/следующих серий
+    // 1. Анонсы: точные даты премьер/следующих серий → сетка;
+    //    грубая точность → список «без точной даты» (не рисуем фальшь)
     for (const c of cards) {
-      if (typeof c.nextEpisodeAt === 'number' && c.nextEpisodeAt > 1_000_000_000) {
+      const rd = c.releaseDate
+      if (rd && (rd.precision === 'month' || rd.precision === 'year' || rd.precision === 'unknown')) {
+        vagueList.push({ card: c, date: rd })
+        continue
+      }
+      const exactUnix =
+        rd && rd.precision === 'day' && rd.unix !== null ? rd.unix : typeof c.nextEpisodeAt === 'number' && c.nextEpisodeAt > 1_000_000_000 ? c.nextEpisodeAt : null
+      if (exactUnix !== null) {
         push({
-          unix: c.nextEpisodeAt,
+          unix: exactUnix,
           title: c.title,
           animeId: c.animeId,
           slug: c.slug,
           poster: c.poster,
           kind: 'announcement',
+          episode: typeof c.episodesAired === 'number' && c.episodesAired > 0 ? c.episodesAired + 1 : null,
+          estimated: false,
         })
       }
     }
@@ -108,6 +146,7 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
             t += weeks * 7 * 86400
           }
           let guard = 0
+          let ep = typeof entry.episodesAired === 'number' && entry.episodesAired > 0 ? entry.episodesAired + 1 : null
           while (t <= monthEnd && guard < 12) {
             if (t >= monthStart) {
               push({
@@ -117,9 +156,12 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
                 slug: entry.slug,
                 poster: entry.poster,
                 kind: 'schedule',
+                episode: ep,
+                estimated: true,
               })
             }
             t += 7 * 86400
+            if (ep !== null) ep += 1
             guard += 1
           }
         }
@@ -128,7 +170,8 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
 
     // Внутри дня — по времени выхода
     for (const list of map.values()) list.sort((a, b) => a.unix - b.unix)
-    return map
+    vagueList.sort((a, b) => vagueSortKey(a.date) - vagueSortKey(b.date) || a.card.title.localeCompare(b.card.title, 'ru'))
+    return { eventsByDay: map, vague: vagueList }
   }, [cards, schedule, ym, nowMs])
 
   const grid = monthGrid(ym.y, ym.m)
@@ -260,9 +303,44 @@ export function ReleaseCalendar({ cards }: { cards: AnimeCard[] }) {
                       aria-hidden
                       className={cn('h-1.5 w-1.5 shrink-0 rounded-full', e.kind === 'announcement' ? 'bg-gold-300' : 'bg-emerald-400')}
                     />
-                    <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {e.title}
+                      {e.episode !== null && <span className="text-muted-foreground"> · серия {e.episode}</span>}
+                    </span>
                     <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
-                      {e.kind === 'announcement' ? 'анонс' : 'по расписанию'}
+                      {e.kind === 'announcement' ? 'анонс' : e.estimated ? 'по расписанию' : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Анонсы БЕЗ точного дня: месяц / год / не объявлена — честный список (ТЗ §14.8) */}
+      {(vague.length > 0 || datesLoading) && (
+        <div className="mt-3 rounded-xl border border-border bg-card/40 p-3" data-testid="calendar-vague">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Анонсы без точной даты
+            {datesLoading && <span className="ml-2 font-normal normal-case">уточняю…</span>}
+          </p>
+          {vague.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {datesLoading ? 'Проверяю источники дат…' : 'Все анонсы этой страницы имеют точные даты'}
+            </p>
+          ) : (
+            <ul className="grid gap-1.5 sm:grid-cols-2">
+              {vague.map(({ card, date }) => (
+                <li key={card.animeId}>
+                  <button
+                    onClick={() => void openAnimeCard(card)}
+                    className="flex w-full items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left text-sm transition-colors hover:border-gold-400/30 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{card.title}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {vagueLabel(date)}
+                      {!date.confirmed && ' · предположительно'}
                     </span>
                   </button>
                 </li>

@@ -354,6 +354,11 @@ export interface AnimeCard {
   episodesAired?: number | null
   /** Всего серий (из деталей); null — неизвестно */
   episodesTotal?: number | null
+  /**
+   * Дата выхода с точностью (анонсы: батч release-meta); при undefined —
+   * обычный бейдж по nextEpisodeAt. Заполняется секцией «Анонсы».
+   */
+  releaseDate?: ReleaseDateInfo | null
 }
 
 export interface DubOption {
@@ -414,6 +419,10 @@ export interface AnimeDetails extends AnimeCard {
   episodesTotal: number | null
   /** Unix-время (сек) следующей серии из details API (episodes.next_date); null — не известно */
   nextEpisodeAt?: number | null
+  /** Unix-время (сек) предыдущей серии (episodes.prev_date) — для периодичности расписания */
+  episodesPrevDate?: number | null
+  /** Машинный статус сайта (anime_status.alias): released | ongoing | announcement */
+  statusAlias?: string | null
   dubs: DubOption[]
   videos: VideoEntry[]
   /** MAL ID (MyAnimeList) с сайта — для Aniskip; null если сайт не отдал */
@@ -422,6 +431,83 @@ export interface AnimeDetails extends AnimeCard {
   viewingOrder?: RelatedAnime[]
   /** Откуда данные: live — реальный сайт; demo — сетевой fallback (честный бейдж в UI) */
   source?: 'live' | 'demo'
+}
+
+// ---------------------------------------------------------------------------
+// Даты выхода и трейлеры анонсов (многоисточниковая система: YummyAnime +
+// AniList GraphQL, резерв Jikan). Все времена — unix СЕКУНДЫ, отображение —
+// Астана (Asia/Almaty) на клиенте.
+// ---------------------------------------------------------------------------
+
+/** Точность известной даты выхода (честная, без выдумок) */
+export type ReleasePrecision = 'day' | 'month' | 'year' | 'unknown'
+
+/** Дата выхода с указанием точности и происхождения (ТЗ §3: не придумывать даты) */
+export interface ReleaseDateInfo {
+  /** day → точная дата (unix); month/year → только m/y; unknown → ничего */
+  precision: ReleasePrecision
+  /** Точный момент (unix сек, UTC) — только при precision='day', иначе null */
+  unix: number | null
+  y: number | null
+  /** 1..12 */
+  m: number | null
+  d: number | null
+  /** Источник: 'yummy' | 'anilist' | 'jikan' */
+  source: string
+  /** true — подтверждено источником; false — расчётная/конфликт источников */
+  confirmed: boolean
+  /** Происхождение/конфликт: «по AniList: 11 октября 2026» и т.п. */
+  note: string | null
+}
+
+/** Официальный видеоролик (трейлер/тизер/PV) анонсированного тайтла */
+export interface TrailerInfo {
+  /** YouTube ID (встраивание — youtube.com/embed/{id}; видео не храним) */
+  youtubeId: string
+  /** Подпись: «Тизер», «Трейлер 2», «PV» … */
+  title: string
+  /** Откуда ролик: yummy (сайт), anilist, jikan */
+  source: string
+}
+
+/** Следующая серия с подтверждённым временем */
+export interface NextEpisodeInfo {
+  number: number
+  /** Unix сек (UTC) */
+  at: number
+  source: string
+}
+
+/** Расписание серий (ТЗ §14: премьера ≠ расписание эпизодов) */
+export interface EpisodeScheduleInfo {
+  /** Подтверждённая следующая серия (точное время) */
+  next: NextEpisodeInfo | null
+  /** Подтверждённая еженедельная периодичность (day 1=Пн…7=Вс, время Астаны) */
+  weekly: { weekday: number; hh: number; mm: number } | null
+  /** Расчётные будущие серии (пометить «расчётная дата») — только при weekly */
+  estimated: Array<{ number: number; at: number }>
+  /** false → «Расписание серий пока не объявлено» */
+  announced: boolean
+}
+
+/** Сводное состояние тайтла (логические состояния ТЗ §6) */
+export type ReleaseStatus =
+  | 'announced' // анонс, эпизодов нет
+  | 'upcoming' // анонс + известна будущая дата премьеры
+  | 'airing' // выходит, есть эпизоды
+  | 'released' // вышел полностью
+  | 'delayed' // дата прошла/перенос, эпизодов нет
+  | 'unknown'
+
+/** Полные метаданные выхода для одного тайтла (ответ /api/site/release-meta) */
+export interface ReleaseMeta {
+  status: ReleaseStatus
+  releaseDate: ReleaseDateInfo
+  nextEpisode: NextEpisodeInfo | null
+  schedule: EpisodeScheduleInfo
+  trailers: TrailerInfo[]
+  /** Момент последней проверки (Date.now()) */
+  checkedAt: number
 }
 
 export interface SectionPage {

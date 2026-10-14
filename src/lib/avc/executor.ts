@@ -553,6 +553,15 @@ async function playEpisode(episode: number): Promise<CommandResult> {
   const details = await fetchDetails(pb.animeId)
   if (!details) return fail('Не удалось загрузить данные аниме')
   const max = maxEpisodeOf(details)
+  // Анонс/ожидание: не запускаем поиск серии в плеере (ТЗ §5) — честное сообщение
+  if (max === 0) {
+    const alias = (details.statusAlias ?? '').toLowerCase()
+    const ru = (details.status ?? '').toLowerCase()
+    if (alias === 'announcement' || ru.includes('анонс')) {
+      return fail('Серий ещё нет — тайтл в статусе анонса (трейлер на его странице)')
+    }
+    return fail('Доступных серий пока нет')
+  }
   if (!Number.isFinite(episode) || episode < 1 || (max > 0 && episode > max)) {
     return fail(`Серия ${episode} не найдена`)
   }
