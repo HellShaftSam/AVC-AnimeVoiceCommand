@@ -351,6 +351,20 @@ function checkPendingUpdate() {
 // --- Next.js сервер для packaged-сборки -----------------------------------------
 // (nextProcess объявлен вверху модуля — до регистрации обработчиков ошибок)
 
+/** Кольцевой буфер последних строк вывода Next-сервера ([Next]/[Next:err]).
+ *  УРОК РЕЛИЗА 1.0.36: сообщение «Подробности в логе, строки выше» бесполезно,
+ *  если окно ошибки открылось в fallback-режиме (нативный диалог без лога).
+ *  Теперь хвост вывода сервера попадает ПРЯМО в текст фатальной ошибки. */
+const NEXT_TAIL_MAX = 40
+const nextOutputTail = []
+function rememberNextOutput(line) {
+  nextOutputTail.push(line)
+  if (nextOutputTail.length > NEXT_TAIL_MAX) nextOutputTail.shift()
+}
+function nextOutputTailText(lines = 12) {
+  return nextOutputTail.slice(-lines).join('\n') || '(сервер ничего не вывел)'
+}
+
 function findFreePort(start) {
   return new Promise((resolve) => {
     const srv = http.createServer()
@@ -392,6 +406,80 @@ function waitForServer(url, timeoutMs = 90000, onTick) {
   })
 }
 
+/**
+ * ОДНА попытка запуска packaged Next-сервера.
+ * Резолвится url'ом при готовности; реджектится понятной причиной, если процесс
+ * умер до готовности или не ответил за отведённое время.
+ *
+ * Гонка «exit vs ready» (урок 1.0.36): раньше exit-обработчик проверял флаг
+ * serverReady, который выставлялся ПОСЛЕ await waitForServer — краш сервера
+ * в микрозазоре между «probe ответил» и «флаг выставлен» давал ЛОЖНЫЙ фатал.
+ * Теперь готовность и смерть соревнуются в Promise.race честно.
+ */
+async function attemptNextServer(serverEntry, dbTarget, attempt, totalAttempts) {
+  const port = await findFreePort(3010)
+  const url = `http://127.0.0.1:${port}`
+  log(`[Main] Starting packaged Next server on port ${port} (попытка ${attempt}/${totalAttempts})`)
+  let child
+  try {
+    child = spawn(process.execPath, [serverEntry], {
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+        PORT: String(port),
+        HOSTNAME: '127.0.0.1',
+        NODE_ENV: 'production',
+        // Windows-пути с "\" ломают file:-URL Prisma — всегда прямые слэши
+        DATABASE_URL: `file:${dbTarget.split(path.sep).join('/')}`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (e) {
+    throw new Error(`не удалось запустить процесс сервера: ${e.message}`)
+  }
+  nextProcess = child
+  child.stdout.on('data', (d) => {
+    const s = String(d).trim()
+    if (s) {
+      rememberNextOutput(`[Next] ${redact(s.slice(0, 400))}`)
+      log(`[Next] ${redact(s.slice(0, 400))}`)
+    }
+  })
+  child.stderr.on('data', (d) => {
+    const s = String(d).trim()
+    if (s) {
+      rememberNextOutput(`[Next:err] ${redact(s.slice(0, 400))}`)
+      log(`[Next:err] ${redact(s.slice(0, 400))}`)
+    }
+  })
+
+  // Первая попытка терпеливая (медленные машины/антивирус на распаковке),
+  // повторные — короче: после краша долго ждать нечего
+  const waitMs = attempt === 1 ? 90000 : 45000
+  const outcome = await Promise.race([
+    waitForServer(url, waitMs, (sec) => {
+      setSplashStage(`Запуск локального сервера… ${sec} с (попытка ${attempt}/${totalAttempts})`)
+    }).then(() => ({ ready: true })),
+    new Promise((resolve) => {
+      child.once('exit', (code, signal) => resolve({ exited: true, code, signal }))
+    }),
+  ]).catch((e) => ({ timedOut: true, error: e }))
+
+  if (outcome && outcome.ready) return url
+
+  if (outcome && outcome.exited) {
+    nextProcess = null
+    const why = outcome.code !== null && outcome.code !== undefined ? `код ${outcome.code}` : `сигнал ${outcome.signal}`
+    log(`[Main] Next server exited before ready (${why})`)
+    throw new Error(`сервер интерфейса завершился до готовности (${why})`)
+  }
+
+  // Таймаут: процесс ещё жив — снимаем дерево, чтобы не копить сироты
+  try { if (nextProcess) killProcessTree(nextProcess) } catch { /* уже мёртв */ }
+  nextProcess = null
+  throw new Error(outcome && outcome.error ? outcome.error.message : 'сервер интерфейса не ответил за отведённое время')
+}
+
 async function startNextServer() {
   // Dev-режим: используем уже запущенный сервер разработки
   const devUrl = process.env.AVC_APP_URL || 'http://localhost:3000'
@@ -403,7 +491,6 @@ async function startNextServer() {
     return devUrl
   }
 
-  const port = await findFreePort(3010)
   const dataDir = app.getPath('userData')
   const dbDir = path.join(dataDir, 'db')
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true })
@@ -417,44 +504,65 @@ async function startNextServer() {
   }
 
   const serverEntry = path.join(standaloneDir, 'server.js')
-  log(`[Main] Starting packaged Next server on port ${port}`)
-  nextProcess = spawn(process.execPath, [serverEntry], {
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      PORT: String(port),
-      HOSTNAME: '127.0.0.1',
-      NODE_ENV: 'production',
-      // Windows-пути с "\" ломают file:-URL Prisma — всегда прямые слэши
-      DATABASE_URL: `file:${dbTarget.split(path.sep).join('/')}`,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  nextProcess.stdout.on('data', (d) => {
-    const s = String(d).trim()
-    if (s) log(`[Next] ${redact(s.slice(0, 400))}`)
-  })
-  nextProcess.stderr.on('data', (d) => {
-    const s = String(d).trim()
-    if (s) log(`[Next:err] ${redact(s.slice(0, 400))}`)
-  })
-  const url = `http://127.0.0.1:${port}`
-  // Если серверный процесс умер ДО готовности — падаем сразу с понятной причиной,
-  // а не ждём таймаут «в тишине»
-  let serverReady = false
-  nextProcess.once('exit', (code, signal) => {
-    if (!serverReady) {
-      const why = code !== null ? `код ${code}` : `сигнал ${signal}`
-      log(`[Main] Next server exited before ready (${why})`)
-      setSplashStage(`Сервер интерфейса неожиданно завершился (${why}) — смотрите окно ошибки`)
-      fatalPromise = Promise.resolve(showFatalError(new Error(`Сервер интерфейса завершился до готовности (${why}). Подробности в логе ([Next]/[Next:err] строки выше).`)))
+
+  // УРОК РЕЛИЗА 1.0.36 («Сервер интерфейса завершился до готовности, код 1»):
+  // одноразовый сбой среды при старте (антивирус сканирует свежераспакованные
+  // файлы standalone и блокирует чтение, гонка порта, временный EBUSY) раньше
+  // сразу показывал фатальную ошибку. Ретраи — проверенный паттерн AI-воркера
+  // (урок релиза 1.0.12: «антивирус блокирует свеже-распакованный node.exe
+  // на первые секунды»). Порт на каждой попытке выбирается заново.
+  const TOTAL_ATTEMPTS = 3
+  let lastErr = null
+  for (let attempt = 1; attempt <= TOTAL_ATTEMPTS; attempt++) {
+    try {
+      const url = await attemptNextServer(serverEntry, dbTarget, attempt, TOTAL_ATTEMPTS)
+      attachNextServerRespawnWatcher(serverEntry, dbTarget, url)
+      return url
+    } catch (e) {
+      lastErr = e
+      log(`[Main] Попытка ${attempt}/${TOTAL_ATTEMPTS} запуска сервера не удалась: ${e.message}`)
+      if (attempt < TOTAL_ATTEMPTS) {
+        setSplashStage(`Сервер интерфейса не поднялся (${e.message}) — перезапускаю (${attempt + 1}/${TOTAL_ATTEMPTS})…`)
+        await new Promise((r) => setTimeout(r, 3000 * attempt))
+      }
     }
+  }
+
+  // Все попытки исчерпаны — фатальная ошибка с ХВОСТОМ ВЫВОДА СЕРВЕРА в тексте,
+  // чтобы причина была видна даже в нативном диалоге (без «строки выше»)
+  setSplashStage('Сервер интерфейса не запустился — смотрите окно ошибки')
+  throw new Error(
+    `Сервер интерфейса не запустился после ${TOTAL_ATTEMPTS} попыток. ` +
+    `Причина последней: ${lastErr ? lastErr.message : 'неизвестна'}.\n\n` +
+    `Последний вывод сервера:\n${nextOutputTailText(12)}`,
+  )
+}
+
+/**
+ * Наблюдатель смерти сервера ПОСЛЕ готовности: одна тихая перезапуска + reload UI.
+ * Раньше краш сервера в сессии оставлял открытое окно с ERR_CONNECTION_REFUSED
+ * навсегда — теперь интерфейс сам поднимается (вкладки восстанавливаются из
+ * TabSession рендерера). Повторная смерть — только в лог (без паники в UI).
+ */
+function attachNextServerRespawnWatcher(serverEntry, dbTarget, url) {
+  const child = nextProcess
+  if (!child) return
+  child.once('exit', (code, signal) => {
+    if (app.isQuitting) return
+    const why = code !== null && code !== undefined ? `код ${code}` : `сигнал ${signal}`
+    log(`[Main] Next server умер после готовности (${why}) — тихая перезапуска интерфейса`)
+    ;(async () => {
+      try {
+        const newUrl = await attemptNextServer(serverEntry, dbTarget, 1, 1)
+        log(`[Main] Сервер перезапущен на ${newUrl} — перезагружаю интерфейс`)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          await mainWindow.loadURL(newUrl)
+        }
+      } catch (e) {
+        log(`[Main] Перезапуск сервера после смерти не удался: ${e.message} — пользователю доступен перезапуск приложения`)
+      }
+    })()
   })
-  await waitForServer(url, 90000, (sec) => {
-    setSplashStage(`Запуск локального сервера… ${sec} с (первый запуск может занять дольше)`)
-  })
-  serverReady = true
-  return url
 }
 
 // --- основная сборка --------------------------------------------------------------
@@ -560,9 +668,13 @@ async function showFatalError(err) {
       .executeJavaScript(`window.__fatal(${JSON.stringify({ message, logTail: readLogTail(80) })})`)
       .catch(() => { /* окно закрыли до загрузки */ })
   } catch (e) {
-    // Последний рубеж — нативный диалог, чтобы приложение НИКОГДА не висело молча
+    // Последний рубеж — нативный диалог, чтобы приложение НИКОГДА не висело молча.
+    // УРОК РЕЛИЗА 1.0.36: у пользователя открылся ИМЕННО этот fallback,
+    // а сообщение отправляло «в лог (строки выше)», которого в диалоге нет —
+    // теперь вместе с сообщением показывается хвост журнала.
     log(`[Boot] не удалось показать окно ошибки: ${e.message}`)
-    try { dialog.showErrorBox('AVC-Anime — ошибка запуска', message) } catch { /* ignore */ }
+    const logTail = readLogTail(25)
+    try { dialog.showErrorBox('AVC-Anime — ошибка запуска', `${message}\n\n— Хвост журнала —\n${logTail}`) } catch { /* ignore */ }
     app.exit(1)
   }
 }
